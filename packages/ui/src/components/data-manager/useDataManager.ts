@@ -209,7 +209,7 @@ export function useDataManager(props: DataManagerProps, emit: DataManagerEmits) 
   const remoteImportWebAddress = ref(
     ['https:', 'http:'].includes(window.location.protocol)
       ? `${window.location.origin}${window.location.pathname}`
-      : 'https://goprmpt.com/',
+      : 'https://goprmpt.net/',
   )
   const remoteImportQrUrl = computed(() => {
     if (!exportedRemoteImportCode.value) return ''

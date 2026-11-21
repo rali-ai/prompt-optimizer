@@ -1,7 +1,4 @@
 import './styles.css'
-import { inject } from '@vercel/analytics'
-
-inject()
 
 const STORAGE_KEY = 'prompt-optimizer-site-locale'
 const THEME_STORAGE_KEY = 'prompt-optimizer-site-theme'
@@ -11,13 +8,11 @@ const THEME_MODES = ['system', 'dark', 'light']
 const translations = {
   'zh-CN': {
     htmlLang: 'zh-CN',
-    title: '提示词优化器 | Prompt Optimizer',
+    title: '提示词优化器',
     description: '开源提示词工具。用自己的模型改写给 AI 的指令，并排比较改写前后的回答，保存满意的版本。',
-    brandAriaLabel: 'Prompt Optimizer 官网首页',
+    brandAriaLabel: '提示词优化器首页',
     nav: {
       product: '优化器',
-      garden: '提示词库',
-      docs: '文档',
       github: 'GitHub',
       githubLabel: '开源仓库',
       themeAria: '切换主题模式',
@@ -34,8 +29,6 @@ const translations = {
       title: '提示词优化器',
       lead: '贴入你准备发给 AI 的指令，改写后用同一个模型测试两版，看看哪份回答更符合你的要求。',
       primary: '打开优化器',
-      secondary: '快速开始',
-      guide: 'https://docs.always200.com/user/quick-start/',
       setupNote: '首次使用需配置 API Key 或连接已运行的本地模型。',
       visualTitle: '左侧改写提示词，右侧对比两版回答',
       screenshotLabel: '点击放大工作区截图',
@@ -54,7 +47,7 @@ const translations = {
       steps: [
         {
           title: '填入提示词',
-          body: '粘贴你准备发给 AI 的指令，也可以从模板、文件或提示词库导入。'
+          body: '粘贴你准备发给 AI 的指令，也可以从模板或文件导入。'
         },
         {
           title: '改写任务要求',
@@ -98,55 +91,39 @@ const translations = {
       screenshotLabel: '点击放大竞技场截图',
       screenshotAlt: '竞技场并排展示三个模型绘制的机械鲸鱼场景',
       caption: '同一道 HTML/SVG 绘图题，结果从左到右：GPT-6.2 Astra、GPT-6.2 Sol、DeepSeek Flash。',
-      guide: 'https://docs.always200.com/advanced/arena/',
       action: '了解竞技场'
     },
     access: {
       title: '选择使用方式',
       repository: 'GitHub 开源仓库',
-      mcp: 'MCP 集成',
-      mcpGuide: 'https://docs.always200.com/user/mcp-server/',
       dataNote: '配置、历史和收藏默认保存在当前使用环境。相关输入会发给你配置的模型服务，远程备份会发到你配置的存储。',
       entries: [
         {
           title: '在线使用',
           body: '在浏览器打开工作区。',
-          href: 'https://prompt.always200.com'
-        },
-        {
-          title: '下载桌面版',
-          body: '从 Releases 获取安装包。',
-          href: 'https://github.com/linshenkx/prompt-optimizer/releases'
-        },
-        {
-          title: 'Chrome 插件',
-          body: '从 Chrome 网上应用店安装。',
-          href: 'https://chromewebstore.google.com/detail/prompt-optimizer/cakkkhboolfnadechdlgdcnjammejlna'
+          href: 'https://goprmpt.net'
         },
         {
           title: 'Docker 部署',
           body: '运行自己的实例。',
-          href: 'https://docs.always200.com/deployment/docker-basic/'
+          href: 'https://github.com/rali-ai/prompt-optimizer'
         }
       ]
     },
     footer: {
-      title: 'Prompt Optimizer',
+      title: '提示词优化器',
       body: '让提示词优化回到真实结果。',
       product: '产品',
-      docs: '文档',
       github: 'GitHub'
     }
   },
   en: {
     htmlLang: 'en',
-    title: 'Prompt Optimizer | Rewrite and test AI prompts',
+    title: '提示词优化器 | Rewrite and test AI prompts',
     description: 'An open-source tool to rewrite prompts with your own models, compare actual responses, and save prompts for reuse.',
-    brandAriaLabel: 'Prompt Optimizer website home',
+    brandAriaLabel: '提示词优化器 home',
     nav: {
       product: 'Optimizer',
-      garden: 'Prompt Library',
-      docs: 'Docs',
       github: 'GitHub',
       githubLabel: 'Open-source repository',
       themeAria: 'Switch theme mode',
@@ -160,15 +137,13 @@ const translations = {
       menuAria: 'Toggle navigation menu'
     },
     hero: {
-      title: 'Prompt Optimizer',
+      title: '提示词优化器',
       lead: 'Paste a prompt, rewrite it, and test both versions with the same model. See which answer fits your task better.',
       primary: 'Open Optimizer',
-      secondary: 'Quick start',
-      guide: 'https://docs.always200.com/en/user/quick-start/',
       setupNote: 'To get started, add an API key or connect to a running local model.',
       visualTitle: 'Edit on the left, compare answers on the right',
       screenshotLabel: 'Click to enlarge the workspace screenshot',
-      screenshotAlt: 'Prompt Optimizer workspace with answers before and after rewriting shown side by side',
+      screenshotAlt: 'Workspace with answers before and after rewriting shown side by side',
       screenshot: 'system-workspace-en.jpg'
     },
     imagePreview: {
@@ -183,7 +158,7 @@ const translations = {
       steps: [
         {
           title: 'Start with a prompt',
-          body: 'Paste your own prompt or import one from a template, file, or Prompt Garden.'
+          body: 'Paste your own prompt or import one from a template or file.'
         },
         {
           title: 'Clarify the instructions',
@@ -227,43 +202,29 @@ const translations = {
       screenshotLabel: 'Click to enlarge the Arena screenshot',
       screenshotAlt: 'Arena showing three models’ drawings of a mechanical whale side by side',
       caption: 'Same HTML/SVG drawing task. From left to right: GPT-6.2 Astra, GPT-6.2 Sol, and DeepSeek Flash.',
-      guide: 'https://docs.always200.com/en/advanced/arena/',
       action: 'Explore Arena'
     },
     access: {
-      title: 'Ways to use Prompt Optimizer',
+      title: 'Ways to use it',
       repository: 'GitHub repository',
-      mcp: 'MCP integration',
-      mcpGuide: 'https://docs.always200.com/en/user/mcp-server/',
       dataNote: 'Settings, history, and favorites stay in your current environment by default. Model requests and remote backups go to the model service and storage you configure.',
       entries: [
         {
           title: 'Web app',
           body: 'Open the workspace in your browser.',
-          href: 'https://prompt.always200.com'
-        },
-        {
-          title: 'Desktop downloads',
-          body: 'Get installers and archives from Releases.',
-          href: 'https://github.com/linshenkx/prompt-optimizer/releases'
-        },
-        {
-          title: 'Chrome extension',
-          body: 'Install it from the Chrome Web Store.',
-          href: 'https://chromewebstore.google.com/detail/prompt-optimizer/cakkkhboolfnadechdlgdcnjammejlna'
+          href: 'https://goprmpt.net'
         },
         {
           title: 'Docker deployment',
           body: 'Host your own instance.',
-          href: 'https://docs.always200.com/deployment/docker-basic/'
+          href: 'https://github.com/rali-ai/prompt-optimizer'
         }
       ]
     },
     footer: {
-      title: 'Prompt Optimizer',
+      title: '提示词优化器',
       body: 'Bring prompt optimization back to real outputs.',
       product: 'Product',
-      docs: 'Docs',
       github: 'GitHub'
     }
   }
@@ -351,27 +312,20 @@ function renderThemeIcon(themeMode) {
 
 function renderGithubPill(copy) {
   return `
-    <a class="github-pill" href="https://github.com/linshenkx/prompt-optimizer" target="_blank" rel="noopener" aria-label="${copy.nav.githubLabel}">
+    <a class="github-pill" href="https://github.com/rali-ai/prompt-optimizer" target="_blank" rel="noopener" aria-label="${copy.nav.githubLabel}">
       <span class="github-pill__icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" role="img" focusable="false">
           <path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.52.1.7-.23.7-.5v-1.95c-2.86.62-3.46-1.21-3.46-1.21-.47-1.18-1.14-1.5-1.14-1.5-.93-.64.07-.63.07-.63 1.03.07 1.57 1.06 1.57 1.06.91 1.56 2.4 1.1 2.98.84.09-.66.36-1.1.65-1.35-2.28-.26-4.67-1.14-4.67-5.08 0-1.12.4-2.04 1.05-2.76-.1-.26-.46-1.31.1-2.73 0 0 .86-.28 2.82 1.05a9.8 9.8 0 0 1 5.13 0c1.96-1.33 2.82-1.05 2.82-1.05.56 1.42.2 2.47.1 2.73.66.72 1.05 1.64 1.05 2.76 0 3.95-2.39 4.82-4.67 5.08.37.32.7.95.7 1.92v2.84c0 .28.18.61.7.5A10.5 10.5 0 0 0 12 1.5Z" fill="currentColor"/>
         </svg>
       </span>
       <span class="github-pill__text">${copy.nav.github}</span>
-      <img
-        class="github-pill__badge"
-        src="https://img.shields.io/github/stars/linshenkx/prompt-optimizer?style=flat&label=stars&color=2563eb&labelColor=f8fbff&logo=github&logoColor=0f172a"
-        alt="GitHub stars"
-      />
     </a>
   `
 }
 
 function renderNav(copy, themeMode) {
   return `
-    <a href="https://prompt.always200.com" target="_blank" rel="noopener">${copy.nav.product}</a>
-    <a href="https://garden.always200.com" target="_blank" rel="noopener">${copy.nav.garden}</a>
-    <a href="https://docs.always200.com" target="_blank" rel="noopener">${copy.nav.docs}</a>
+    <a href="https://goprmpt.net" target="_blank" rel="noopener">${copy.nav.product}</a>
     ${renderGithubPill(copy)}
     ${renderThemeButton(copy, themeMode)}
     ${renderLocaleButton(copy)}
@@ -412,7 +366,7 @@ function renderApp(locale, themeMode) {
       <header class="site-header">
         <a class="site-brand" href="/" aria-label="${copy.brandAriaLabel}">
           <img src="/images/logo.png" alt="" class="site-brand__logo" />
-          <span class="site-brand__text">Prompt Optimizer</span>
+          <span class="site-brand__text">提示词优化器</span>
         </a>
         <button class="site-menu-button" type="button" aria-expanded="${menuExpanded}" aria-controls="site-nav" aria-label="${copy.nav.menuAria}">
           <span></span>
@@ -430,8 +384,7 @@ function renderApp(locale, themeMode) {
             <h1 class="hero-title">${copy.hero.title}</h1>
             <p class="hero-lead">${copy.hero.lead}</p>
             <div class="hero-actions">
-              <a class="button button--primary" href="https://prompt.always200.com" target="_blank" rel="noopener">${copy.hero.primary}</a>
-              <a class="button" href="${copy.hero.guide}" target="_blank" rel="noopener" aria-describedby="hero-setup">${copy.hero.secondary}</a>
+              <a class="button button--primary" href="https://goprmpt.net" target="_blank" rel="noopener">${copy.hero.primary}</a>
             </div>
             <p class="hero-setup" id="hero-setup">${copy.hero.setupNote}</p>
           </div>
@@ -482,7 +435,6 @@ function renderApp(locale, themeMode) {
               <p id="arena-screenshot-caption">
                 ${copy.arena.caption}<span class="screenshot-hint" aria-hidden="true">${copy.imagePreview.hint}</span>
               </p>
-              <a class="section-link" href="${copy.arena.guide}" target="_blank" rel="noopener">${copy.arena.action}</a>
             </figcaption>
           </figure>
         </section>
@@ -515,9 +467,8 @@ function renderApp(locale, themeMode) {
           </div>
           <div class="project-details">
             <div class="project-details__links">
-              <a class="section-link" href="https://github.com/linshenkx/prompt-optimizer" target="_blank" rel="noopener">${copy.access.repository}</a>
+              <a class="section-link" href="https://github.com/rali-ai/prompt-optimizer" target="_blank" rel="noopener">${copy.access.repository}</a>
               <span>AGPL-3.0</span>
-              <a class="section-link" href="${copy.access.mcpGuide}" target="_blank" rel="noopener">${copy.access.mcp}</a>
             </div>
             <p>${copy.access.dataNote}</p>
           </div>
@@ -530,9 +481,8 @@ function renderApp(locale, themeMode) {
           <p>${copy.footer.body}</p>
         </div>
         <div class="site-footer__links">
-          <a href="https://prompt.always200.com" target="_blank" rel="noopener">${copy.footer.product}</a>
-          <a href="https://docs.always200.com" target="_blank" rel="noopener">${copy.footer.docs}</a>
-          <a href="https://github.com/linshenkx/prompt-optimizer" target="_blank" rel="noopener">${copy.footer.github}</a>
+          <a href="https://goprmpt.net" target="_blank" rel="noopener">${copy.footer.product}</a>
+          <a href="https://github.com/rali-ai/prompt-optimizer" target="_blank" rel="noopener">${copy.footer.github}</a>
           ${renderThemeButton(copy, themeMode)}
           ${renderLocaleButton(copy)}
         </div>

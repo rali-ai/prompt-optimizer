@@ -248,7 +248,7 @@ describe('remote backup settings', () => {
     expect(cors[0].AllowedOrigins).toEqual([
       'http://localhost:18181',
       'http://127.0.0.1:18181',
-      'https://goprmpt.com',
+      'https://goprmpt.net',
       'https://app.example.com',
     ])
     expect(cors[0].AllowedMethods).toEqual(['GET', 'PUT', 'HEAD', 'DELETE'])

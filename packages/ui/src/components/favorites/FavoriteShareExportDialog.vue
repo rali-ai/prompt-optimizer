@@ -198,7 +198,7 @@ const getDefaultShareSections = (): FavoriteShareSections => ({
 const sections = reactive<FavoriteShareSections>(getDefaultShareSections())
 const PRODUCT_WATERMARK = {
   projectName: '提示词优化器',
-  projectUrl: 'https://goprmpt.com/',
+  projectUrl: 'https://goprmpt.net/',
 } as const
 const previewFormat = ref<'html' | 'png'>('html')
 const previewHtml = ref('')
