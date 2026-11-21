@@ -46,6 +46,10 @@ COPY docker/generate-config.sh /docker-entrypoint.d/40-generate-config.sh
 COPY docker/generate-auth.sh /docker-entrypoint.d/30-generate-auth.sh
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/start-services.sh /start-services.sh
+COPY docker/auth-api.mjs /app/auth-api/server.mjs
+
+# 持久化数据（访问密码文件 /data/auth/.htpasswd）
+VOLUME /data
 
 # 确保脚本有执行权限
 RUN chmod +x /docker-entrypoint.d/40-generate-config.sh

@@ -33,4 +33,10 @@ services:
       # Basic认证配置（可选）
       - ACCESS_USERNAME=${ACCESS_USERNAME:-admin}
       - ACCESS_PASSWORD=${ACCESS_PASSWORD:-123456}
+    volumes:
+      # 持久化访问密码文件；ACCESS_PASSWORD 只在首次启动时写入，之后可在网站内修改
+      - prompt-optimizer-dev-data:/data
+
+volumes:
+  prompt-optimizer-dev-data:
 
