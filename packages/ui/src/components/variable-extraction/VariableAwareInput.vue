@@ -594,6 +594,8 @@ onMounted(() => {
             highlightSpecialChars(),
             history(),
             foldGutter(),
+            // Localize CodeMirror's built-in fold-gutter tooltips.
+            EditorState.phrases.of({ "Fold line": t("common.collapse"), "Unfold line": t("common.expand") }),
             drawSelection(),
             dropCursor(),
             EditorState.allowMultipleSelections.of(true),

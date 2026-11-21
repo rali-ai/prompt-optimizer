@@ -90,7 +90,7 @@ const messages = {
     "context": "Context",
     "copySuccess": "Copied to clipboard",
     "copyFailed": "Copy Failed",
-    "appName": "Prompt Optimizer",
+    "appName": "提示词优化器",
     "selectFile": "Select File",
     "exporting": "Exporting...",
     "importing": "Importing...",
@@ -156,7 +156,7 @@ const messages = {
   "nav": {
     "home": "Home",
     "dashboard": "Dashboard",
-    "promptOptimizer": "Prompt Optimizer",
+    "promptOptimizer": "提示词优化器",
     "modelManager": "Model Manager",
     "history": "History",
     "templates": "Templates",
@@ -168,13 +168,6 @@ const messages = {
     "basicMode": "Basic",
     "contextMode": "Context",
     "imageMode": "Image"
-  },
-  "about": {
-    "title": "Prompt Optimizer",
-    "website": "Website",
-    "websiteLabel": "always200.com",
-    "documentation": "Docs",
-    "documentationLabel": "docs.always200.com"
   },
   "settings": {
     "title": "Settings",

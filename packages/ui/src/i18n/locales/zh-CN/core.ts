@@ -169,13 +169,6 @@ const messages = {
     "contextMode": "上下文",
     "imageMode": "图像"
   },
-  "about": {
-    "title": "提示词优化器",
-    "website": "官网",
-    "websiteLabel": "always200.com",
-    "documentation": "文档站",
-    "documentationLabel": "docs.always200.com"
-  },
   "settings": {
     "title": "设置",
     "advancedMode": "启用高级功能",

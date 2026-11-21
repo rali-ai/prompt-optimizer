@@ -93,7 +93,7 @@ describe('LanguageSwitchDropdown', () => {
       wrapper = createWrapper()
       const vm = wrapper.vm
 
-      expect(vm.currentLanguageLabel).toBe('Switch language (English)')
+      expect(vm.currentLanguageLabel).toBe('Switch language (Chinese (Simplified))')
     })
 
     it('应该能够调用语言切换方法', async () => {

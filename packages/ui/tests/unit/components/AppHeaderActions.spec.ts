@@ -20,22 +20,6 @@ vi.mock('naive-ui', async (importOriginal) => {
         return () => h('span', { class: 'n-badge-stub', 'data-show': String(Boolean(props.show)) }, slots.default?.())
       },
     }),
-    NPopover: defineComponent({
-      name: 'NPopover',
-      setup(_, { slots }) {
-        return () =>
-          h('div', { class: 'n-popover-stub' }, [
-            h('div', { class: 'n-popover-trigger' }, slots.trigger?.()),
-            h('div', { class: 'n-popover-content' }, slots.default?.()),
-          ])
-      },
-    }),
-    NTag: defineComponent({
-      name: 'NTag',
-      setup(_, { slots, attrs }) {
-        return () => h('span', { class: 'n-tag-stub', ...attrs }, slots.default?.())
-      },
-    }),
     NText: defineComponent({
       name: 'NText',
       setup(_, { slots }) {
@@ -47,56 +31,34 @@ vi.mock('naive-ui', async (importOriginal) => {
 
 import AppHeaderActions from '../../../src/components/app-layout/AppHeaderActions.vue'
 
-describe('AppHeaderActions about menu layout hooks', () => {
-  it('renders the about popover with naive-themed panel content', () => {
+describe('AppHeaderActions', () => {
+  it('offers one source link to the fork and no upstream links', async () => {
     const wrapper = mount(AppHeaderActions, {
-      props: {
-        appVersion: 'v2.7.0',
-      },
       global: {
-        renderStubDefaultSlot: true,
-        mocks: {
-          $t: (key: string) => {
-            const map: Record<string, string> = {
-              'nav.templates': 'Templates',
-              'nav.history': 'History',
-              'nav.modelManager': 'Model Manager',
-              'nav.favorites': 'Favorite Library',
-              'nav.dataManager': 'Data Manager',
-              'nav.variableManager': 'Variable Manager',
-              'nav.about': 'About',
-              'updater.viewOnGitHub': 'View on GitHub',
-              'about.title': 'Prompt Optimizer',
-              'about.website': 'Website',
-              'about.websiteLabel': 'always200.com',
-              'about.documentation': 'Docs',
-              'about.documentationLabel': 'docs.always200.com',
-            }
-            return map[key] ?? key
-          },
-        },
+        mocks: { $t: (key: string) => key },
         stubs: {
           ThemeToggleUI: true,
-          LanguageSwitchDropdown: true,
+          LanguageSwitchDropdown: { template: '<button data-testid="language-switch" />' },
           UpdaterIcon: true,
           ActionButtonUI: true,
+          ChangePasswordButton: true,
         },
       },
     })
 
-    expect(wrapper.find('.about-flyout').exists()).toBe(false)
-    expect(wrapper.findAll('.about-chip')).toHaveLength(0)
-    expect(wrapper.find('.about-panel').exists()).toBe(true)
-    expect(wrapper.find('.about-version-tag').text()).toContain('v2.7.0')
-    expect(wrapper.findAll('.about-link-button')).toHaveLength(2)
-    expect(wrapper.text()).toContain('always200.com')
-    expect(wrapper.text()).toContain('docs.always200.com')
+    const sourceLink = wrapper.get('[data-testid="header-source-link"]')
+    expect(sourceLink.text()).toBe('源代码')
+    expect(wrapper.find('[data-testid="language-switch"]').exists()).toBe(true)
+    expect(wrapper.html()).not.toMatch(/always200|linshenkx|GitHub/)
+
+    await sourceLink.trigger('click')
+
+    expect(wrapper.emitted('open-source')).toHaveLength(1)
   })
 
   it('separates the favorites page destination from modal actions and marks it active', async () => {
     const wrapper = mount(AppHeaderActions, {
       props: {
-        appVersion: 'v2.7.0',
         favoritesActive: true,
       },
       global: {
@@ -109,12 +71,6 @@ describe('AppHeaderActions about menu layout hooks', () => {
               'nav.favorites': 'Favorite Library',
               'nav.dataManager': 'Data Manager',
               'nav.variableManager': 'Variable Manager',
-              'nav.about': 'About',
-              'updater.viewOnGitHub': 'View on GitHub',
-              'about.website': 'Website',
-              'about.websiteLabel': 'always200.com',
-              'about.documentation': 'Docs',
-              'about.documentationLabel': 'docs.always200.com',
             }
             return map[key] ?? key
           },
@@ -123,6 +79,7 @@ describe('AppHeaderActions about menu layout hooks', () => {
           ThemeToggleUI: true,
           LanguageSwitchDropdown: true,
           UpdaterIcon: true,
+          ChangePasswordButton: true,
           ActionButtonUI: defineComponent({
             name: 'ActionButtonUI',
             props: ['text', 'type'],
@@ -165,7 +122,6 @@ describe('AppHeaderActions about menu layout hooks', () => {
   it('marks the data manager action when an existing backup is stale', async () => {
     const wrapper = mount(AppHeaderActions, {
       props: {
-        appVersion: 'v2.7.0',
         backupReminderDue: true,
       },
       global: {
@@ -178,8 +134,6 @@ describe('AppHeaderActions about menu layout hooks', () => {
               'nav.favorites': 'Favorite Library',
               'nav.dataManager': 'Data Manager',
               'nav.variableManager': 'Variable Manager',
-              'nav.about': 'About',
-              'updater.viewOnGitHub': 'View on GitHub',
               'dataManager.backupReminder.tooltip': 'No data export in over 10 days. Export a local copy.',
             }
             return map[key] ?? key
@@ -189,6 +143,7 @@ describe('AppHeaderActions about menu layout hooks', () => {
           ThemeToggleUI: true,
           LanguageSwitchDropdown: true,
           UpdaterIcon: true,
+          ChangePasswordButton: true,
           ActionButtonUI: defineComponent({
             name: 'ActionButtonUI',
             props: ['text', 'type'],

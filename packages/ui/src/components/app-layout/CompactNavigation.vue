@@ -28,9 +28,7 @@
     </div>
     <details class="compact-menu-help">
       <summary>{{ t('workspace.helpAbout') }}</summary>
-      <button type="button" class="compact-menu-row" @click="open('docs')"><NIcon :size="16"><Book /></NIcon><span>{{ t('about.documentation') }}</span><NIcon :size="16"><ExternalLink /></NIcon></button>
-      <button type="button" class="compact-menu-row" @click="open('website')"><NIcon :size="16"><World /></NIcon><span>{{ t('about.website') }}</span><NIcon :size="16"><ExternalLink /></NIcon></button>
-      <button type="button" class="compact-menu-row" @click="open('github')"><NIcon><BrandGithub /></NIcon><span>GitHub</span><NIcon :size="16"><ExternalLink /></NIcon></button>
+      <button type="button" class="compact-menu-row" data-testid="compact-menu-source" @click="open('source')"><NIcon :size="16"><Code /></NIcon><span>源代码</span><NIcon :size="16"><ExternalLink /></NIcon></button>
       <div class="compact-menu-version">{{ appVersion }}<UpdaterIcon /></div>
     </details>
   </AdaptiveModal>
@@ -51,11 +49,10 @@
 </template>
 
 <script setup lang="ts">
-import BrandGithub from '../icons/GitHubIcon.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton, NIcon, NBadge } from 'naive-ui'
-import { Menu as Menu2, ChevronDown, ChevronRight, Undo2 as ArrowBackUp, Book, Globe as World, ExternalLink, Check } from '@lucide/vue'
+import { Menu as Menu2, ChevronDown, ChevronRight, Undo2 as ArrowBackUp, Code, ExternalLink, Check } from '@lucide/vue'
 import { router } from '../../router'
 import { releaseCompactOverlayHistory } from '../../composables/ui/useCompactModalBack'
 import AdaptiveModal from '../common/AdaptiveModal.vue'

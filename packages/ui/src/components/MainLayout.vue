@@ -14,17 +14,11 @@
           <!-- 左侧：Logo + 标题 + 核心导航 -->
           <NFlex align="center" :size="16" :wrap="false" class="nav-primary">
             <!-- Logo + 标题 -->
-            <NButton
-              text
-              class="brand-link"
-              :aria-label="t('common.appName')"
-              :title="t('common.appName')"
-              @click="openBrandWebsite"
-            >
+            <div class="brand-link" :title="t('common.appName')">
               <NFlex align="center" :size="8" :wrap="false">
                 <AppPreviewImage
                   :src="logoSrc"
-                  alt="Logo"
+                  :alt="t('common.appName')"
                   :width="logoSize"
                   :height="logoSize"
                   object-fit="cover"
@@ -37,7 +31,7 @@
                   <slot name="title">{{ t('common.appName') }}</slot>
                 </NText>
               </NFlex>
-            </NButton>
+            </div>
 
             <!-- 核心导航元素 -->
             <div class="core-navigation">
@@ -88,11 +82,10 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
 
 import { useI18n } from 'vue-i18n'
-import { NButton, NLayout, NLayoutHeader, NLayoutContent, NFlex, NText } from 'naive-ui'
+import { NLayout, NLayoutHeader, NLayoutContent, NFlex, NText } from 'naive-ui'
 import ToastUI from './Toast.vue'
 import logoImage from '../assets/logo.png'
 import AppPreviewImage from './media/AppPreviewImage.vue'
-import { openExternalUrl } from '../utils/open-external-url'
 import { i18n } from '../plugins/i18n'
 
 const { t } = useI18n()
@@ -142,10 +135,6 @@ const logoSize = computed(() => {
   }
   return 28 // 默认尺寸
 })
-
-const openBrandWebsite = async () => {
-  await openExternalUrl('https://always200.com', { logPrefix: 'MainLayout' })
-}
 </script>
 
 <style>
@@ -289,33 +278,10 @@ const openBrandWebsite = async () => {
 }
 
 .brand-link {
+  display: inline-flex;
   align-items: center;
   padding: 6px 10px 6px 6px;
-  border-radius: 12px;
   color: inherit;
-  transition:
-    background-color 0.2s ease-in-out,
-    box-shadow 0.2s ease-in-out,
-    transform 0.2s ease-in-out;
-}
-
-.brand-link:hover {
-  background: color-mix(in srgb, var(--n-primary-color) 10%, transparent);
-  transform: translateY(-1px);
-}
-
-.brand-link:hover .logo-image {
-  transform: scale(1.05);
-}
-
-.brand-link:hover .theme-title {
-  opacity: 0.88;
-}
-
-.brand-link:focus-visible {
-  outline: none;
-  background: color-mix(in srgb, var(--n-primary-color) 14%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--n-primary-color) 28%, transparent);
 }
 
 /* Logo样式优化 */

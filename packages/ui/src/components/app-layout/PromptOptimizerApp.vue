@@ -16,6 +16,8 @@
         :theme-overrides="themeOverrides"
         :style="isCompact ? { '--compact-accent': themeOverrides.common?.primaryColor } : undefined"
         :hljs="hljsInstance"
+        :locale="naiveLocale?.locale ?? null"
+        :date-locale="naiveLocale?.dateLocale ?? null"
     >
         <div v-if="isInitializing" class="loading-container">
             <NSpin size="medium" />
@@ -62,10 +64,7 @@
                         @open-variables="handleOpenVariableManager()"
                         :favorites-active="isFavoritesRoute"
                         :backup-reminder-due="dataBackupReminderDue"
-                        :app-version="appVersion"
-                        @open-website="openOfficialWebsite"
-                        @open-docs="openDocumentationSite"
-                        @open-github="openGithubRepo"
+                        @open-source="openSourceRepo"
                     />
                 </template>
                 <template #main>
@@ -266,6 +265,10 @@ import {
     NResult,
     NSpin,
     NText,
+    zhCN as naiveZhCN,
+    dateZhCN,
+    zhTW as naiveZhTW,
+    dateZhTW,
 } from "naive-ui";
 import hljs from "highlight.js/lib/core";
 import jsonLang from "highlight.js/lib/languages/json";
@@ -334,7 +337,7 @@ import {
 } from '../../composables'
 
 // i18n functions
-import { initializeI18nWithStorage, setI18nServices } from '../../plugins/i18n'
+import { initializeI18nWithStorage, setI18nServices, i18n as appI18n } from '../../plugins/i18n'
 
 // Pinia functions
 import { setPiniaServices, getPiniaServices } from '../../plugins/pinia'
@@ -368,6 +371,12 @@ import { type IPromptService, type PromptAssetBinding, type PromptSessionOrigin,
 // 1. 基础 composables
 const hljsInstance = hljs;
 const i18n = useI18n();
+// Naive UI's built-in texts (empty states, pickers, popconfirm) follow the app locale; English is Naive's default.
+const NAIVE_LOCALES = {
+    'zh-CN': { locale: naiveZhCN, dateLocale: dateZhCN },
+    'zh-TW': { locale: naiveZhTW, dateLocale: dateZhTW },
+} as const;
+const naiveLocale = computed(() => NAIVE_LOCALES[String(appI18n.global.locale.value) as keyof typeof NAIVE_LOCALES]);
  
 const t = i18n.t;  // 在模板中使用
 const toast = useToast();
@@ -795,9 +804,7 @@ const handleMobileAction = (action: string) => {
     else if (action === 'models') openModelManager();
     else if (action === 'variables') handleOpenVariableManager();
     else if (action === 'data') showDataManager.value = true;
-    else if (action === 'docs') openDocumentationSite();
-    else if (action === 'website') openOfficialWebsite();
-    else if (action === 'github') openGithubRepo();
+    else if (action === 'source') openSourceRepo();
 };
 watch(isCompact, (compact) => {
     if (typeof document !== 'undefined') document.documentElement.classList.toggle('workspace-compact', compact);
@@ -2077,17 +2084,9 @@ watch(
 
 const appVersion = `v${rootPackageJson.version}`;
 
-const openOfficialWebsite = async () => {
-    await openExternalUrl("https://always200.com");
-};
-
-const openDocumentationSite = async () => {
-    await openExternalUrl("https://docs.always200.com");
-};
-
-// 打开GitHub仓库
-const openGithubRepo = async () => {
-    await openExternalUrl("https://github.com/linshenkx/prompt-optimizer");
+// AGPL-3.0: offer the running version's source to network users.
+const openSourceRepo = async () => {
+    await openExternalUrl("https://github.com/rali-ai/prompt-optimizer");
 };
 
 const normalizeTemplateTypeForManager = (

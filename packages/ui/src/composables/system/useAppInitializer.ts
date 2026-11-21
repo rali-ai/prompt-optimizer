@@ -55,9 +55,11 @@ import {
   type IImageStorageService,
   type StartupRepairReport,
   type ContextMode,
-  DEFAULT_CONTEXT_MODE
+  DEFAULT_CONTEXT_MODE,
+  UI_SETTINGS_KEYS
 } from '@prompt-optimizer/core';
 import type { AppServices } from '../../types/services';
+import { DEFAULT_LOCALE } from '../../plugins/i18n'
 import { scheduleImageStorageGc } from '../../stores/session/imageStorageMaintenance'
 import {
   attachFavoriteAssetGc,
@@ -314,6 +316,10 @@ export function useAppInitializer(): {
 
         // Initialize language service first, as template manager depends on it
         console.log('[AppInitializer] Initializing language service...');
+        // Built-in templates follow the UI's first-visit default (not the browser language); an explicit choice is kept.
+        if (!(await preferenceService.get<string | null>(UI_SETTINGS_KEYS.BUILTIN_TEMPLATE_LANGUAGE, null))) {
+          await preferenceService.set(UI_SETTINGS_KEYS.BUILTIN_TEMPLATE_LANGUAGE, DEFAULT_LOCALE);
+        }
         await languageService.initialize();
         
         const templateManagerInstance = createTemplateManager(storageProvider, languageService);

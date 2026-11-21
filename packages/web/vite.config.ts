@@ -11,6 +11,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, monorepoRoot)
   const processEnv = {
     ...DEFAULT_VITE_ENV,
+    // Self-hosted fork: the upstream Prompt Garden site stays off unless env opts back in.
+    VITE_ENABLE_PROMPT_GARDEN_IMPORT: '0',
+    VITE_PROMPT_GARDEN_BASE_URL: '',
     ...env,
   }
 

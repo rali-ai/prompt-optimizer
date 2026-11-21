@@ -209,13 +209,13 @@ const messages = {
       },
       "conversation": {
         "name": "Internal Format",
-        "description": "Prompt Optimizer internal JSON structure"
+        "description": "提示词优化器 internal JSON structure"
       }
     },
     "exportFormats": {
       "standard": {
         "name": "Internal Format",
-        "description": "Prompt Optimizer internal standard format"
+        "description": "提示词优化器 internal standard format"
       },
       "openai": {
         "name": "OpenAI",

@@ -13,7 +13,12 @@ import type { AppServices } from "../types/services";
 
 export type SupportedLocale = "zh-CN" | "zh-TW" | "en-US";
 
-export const DEFAULT_LOCALE: SupportedLocale = "en-US";
+/**
+ * First-visit locale. This deployment is a Chinese site, so a visitor with no
+ * stored preference gets zh-CN whatever the browser language; an explicit
+ * choice in the language switcher is stored and wins on later visits.
+ */
+export const DEFAULT_LOCALE: SupportedLocale = "zh-CN";
 export const SUPPORTED_LOCALES: SupportedLocale[] = ["zh-CN", "zh-TW", "en-US"];
 
 function normalizeLocaleCandidate(
@@ -50,41 +55,11 @@ function normalizeLocaleCandidate(
   return null;
 }
 
-function getBrowserPreferredLocale(): SupportedLocale {
-  if (typeof navigator === 'undefined') {
-    return DEFAULT_LOCALE;
-  }
-
-  const candidates =
-    Array.isArray(navigator.languages) && navigator.languages.length > 0
-      ? navigator.languages
-      : [navigator.language];
-
-  return resolveDefaultLocale(candidates);
-}
-
 export function sanitizeSupportedLocale(
   locale: string | null | undefined,
   fallback: SupportedLocale = DEFAULT_LOCALE,
 ): SupportedLocale {
   return normalizeLocaleCandidate(locale) ?? fallback;
-}
-
-export function resolveDefaultLocale(
-  browserLanguage?: string | readonly string[],
-): SupportedLocale {
-  const candidates = Array.isArray(browserLanguage)
-    ? browserLanguage
-    : [browserLanguage];
-
-  for (const candidate of candidates) {
-    const resolved = normalizeLocaleCandidate(candidate);
-    if (resolved) {
-      return resolved;
-    }
-  }
-
-  return DEFAULT_LOCALE;
 }
 
 // 服务引用
@@ -98,7 +73,7 @@ export function setI18nServices(services: AppServices) {
 // 创建i18n实例
 const i18n = createI18n({
   legacy: false,
-  locale: getBrowserPreferredLocale(),
+  locale: DEFAULT_LOCALE,
   fallbackLocale: {
     "zh-TW": ["zh-CN", "en-US"],
     "zh-CN": ["en-US"],
@@ -137,11 +112,9 @@ watch(
 // 初始化语言设置
 async function initializeLanguage() {
   try {
-    const browserLocale = getBrowserPreferredLocale();
-
     if (!servicesRef.value) {
       console.warn("[i18n] Services unavailable during locale initialization. Falling back to default locale.");
-      i18n.global.locale.value = browserLocale;
+      i18n.global.locale.value = DEFAULT_LOCALE;
       return;
     }
 
@@ -150,7 +123,7 @@ async function initializeLanguage() {
       UI_SETTINGS_KEYS.PREFERRED_LANGUAGE,
       null,
     );
-    const resolvedLocale = sanitizeSupportedLocale(savedLanguage, browserLocale);
+    const resolvedLocale = sanitizeSupportedLocale(savedLanguage, DEFAULT_LOCALE);
 
     i18n.global.locale.value = resolvedLocale;
 
@@ -163,7 +136,7 @@ async function initializeLanguage() {
     }
   } catch (error) {
     console.error("[i18n] Failed to initialize locale:", error);
-    i18n.global.locale.value = getBrowserPreferredLocale();
+    i18n.global.locale.value = DEFAULT_LOCALE;
   }
 }
 

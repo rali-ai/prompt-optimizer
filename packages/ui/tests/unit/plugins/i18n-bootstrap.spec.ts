@@ -7,7 +7,6 @@ import enUS from '../../../src/i18n/locales/en-US'
 import {
   i18n,
   initializeI18nWithStorage,
-  resolveDefaultLocale,
   sanitizeSupportedLocale,
   setI18nServices,
 } from '../../../src/plugins/i18n'
@@ -30,19 +29,6 @@ afterEach(() => {
 })
 
 describe('i18n bootstrap helpers', () => {
-  it('defaults to en-US when browser language is missing', () => {
-    expect(resolveDefaultLocale(undefined)).toBe('en-US')
-    expect(resolveDefaultLocale('')).toBe('en-US')
-  })
-
-  it('maps Chinese browser languages to supported Chinese locales', () => {
-    expect(resolveDefaultLocale('zh-CN')).toBe('zh-CN')
-    expect(resolveDefaultLocale('zh-SG')).toBe('zh-CN')
-    expect(resolveDefaultLocale('zh-TW')).toBe('zh-TW')
-    expect(resolveDefaultLocale('zh-HK')).toBe('zh-TW')
-    expect(resolveDefaultLocale('zh-Hant')).toBe('zh-TW')
-  })
-
   it('keeps supported saved locales', () => {
     expect(sanitizeSupportedLocale('zh-CN')).toBe('zh-CN')
     expect(sanitizeSupportedLocale('zh-TW')).toBe('zh-TW')
@@ -54,14 +40,14 @@ describe('i18n bootstrap helpers', () => {
     expect(sanitizeSupportedLocale('en')).toBe('en-US')
   })
 
-  it('falls back to en-US for unsupported saved locales', () => {
-    expect(sanitizeSupportedLocale('ja-JP')).toBe('en-US')
-    expect(sanitizeSupportedLocale('')).toBe('en-US')
-    expect(sanitizeSupportedLocale(undefined)).toBe('en-US')
+  it('falls back to zh-CN for unsupported saved locales', () => {
+    expect(sanitizeSupportedLocale('ja-JP')).toBe('zh-CN')
+    expect(sanitizeSupportedLocale('')).toBe('zh-CN')
+    expect(sanitizeSupportedLocale(undefined)).toBe('zh-CN')
   })
 
-  it('initializes to Chinese when browser language is Chinese and no saved preference exists', async () => {
-    setNavigatorLocales('zh-CN')
+  it('initializes a first-time visitor with an English browser to Chinese', async () => {
+    setNavigatorLocales('en-US', ['en-US', 'en'])
 
     const get = vi.fn().mockResolvedValue(null)
     const set = vi.fn().mockResolvedValue(undefined)
@@ -78,6 +64,25 @@ describe('i18n bootstrap helpers', () => {
     expect(i18n.global.locale.value).toBe('zh-CN')
     expect(get).toHaveBeenCalledWith(UI_SETTINGS_KEYS.PREFERRED_LANGUAGE, null)
     expect(set).toHaveBeenCalledWith(UI_SETTINGS_KEYS.PREFERRED_LANGUAGE, 'zh-CN')
+  })
+
+  it('keeps an explicit English choice from the language switcher', async () => {
+    setNavigatorLocales('zh-CN')
+
+    const get = vi.fn().mockResolvedValue('en-US')
+    const set = vi.fn().mockResolvedValue(undefined)
+
+    setI18nServices({
+      preferenceService: {
+        get,
+        set,
+      },
+    } as any)
+
+    await initializeI18nWithStorage()
+
+    expect(i18n.global.locale.value).toBe('en-US')
+    expect(set).not.toHaveBeenCalled()
   })
 
   it('normalizes legacy zh preference during initialization instead of overwriting it with English', async () => {

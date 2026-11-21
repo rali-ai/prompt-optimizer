@@ -90,4 +90,16 @@ describe('mobile navigation panels', () => {
       expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     } finally { wrapper.unmount() }
   })
+
+  it('offers the source link as the only external link in help', async () => {
+    const wrapper = createNavigation()
+    try {
+      await wrapper.get('[data-testid="compact-global-menu"]').trigger('click')
+      const help = wrapper.get('.compact-menu-help')
+      expect(help.findAll('.compact-menu-row')).toHaveLength(1)
+      expect(help.get('[data-testid="compact-menu-source"]').text()).toContain('源代码')
+      await help.get('[data-testid="compact-menu-source"]').trigger('click')
+      expect(wrapper.emitted('action')).toEqual([['source']])
+    } finally { wrapper.unmount() }
+  })
 })
