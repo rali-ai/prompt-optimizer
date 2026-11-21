@@ -226,7 +226,7 @@ describe('favorite share export', () => {
     const html = await blob.text()
     expect(html).toContain('Private image prompt')
     expect(html).toContain('Prompt Optimizer')
-    expect(html).toContain('https://prompt.always200.com/')
+    expect(html).toContain('https://goprmpt.com/')
     expect(html).toContain('Favorites -&gt; Import -&gt; upload this HTML file')
 
     const packageBytes = readFavoriteSharePackage(html)
@@ -251,7 +251,7 @@ describe('favorite share export', () => {
         documentTitleSuffix: 'Prompt Optimizer 收藏分享',
         eyebrow: 'Prompt Optimizer 收藏分享',
         metaPrefix: '收藏分享',
-        headerImportNote: '导入：访问 https://prompt.always200.com/ → 收藏夹 → 导入 → 上传此 HTML 文件。',
+        headerImportNote: '导入：访问 https://goprmpt.com/ → 收藏夹 → 导入 → 上传此 HTML 文件。',
         copyButton: '复制',
         copiedButton: '已复制',
         copyFailedButton: '复制失败',
@@ -261,7 +261,7 @@ describe('favorite share export', () => {
         modeTitle: '模式',
         variablesTitle: '变量',
         importNoteTitle: '导入说明',
-        htmlImportNoteBody1: '导入：访问 https://prompt.always200.com/ → 收藏夹 → 导入 → 上传此 HTML 文件。',
+        htmlImportNoteBody1: '导入：访问 https://goprmpt.com/ → 收藏夹 → 导入 → 上传此 HTML 文件。',
         htmlImportNoteBody2: '请使用原始 HTML 文件恢复数据。',
       },
       imageStorageServices: [],
@@ -271,7 +271,7 @@ describe('favorite share export', () => {
     expect(html).toContain('<html lang="zh-CN">')
     expect(html).toContain('Prompt Optimizer 收藏分享')
     expect(html).toContain('<h2>导入说明</h2>')
-    expect(html).toContain('导入：访问 https://prompt.always200.com/ → 收藏夹 → 导入 → 上传此 HTML 文件。')
+    expect(html).toContain('导入：访问 https://goprmpt.com/ → 收藏夹 → 导入 → 上传此 HTML 文件。')
     expect(html).toContain('data-copy-button>复制</button>')
     expect(html).toContain("setButtonText(target, \"已复制\")")
   })
@@ -399,7 +399,7 @@ describe('favorite share export', () => {
     expect(exported.favorites[0].metadata.reproducibility.examples).toEqual([])
     expect(fillText).toHaveBeenCalledWith('IMPORT NOTE', expect.any(Number), expect.any(Number))
     expect(fillText).toHaveBeenCalledWith(
-      expect.stringContaining('https://prompt.always200.com/'),
+      expect.stringContaining('https://goprmpt.com/'),
       expect.any(Number),
       expect.any(Number),
     )
@@ -441,7 +441,7 @@ describe('favorite share export', () => {
         modeTitle: '模式',
         variablesTitle: '变量',
         importNoteTitle: '导入说明',
-        pngImportNoteText: '导入：访问 https://prompt.always200.com/ → 收藏夹 → 导入 → 上传原始 PNG 文件。\n必须使用原图。',
+        pngImportNoteText: '导入：访问 https://goprmpt.com/ → 收藏夹 → 导入 → 上传原始 PNG 文件。\n必须使用原图。',
       },
       imageStorageServices: [],
       canvasFactory: () => canvas,
