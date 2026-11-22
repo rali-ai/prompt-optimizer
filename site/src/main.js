@@ -125,25 +125,26 @@ const translations = {
     },
     access: {
       title: '选择使用方式',
-      repository: 'GitHub 开源仓库',
-      dataNote: '配置、历史和收藏默认保存在当前使用环境。相关输入会发给你配置的模型服务，远程备份会发到你配置的存储。',
+      dataNote: '配置、历史和收藏默认保存在当前浏览器本地。相关输入会发给你自行配置的模型服务，请勿在提示词中提交个人隐私或敏感机密信息。',
       entries: [
         {
-          title: '在线使用',
-          body: '在浏览器打开工作区。',
-          href: 'https://goprmpt.net'
+          title: '在线优化器',
+          body: '在浏览器打开工作区，直接改写与对比测试。',
+          href: 'https://goprmpt.net',
+          external: true
         },
         {
-          title: 'Docker 部署',
-          body: '运行自己的实例。',
-          href: 'https://github.com/rali-ai/prompt-optimizer'
+          title: '提示词库与教程',
+          body: '按分类检索现成提示词，或按课学习写作方法。',
+          href: '/library/',
+          external: false
         }
       ]
     }
   },
   en: {
     title: '提示词优化器 | Rewrite and test AI prompts',
-    description: 'An open-source tool to rewrite prompts with your own models, compare actual responses, and explore a bilingual prompt library and course.',
+    description: 'A tool to rewrite prompts with your own models, compare actual responses, and explore a bilingual prompt library and course.',
     hero: {
       title: '提示词优化器',
       lead: 'Paste a prompt, rewrite it, and test both versions with the same model. See which answer fits your task better.',
@@ -232,18 +233,19 @@ const translations = {
     },
     access: {
       title: 'Ways to use it',
-      repository: 'GitHub repository',
-      dataNote: 'Settings, history, and favorites stay in your current environment by default. Model requests and remote backups go to the model service and storage you configure.',
+      dataNote: 'Settings, history, and favorites stay in your browser by default. Model requests go to the service you configure; do not submit personal privacy or confidential data.',
       entries: [
         {
-          title: 'Web app',
-          body: 'Open the workspace in your browser.',
-          href: 'https://goprmpt.net'
+          title: 'Web optimizer',
+          body: 'Open the workspace in your browser to rewrite and test prompts.',
+          href: 'https://goprmpt.net',
+          external: true
         },
         {
-          title: 'Docker deployment',
-          body: 'Host your own instance.',
-          href: 'https://github.com/rali-ai/prompt-optimizer'
+          title: 'Library & course',
+          body: 'Browse ready-to-use prompts by category or learn prompting patterns.',
+          href: '/library/',
+          external: false
         }
       ]
     }
@@ -406,17 +408,13 @@ function renderApp(locale, { preserveFocus = false } = {}) {
           </div>
           <div class="entry-list">
             ${copy.access.entries.map((entry) => `
-              <a class="entry-link" href="${entry.href}" target="_blank" rel="noopener noreferrer">
+              <a class="entry-link" href="${entry.href}"${entry.external ? ' target="_blank" rel="noopener noreferrer"' : ''}>
                 <strong>${entry.title}</strong>
                 <span>${entry.body}</span>
               </a>
             `).join('')}
           </div>
           <div class="project-details">
-            <div class="project-details__links">
-              <a class="section-link" href="https://github.com/rali-ai/prompt-optimizer" target="_blank" rel="noopener noreferrer">${copy.access.repository}</a>
-              <span>AGPL-3.0</span>
-            </div>
             <p>${copy.access.dataNote}</p>
           </div>
         </section>

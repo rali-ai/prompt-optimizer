@@ -46,14 +46,9 @@ describe('AppHeaderActions', () => {
       },
     })
 
-    const sourceLink = wrapper.get('[data-testid="header-source-link"]')
-    expect(sourceLink.text()).toBe('源代码')
+    expect(wrapper.find('[data-testid="header-source-link"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="language-switch"]').exists()).toBe(true)
-    expect(wrapper.html()).not.toMatch(/always200|linshenkx|GitHub/)
-
-    await sourceLink.trigger('click')
-
-    expect(wrapper.emitted('open-source')).toHaveLength(1)
+    expect(wrapper.html()).not.toMatch(/always200|linshenkx|GitHub|源代码/)
   })
 
   it('separates the favorites page destination from modal actions and marks it active', async () => {

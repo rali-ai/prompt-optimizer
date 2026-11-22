@@ -91,15 +91,13 @@ describe('mobile navigation panels', () => {
     } finally { wrapper.unmount() }
   })
 
-  it('offers the source link as the only external link in help', async () => {
+  it('keeps help free of external GitHub or source links', async () => {
     const wrapper = createNavigation()
     try {
       await wrapper.get('[data-testid="compact-global-menu"]').trigger('click')
       const help = wrapper.get('.compact-menu-help')
-      expect(help.findAll('.compact-menu-row')).toHaveLength(1)
-      expect(help.get('[data-testid="compact-menu-source"]').text()).toContain('源代码')
-      await help.get('[data-testid="compact-menu-source"]').trigger('click')
-      expect(wrapper.emitted('action')).toEqual([['source']])
+      expect(help.findAll('.compact-menu-row')).toHaveLength(0)
+      expect(help.html()).not.toMatch(/always200|linshenkx|GitHub|源代码/)
     } finally { wrapper.unmount() }
   })
 })

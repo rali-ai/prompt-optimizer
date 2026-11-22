@@ -64,7 +64,6 @@
                         @open-variables="handleOpenVariableManager()"
                         :favorites-active="isFavoritesRoute"
                         :backup-reminder-due="dataBackupReminderDue"
-                        @open-source="openSourceRepo"
                     />
                 </template>
                 <template #main>
@@ -256,7 +255,6 @@ import {
     resolveWorkspacePathFallback,
 } from '../../router/workspaceRoutes';
 import { createExternalDataLoadingGate } from '../../utils/external-data-loading'
-import { openExternalUrl } from '../../utils/open-external-url'
 import { registerOptionalIntegrations } from '../../integrations/registerOptionalIntegrations';
 import { useAppPromptPrefill } from '../../composables/app/useAppPromptPrefill';
 import { useI18n } from "vue-i18n";
@@ -805,7 +803,6 @@ const handleMobileAction = (action: string) => {
     else if (action === 'models') openModelManager();
     else if (action === 'variables') handleOpenVariableManager();
     else if (action === 'data') showDataManager.value = true;
-    else if (action === 'source') openSourceRepo();
 };
 watch(isCompact, (compact) => {
     if (typeof document !== 'undefined') document.documentElement.classList.toggle('workspace-compact', compact);
@@ -2093,11 +2090,6 @@ watch(
 );
 
 const appVersion = `v${rootPackageJson.version}`;
-
-// AGPL-3.0: offer the running version's source to network users.
-const openSourceRepo = async () => {
-    await openExternalUrl("https://github.com/rali-ai/prompt-optimizer");
-};
 
 const normalizeTemplateTypeForManager = (
     templateType: TemplateType | undefined,

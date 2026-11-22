@@ -1,6 +1,5 @@
 const THEME_STORAGE_KEY = 'prompt-optimizer-site-theme'
 const THEME_MODES = ['system', 'dark', 'light']
-const GITHUB_URL = 'https://github.com/rali-ai/prompt-optimizer'
 
 export const OPTIMIZER_URL = 'https://goprmpt.net'
 
@@ -11,8 +10,6 @@ export const chromeCopy = {
       product: '优化器',
       library: '提示词库',
       learn: '教程与写法',
-      github: 'GitHub',
-      githubLabel: '开源仓库',
       themeAria: '切换主题模式',
       themeLabels: {
         system: '自动',
@@ -25,9 +22,8 @@ export const chromeCopy = {
     },
     footer: {
       title: '提示词优化器',
-      body: '让提示词优化回到真实结果。',
-      product: '优化器',
-      github: 'GitHub'
+      body: '让提示词优化回到真实结果。AI 生成内容仅供参考，请结合实际场景人工核验。',
+      product: '优化器'
     }
   },
   en: {
@@ -36,8 +32,6 @@ export const chromeCopy = {
       product: 'Optimizer',
       library: 'Prompt Library',
       learn: 'Learn',
-      github: 'GitHub',
-      githubLabel: 'Open-source repository',
       themeAria: 'Switch theme mode',
       themeLabels: {
         system: 'Auto',
@@ -50,9 +44,8 @@ export const chromeCopy = {
     },
     footer: {
       title: '提示词优化器',
-      body: 'Bring prompt optimization back to real outputs.',
-      product: 'Optimizer',
-      github: 'GitHub'
+      body: 'Bring prompt optimization back to real outputs. AI-generated outputs are for reference only; please review before use.',
+      product: 'Optimizer'
     }
   }
 }
@@ -137,19 +130,6 @@ function renderLocaleButton(copy) {
   `
 }
 
-function renderGithubPill(copy) {
-  return `
-    <a class="github-pill" href="${GITHUB_URL}" target="_blank" rel="noopener noreferrer" aria-label="${copy.nav.githubLabel}">
-      <span class="github-pill__icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" role="img" focusable="false">
-          <path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.52.1.7-.23.7-.5v-1.95c-2.86.62-3.46-1.21-3.46-1.21-.47-1.18-1.14-1.5-1.14-1.5-.93-.64.07-.63.07-.63 1.03.07 1.57 1.06 1.57 1.06.91 1.56 2.4 1.1 2.98.84.09-.66.36-1.1.65-1.35-2.28-.26-4.67-1.14-4.67-5.08 0-1.12.4-2.04 1.05-2.76-.1-.26-.46-1.31.1-2.73 0 0 .86-.28 2.82 1.05a9.8 9.8 0 0 1 5.13 0c1.96-1.33 2.82-1.05 2.82-1.05.56 1.42.2 2.47.1 2.73.66.72 1.05 1.64 1.05 2.76 0 3.95-2.39 4.82-4.67 5.08.37.32.7.95.7 1.92v2.84c0 .28.18.61.7.5A10.5 10.5 0 0 0 12 1.5Z" fill="currentColor"/>
-        </svg>
-      </span>
-      <span class="github-pill__text">${copy.nav.github}</span>
-    </a>
-  `
-}
-
 function renderPageLink(href, label, current) {
   return `<a href="${href}"${href === current ? ' aria-current="page"' : ''}>${label}</a>`
 }
@@ -179,7 +159,6 @@ export function renderSiteHeader({ locale = 'zh-CN', current = '', showLocale = 
         <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.nav.product}</a>
         ${renderPageLink('/library/', copy.nav.library, current)}
         ${renderPageLink('/learn/', copy.nav.learn, current)}
-        ${renderGithubPill(copy)}
         ${renderThemeButton(copy)}
         ${showLocale ? renderLocaleButton(copy) : ''}
       </nav>
@@ -199,7 +178,6 @@ export function renderSiteFooter({ locale = 'zh-CN', current = '', showLocale = 
         <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.footer.product}</a>
         ${renderPageLink('/library/', copy.nav.library, current)}
         ${renderPageLink('/learn/', copy.nav.learn, current)}
-        <a href="${GITHUB_URL}" target="_blank" rel="noopener noreferrer">${copy.footer.github}</a>
         ${renderThemeButton(copy)}
         ${showLocale ? renderLocaleButton(copy) : ''}
       </div>

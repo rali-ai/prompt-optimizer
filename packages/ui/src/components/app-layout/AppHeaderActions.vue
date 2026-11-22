@@ -86,15 +86,6 @@
     <ThemeToggleUI />
     <div class="aux-icon-group">
         <ChangePasswordButton />
-        <NButton
-            quaternary
-            size="small"
-            class="aux-text-button"
-            data-testid="header-source-link"
-            @click="emit('open-source')"
-        >
-            源代码
-        </NButton>
         <LanguageSwitchDropdown />
         <!-- 自动更新组件 - 仅在Electron环境中显示 -->
         <UpdaterIcon />
@@ -161,8 +152,6 @@ const emit = defineEmits<{
     'open-data-manager': []
     /** 打开变量管理器 */
     'open-variables': []
-    /** 打开源代码仓库（AGPL-3.0 源代码提供） */
-    'open-source': []
 }>()
 </script>
 
