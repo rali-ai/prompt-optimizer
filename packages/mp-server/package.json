@@ -1,0 +1,14 @@
+{
+  "name": "@goprmpt/mp-server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "goprmpt 微信小程序后端：登录换会话、调用国产模型优化提示词、内容安全检查、限流",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/main.js",
+    "test": "node --test"
+  }
+}
