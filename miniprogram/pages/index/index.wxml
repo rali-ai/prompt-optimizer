@@ -1,0 +1,33 @@
+<view class="gp-page">
+  <view class="brand">
+    <view class="logo">P</view>
+    <view class="brand-name">goprmpt 提示词优化器</view>
+    <view class="gp-muted">把想法写成 AI 一看就懂的提示词</view>
+  </view>
+
+  <view class="gp-card main" hover-class="gp-pressed" data-url="/goprmpt/pages/optimize/optimize" bindtap="onOpen">
+    <view class="main-title">开始优化</view>
+    <view class="main-desc">通用、结构化、精简、系统提示词、图片提示词五种方式，支持中英文输出</view>
+  </view>
+
+  <view class="grid">
+    <view class="gp-card cell" hover-class="gp-pressed" data-url="/goprmpt-library/pages/library/library" bindtap="onOpen">
+      <view class="cell-title">提示词库</view>
+      <view class="gp-muted">现成模板，填空即用</view>
+    </view>
+    <view class="gp-card cell" hover-class="gp-pressed" data-url="/goprmpt-library/pages/learn/learn" bindtap="onOpen">
+      <view class="cell-title">学习</view>
+      <view class="gp-muted">提示词写作方法</view>
+    </view>
+    <view class="gp-card cell" hover-class="gp-pressed" data-url="/goprmpt/pages/history/history" bindtap="onOpen">
+      <view class="cell-title">历史</view>
+      <view class="gp-muted">本机的优化记录</view>
+    </view>
+    <view class="gp-card cell" hover-class="gp-pressed" data-url="/goprmpt/pages/settings/settings" bindtap="onOpen">
+      <view class="cell-title">设置</view>
+      <view class="gp-muted">模型与 API Key</view>
+    </view>
+  </view>
+
+  <view class="gp-muted footer">网页版 goprmpt.net · 官网 goprmpt.com</view>
+</view>

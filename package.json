@@ -79,7 +79,9 @@
     "typecheck:web": "pnpm -F @prompt-optimizer/web typecheck",
     "typecheck:extension": "pnpm -F @prompt-optimizer/extension typecheck",
     "typecheck:mcp-server": "pnpm -F @prompt-optimizer/mcp-server type-check",
-    "kill:dev": "node scripts/kill-dev.js"
+    "kill:dev": "node scripts/kill-dev.js",
+    "miniprogram:data": "node scripts/build-miniprogram-data.mjs",
+    "miniprogram:check": "node miniprogram/tools/check.mjs && node --test scripts/build-miniprogram-data.test.mjs \"miniprogram/tools/tests/*.test.mjs\""
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

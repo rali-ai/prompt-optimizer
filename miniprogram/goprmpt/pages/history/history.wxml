@@ -1,0 +1,30 @@
+<view class="gp-page">
+  <view class="gp-row-between header">
+    <view class="gp-muted">只保存在本机，最多 100 条</view>
+    <view wx:if="{{records.length}}" class="gp-link clear" hover-class="gp-pressed" bindtap="onClearAll">清空</view>
+  </view>
+
+  <view wx:if="{{!records.length}}" class="gp-empty">还没有优化记录</view>
+
+  <view wx:for="{{records}}" wx:key="id" class="gp-card record">
+    <view class="gp-row-between">
+      <view class="gp-row">
+        <view class="gp-tag">{{item.modeName}}</view>
+        <view class="gp-tag">{{item.langName}}</view>
+      </view>
+      <view class="gp-muted time">{{item.time}}</view>
+    </view>
+
+    <view wx:if="{{item.iterateInput}}" class="direction">改进方向：{{item.iterateInput}}</view>
+    <view class="label">原文</view>
+    <view class="gp-clamp-2 excerpt before">{{item.input}}</view>
+    <view class="label">结果</view>
+    <view class="gp-clamp-2 excerpt">{{item.output}}</view>
+
+    <view class="gp-row actions">
+      <view class="gp-btn gp-btn-small" hover-class="gp-pressed" data-id="{{item.id}}" bindtap="onReuse">复用</view>
+      <view class="gp-btn gp-btn-small" hover-class="gp-pressed" data-id="{{item.id}}" bindtap="onCopy">复制结果</view>
+      <view class="delete" hover-class="gp-pressed" data-id="{{item.id}}" bindtap="onDelete">删除</view>
+    </view>
+  </view>
+</view>

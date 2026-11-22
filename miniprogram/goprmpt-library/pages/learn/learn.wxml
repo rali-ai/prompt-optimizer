@@ -1,0 +1,20 @@
+<view class="gp-page">
+  <view class="intro">
+    <view class="gp-title">学写提示词</view>
+    <view class="gp-muted">每课一个方法，配改写前后的例子和一道练习</view>
+  </view>
+
+  <view wx:if="{{!lessons.length}}" class="gp-empty">课程正在整理中，敬请期待</view>
+
+  <view
+    wx:for="{{lessons}}"
+    wx:key="id"
+    class="gp-card lesson"
+    hover-class="gp-pressed"
+    data-id="{{item.id}}"
+    bindtap="onOpen"
+  >
+    <view class="lesson-title">{{item.title}}</view>
+    <view wx:if="{{item.summary}}" class="gp-clamp-2 lesson-summary">{{item.summary}}</view>
+  </view>
+</view>

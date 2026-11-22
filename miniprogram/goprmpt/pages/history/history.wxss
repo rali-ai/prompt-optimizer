@@ -1,0 +1,50 @@
+@import "../../styles/theme.wxss";
+
+.header {
+  margin-bottom: var(--gp-gap);
+}
+
+.clear {
+  font-size: var(--gp-font-sm);
+}
+
+.time {
+  font-size: var(--gp-font-xs);
+  white-space: nowrap;
+}
+
+.direction {
+  margin-top: 12rpx;
+  font-size: var(--gp-font-sm);
+  color: var(--gp-text-2);
+}
+
+.label {
+  margin-top: 16rpx;
+  font-size: var(--gp-font-xs);
+  color: var(--gp-text-3);
+}
+
+.excerpt {
+  font-size: var(--gp-font-sm);
+  word-break: break-all;
+}
+
+.before {
+  color: var(--gp-text-2);
+}
+
+.actions {
+  margin-top: 24rpx;
+}
+
+.actions .gp-btn {
+  margin-right: 16rpx;
+}
+
+.delete {
+  margin-left: auto;
+  padding: 8rpx 0;
+  color: var(--gp-danger);
+  font-size: var(--gp-font-sm);
+}
