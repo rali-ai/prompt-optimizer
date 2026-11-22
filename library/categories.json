@@ -148,5 +148,35 @@
       "name": "Infographics & Slides",
       "description": "Flowcharts, timelines, knowledge cards and presentation slides."
     }
+  },
+  {
+    "id": "3d-space",
+    "name": "3D与空间",
+    "description": "微缩场景、等距视角、立体书和剖面图，靠比例和层次出效果。",
+    "kind": "image",
+    "en": {
+      "name": "3D & Space",
+      "description": "Miniature scenes, isometric views, pop-up books and cutaways that rely on scale and depth layers."
+    }
+  },
+  {
+    "id": "character",
+    "name": "角色与叙事",
+    "description": "角色设定图、档案卡、表情表、分镜和漫画，让同一个角色前后一致。",
+    "kind": "image",
+    "en": {
+      "name": "Characters & Storytelling",
+      "description": "Reference sheets, profile cards, expression sheets, storyboards and comics that keep one character consistent."
+    }
+  },
+  {
+    "id": "social-fun",
+    "name": "社交娱乐",
+    "description": "表情包、Starter Pack、收藏卡和恶搞封面，适合发朋友圈和社群。",
+    "kind": "image",
+    "en": {
+      "name": "Social & Fun",
+      "description": "Sticker packs, starter packs, collectible cards and parody covers made for sharing."
+    }
   }
 ]
