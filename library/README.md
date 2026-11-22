@@ -57,11 +57,28 @@
 ```json
 [{
   "id": "clear-goal",
+  "track": "course",
+  "order": 1,
   "title": "第 1 课：先说清目标",
   "summary": "一句话说明这课讲什么。",
   "sections": [{ "heading": "为什么", "body": "Markdown 段落" }],
   "before": "改写前的提示词",
   "after": "改写后的提示词",
-  "exercise": "练习题"
+  "exercise": "练习题",
+  "source": { "name": "Prompt Garden", "url": "https://example.com/patterns/clear-goal", "license": "CC BY 4.0" },
+  "en": {
+    "title": "Lesson 1: State the goal first",
+    "summary": "One sentence on what this lesson covers.",
+    "sections": [{ "heading": "Why", "body": "Markdown paragraph" }],
+    "before": "Prompt before the rewrite",
+    "after": "Prompt after the rewrite",
+    "exercise": "Exercise"
+  }
 }]
 ```
+
+- `track` 必填：`course` 是完整课程里的一课，`pattern` 是从某个提示词库提炼出的写法套路。
+- `order` 可选，数字。有 `order` 的课按从小到大排在前面，没有的按文件顺序排在后面。
+- `title`、`summary`、`before`、`after`、`exercise` 都必填且不能为空，`before` 和 `after` 不能相同；`sections` 至少一节，每节都要有 `heading` 和 `body`。
+- `en` 必填，是英文版的 `title`、`summary`、`sections`、`before`、`after`、`exercise`，规则同上。中英文标题各自不能重复。
+- `source` 可选，格式同提示词的 `source`，从外部提示词库提炼时填写。

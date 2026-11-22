@@ -26,12 +26,21 @@ const valid = () => ({
   }],
   learn: [{
     id: 'clear-goal',
+    track: 'course',
     title: '第 1 课：先说清目标',
     summary: '先说目标。',
     sections: [{ heading: '为什么', body: '正文' }],
     before: '写个周报',
     after: '写一份给经理看的周报',
-    exercise: '改写一句提示词'
+    exercise: '改写一句提示词',
+    en: {
+      title: 'Lesson 1: State the goal first',
+      summary: 'Say what you want first.',
+      sections: [{ heading: 'Why', body: 'Text' }],
+      before: 'Write a report',
+      after: 'Write a weekly report for my manager',
+      exercise: 'Rewrite one prompt'
+    }
   }]
 })
 
@@ -80,7 +89,9 @@ test('valid data loads into categories, prompts with both languages, and lessons
   assert.equal(prompt.locales.zh.prompt, '本周工作记录：{{记录}}')
   assert.equal(prompt.locales.en.title, 'Weekly Report Generator')
   assert.deepEqual(prompt.importCodes, { zh: 'weekly-report', en: 'weekly-report-en' })
-  assert.equal(library.lessons[0].after, '写一份给经理看的周报')
+  assert.equal(library.lessons[0].locales.zh.after, '写一份给经理看的周报')
+  assert.equal(library.lessons[0].locales.en.title, 'Lesson 1: State the goal first')
+  assert.equal(library.lessons[0].track, 'course')
 })
 
 test('every problem across all three files is reported in one error', () => {
@@ -109,7 +120,7 @@ test('ids must be kebab-case and unique; titles must be unique', () => {
   assertProblem((files) => { files.categories.push({ ...files.categories[0], name: '另一个' }) }, /categories\.json：id 重复：writing/)
   assertProblem((files) => { files.categories.push({ ...files.categories[0], id: 'other' }) }, /categories\.json：name 重复/)
   assertProblem((files) => { files.prompts.push({ ...files.prompts[0], id: 'other', en: { ...files.prompts[0].en, title: 'Other' } }) }, /中文标题重复/)
-  assertProblem((files) => { files.learn.push({ ...files.learn[0] }) }, /learn\.json：id 重复/, /learn\.json：标题重复/)
+  assertProblem((files) => { files.learn.push({ ...files.learn[0] }) }, /learn\.json：id 重复/, /learn\.json：中文标题重复/)
 })
 
 test('an id that collides with another prompt\'s English import code fails', () => {
@@ -203,10 +214,40 @@ test('a prompt adapted from another library carries its source; free-text credit
   assertProblem((files) => { files.prompts[0].credit = '改编自 XXX' }, /未知字段 credit/)
 })
 
-test('lessons need at least one complete section and a real rewrite', () => {
+test('lessons need at least one complete section and a real rewrite, in each language', () => {
   assertProblem((files) => { files.learn[0].sections = [] }, /sections 至少一节/)
   assertProblem((files) => { files.learn[0].sections = [{ heading: '缺正文' }] }, /sections\[0\]：缺少字段 body/)
   assertProblem((files) => { files.learn[0].after = files.learn[0].before }, /before 和 after 相同/)
+  assertProblem((files) => { files.learn[0].en.after = files.learn[0].en.before }, /\.en：before 和 after 相同/)
+  assertProblem((files) => { files.learn[0].en.sections = [{ heading: 'Why' }] }, /\.en\.sections\[0\]：缺少字段 body/)
+})
+
+test('every lesson is bilingual', () => {
+  assertProblem((files) => { delete files.learn[0].en }, /clear-goal\)：缺少字段 en/)
+  assertProblem((files) => { delete files.learn[0].en.exercise }, /clear-goal\)\.en：缺少字段 exercise/)
+  assertProblem((files) => { files.learn.push({ ...files.learn[0], id: 'other', title: '第 2 课' }) }, /learn\.json：英文标题重复/)
+})
+
+test('lessons belong to the course or pattern track', () => {
+  assertProblem((files) => { delete files.learn[0].track }, /缺少字段 track/)
+  assertProblem((files) => { files.learn[0].track = 'blog' }, /track 只能是 course \/ pattern：blog/)
+})
+
+test('lessons with an order come first, sorted by it; the rest keep file order', () => {
+  const lesson = (id, order) => {
+    const base = valid().learn[0]
+    return { ...base, id, title: id, ...(order === undefined ? {} : { order }), en: { ...base.en, title: id } }
+  }
+  const ids = load((files) => { files.learn = [lesson('a'), lesson('b', 2), lesson('c'), lesson('d', 1)] }).lessons.map((l) => l.id)
+  assert.deepEqual(ids, ['d', 'b', 'a', 'c'])
+  assertProblem((files) => { files.learn[0].order = '1' }, /order 必须是数字/)
+})
+
+test('a lesson distilled from another library carries its source', () => {
+  const source = { name: 'Prompt Garden', url: 'https://example.com/patterns' }
+  const [lesson] = load((files) => { files.learn[0].track = 'pattern'; files.learn[0].source = source }).lessons
+  assert.deepEqual(lesson.source, source)
+  assertProblem((files) => { files.learn[0].source = { name: 'Prompt Garden' } }, /learn\.json.*source：缺少字段 url/)
 })
 
 test('prompt sources cover every prompt in both languages for the optimizer import', () => {

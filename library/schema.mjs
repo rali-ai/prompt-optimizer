@@ -18,8 +18,12 @@ import path from 'node:path'
  * }} Prompt
  * @typedef {{ heading: string, body: string }} Section
  * @typedef {{
- *   id: string, title: string, summary: string, sections: Section[],
+ *   title: string, summary: string, sections: Section[],
  *   before: string, after: string, exercise: string
+ * }} LessonText
+ * @typedef {{
+ *   id: string, track: 'course' | 'pattern', order?: number, source?: Source,
+ *   locales: Record<Language, LessonText>
  * }} Lesson
  * @typedef {{ categories: Category[], prompts: Prompt[], lessons: Lesson[] }} Library
  */
@@ -37,7 +41,9 @@ const SENTENCE = { zh: /^[^。！？!?]+[。！？]$/u, en: /^[^.!?]+(?:\.[^\s.!
 const ENGLISH_VARIABLE = /^[a-z][a-z0-9_]*$/u
 const PROMPT_FIELDS = ['id', 'title', 'category', 'tags', 'summary', 'target', 'prompt', 'variables', 'en']
 const TEXT_FIELDS = ['title', 'summary', 'prompt', 'variables']
-const LESSON_FIELDS = ['id', 'title', 'summary', 'sections', 'before', 'after', 'exercise']
+const LESSON_TEXT_FIELDS = ['title', 'summary', 'sections', 'before', 'after', 'exercise']
+const LESSON_FIELDS = ['id', 'track', ...LESSON_TEXT_FIELDS, 'en']
+export const TRACKS = ['course', 'pattern']
 
 export class LibraryError extends Error {
   constructor(dir, problems) {
@@ -83,6 +89,12 @@ function reader(problems, where, record, required, optional = []) {
       return ''
     },
     optionalText: (key) => (key in record ? field.text(key) : undefined),
+    optionalNumber(key) {
+      if (!(key in record)) return undefined
+      if (Number.isFinite(record[key])) return record[key]
+      fail(`${key} 必须是数字`)
+      return undefined
+    },
     string(key) {
       if (typeof record[key] === 'string') return record[key]
       if (key in record) fail(`${key} 必须是字符串，留空写 ""`)
@@ -255,29 +267,49 @@ function parsePrompts(problems, data, categoryById) {
   return prompts
 }
 
+// 一种语言的课程正文。
+function parseLessonText(field) {
+  const sectionList = field.list('sections')
+  if (field.isList('sections') && sectionList.length === 0) field.fail('sections 至少一节')
+  const sections = sectionList.flatMap((value, index) => {
+    const section = field.child(`sections[${index}]`, ['heading', 'body'], [], value)
+    return section ? [{ heading: section.text('heading'), body: section.text('body') }] : []
+  })
+  const text = {
+    title: field.text('title'),
+    summary: field.text('summary'),
+    sections,
+    before: field.text('before'),
+    after: field.text('after'),
+    exercise: field.text('exercise')
+  }
+  if (text.before && text.before === text.after) field.fail('before 和 after 相同')
+  return text
+}
+
 function parseLessons(problems, data) {
-  const lessons = records(problems, 'learn.json', data, LESSON_FIELDS, [], (field) => {
-    const sectionList = field.list('sections')
-    if (field.isList('sections') && sectionList.length === 0) field.fail('sections 至少一节')
-    const sections = sectionList.flatMap((value, index) => {
-      const section = field.child(`sections[${index}]`, ['heading', 'body'], [], value)
-      return section ? [{ heading: section.text('heading'), body: section.text('body') }] : []
-    })
-    const lesson = {
-      id: field.id(),
-      title: field.text('title'),
-      summary: field.text('summary'),
-      sections,
-      before: field.text('before'),
-      after: field.text('after'),
-      exercise: field.text('exercise')
+  const lessons = records(problems, 'learn.json', data, LESSON_FIELDS, ['order', 'source'], (field) => {
+    const id = field.id()
+    const track = field.text('track')
+    if (track && !TRACKS.includes(track)) field.fail(`track 只能是 ${TRACKS.join(' / ')}：${track}`)
+    const order = field.optionalNumber('order')
+    const source = parseSource(field)
+    const zh = parseLessonText(field)
+    const enField = field.has('en') ? field.child('en', LESSON_TEXT_FIELDS) : null
+    const en = enField ? parseLessonText(enField) : zh
+    return {
+      id,
+      track,
+      ...(order === undefined ? {} : { order }),
+      ...(source ? { source } : {}),
+      locales: { zh, en }
     }
-    if (lesson.before && lesson.before === lesson.after) field.fail('before 和 after 相同')
-    return lesson
   })
   checkUnique(problems, 'learn.json', 'id ', lessons.map((l) => l.id))
-  checkUnique(problems, 'learn.json', '标题', lessons.map((l) => l.title))
-  return lessons
+  checkUnique(problems, 'learn.json', '中文标题', lessons.map((l) => l.locales.zh.title))
+  checkUnique(problems, 'learn.json', '英文标题', lessons.map((l) => l.locales.en.title))
+  // 有 order 的按 order 从小到大排在前面，没有的保持文件里的顺序排在后面。
+  return lessons.sort((a, b) => (a.order ?? Number.MAX_VALUE) - (b.order ?? Number.MAX_VALUE))
 }
 
 /** @returns {Library} */

@@ -1,9 +1,12 @@
 import './styles.css'
 import './pages.css'
-import { lessons } from 'virtual:library/lessons'
+import { lessons as libraryLessons } from 'virtual:library/lessons'
 import { OPTIMIZER_URL, initSiteChrome, renderSiteFooter, renderSiteHeader, siteBackground } from './shell.js'
 import { escapeHtml } from './html.js'
 import { renderMarkdown } from './markdown.js'
+
+// 学习页暂时只有中文版。
+const lessons = libraryLessons.map((lesson) => ({ id: lesson.id, ...lesson.locales.zh }))
 
 const PAGE_TITLE = document.title
 const lessonIndexById = new Map(lessons.map((lesson, index) => [lesson.id, index]))

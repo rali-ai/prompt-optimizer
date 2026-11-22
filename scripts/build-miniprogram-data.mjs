@@ -31,8 +31,7 @@ export function toMiniprogramData({ categories, prompts, lessons }) {
       credit: prompt.source ? creditLine(prompt.source) : '',
       en: prompt.locales.en
     })),
-    learn: lessons.map(({ id, title, summary, sections, before, after, exercise }) =>
-      ({ id, title, summary, sections, before, after, exercise }))
+    learn: lessons.map((lesson) => ({ id: lesson.id, track: lesson.track, ...lesson.locales.zh, en: lesson.locales.en }))
   }
 }
 

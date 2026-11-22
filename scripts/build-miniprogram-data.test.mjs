@@ -13,10 +13,12 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const zh = { title: '周报生成器', summary: '整理周报。', prompt: '记录：{{记录}}', variables: [{ name: '记录', description: '一行一条', defaultValue: '' }] }
 const en = { title: 'Weekly report', summary: 'Write a weekly report.', prompt: 'Notes: {{notes}}', variables: [{ name: 'notes', description: 'One per line', defaultValue: '-' }] }
+const lessonZh = { title: '第 1 课', summary: '目标。', sections: [{ heading: '为什么', body: '正文' }], before: '写', after: '写周报', exercise: '练' }
+const lessonEn = { title: 'Lesson 1', summary: 'Goals.', sections: [{ heading: 'Why', body: 'Text' }], before: 'Write', after: 'Write a weekly report', exercise: 'Try it' }
 const library = {
   categories: [{ id: 'writing', name: '写作创作', description: '文章。' }],
   prompts: [{ id: 'weekly-report', category: 'writing', tags: ['职场', '总结'], target: 'basic-user', locales: { zh, en }, importCodes: { zh: 'weekly-report', en: 'weekly-report-en' } }],
-  lessons: [{ id: 'clear-goal', title: '第 1 课', summary: '目标。', sections: [{ heading: '为什么', body: '正文' }], before: '写', after: '写周报', exercise: '练' }]
+  lessons: [{ id: 'clear-goal', track: 'course', order: 1, locales: { zh: lessonZh, en: lessonEn } }]
 }
 
 test('mini program data flattens the Chinese text, keeps English under en and fills optional text with ""', () => {
@@ -35,7 +37,7 @@ test('mini program data flattens the Chinese text, keeps English under en and fi
   const english = { name: 'Writing', description: 'Articles.' }
   const withEnglish = toMiniprogramData({ ...library, categories: [{ ...library.categories[0], kind: 'text', en: english }] })
   assert.deepEqual(withEnglish.categories[0].en, english)
-  assert.deepEqual(data.learn, library.lessons)
+  assert.deepEqual(data.learn, [{ id: 'clear-goal', track: 'course', ...lessonZh, en: lessonEn }])
 })
 
 test('a prompt source becomes a one-line credit, since the mini program cannot open links', () => {
