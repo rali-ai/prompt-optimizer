@@ -47,8 +47,9 @@ COPY docker/generate-auth.sh /docker-entrypoint.d/30-generate-auth.sh
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/start-services.sh /start-services.sh
 COPY docker/auth-api.mjs /app/auth-api/server.mjs
+COPY packages/user-sync-api /app/user-sync-api
 
-# 持久化数据（访问密码文件 /data/auth/.htpasswd）
+# 持久化数据（访问密码文件 /data/auth/.htpasswd 与用户云同步库 /data/user-sync/users.db）
 VOLUME /data
 
 # 确保脚本有执行权限
