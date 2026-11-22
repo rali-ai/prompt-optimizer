@@ -4,34 +4,36 @@
     - 免登录可直接使用；云同步仅保存收藏、历史、模板和变量，模型 API Key 仅留在浏览器本地（BYOK）。
     - 扩展、桌面版或纯静态部署无 /user-api/ 时自动静默隐藏。
   -->
-  <template v-if="available">
+  <div v-if="available" class="account-sync-inline" :class="{ 'account-sync-inline--open': showModal }">
     <NButton
       quaternary
       size="small"
       class="account-sync-trigger"
       data-testid="header-account-sync"
-      @click="openModal"
+      :aria-expanded="showModal"
+      @click="togglePanel"
     >
-      <template v-if="currentUser">
-        <span class="sync-status-dot" :class="{ 'sync-status-dot--synced': lastSyncVersion > 0 }" />
-        <span class="account-sync-username">{{ currentUser.username }}</span>
+      <template #icon>
+        <NIcon :size="15" class="account-sync-icon"><Cloud :stroke-width="1.75" /></NIcon>
       </template>
-      <template v-else>
-        {{ text.triggerSignedOut }}
-      </template>
+      <span class="account-sync-trigger-body">
+        <template v-if="currentUser">
+          <span class="sync-status-dot" :class="{ 'sync-status-dot--synced': lastSyncVersion > 0 }" />
+          <span class="account-sync-username">{{ currentUser.username }}</span>
+        </template>
+        <template v-else>
+          <span class="account-sync-label">{{ text.triggerSignedOut }}</span>
+        </template>
+        <NIcon :size="14" class="account-sync-chevron" :class="{ 'account-sync-chevron--open': showModal }">
+          <ChevronDown :stroke-width="1.75" />
+        </NIcon>
+      </span>
     </NButton>
 
-    <NModal
-      v-model:show="showModal"
-      preset="card"
-      :title="currentUser ? text.modalTitleSignedIn : text.modalTitleSignedOut"
-      :mask-closable="!busy"
-      :closable="!busy"
-      :style="{ width: 'min(440px, 92vw)' }"
-    >
-      <NAlert type="info" :show-icon="false" class="byok-notice" data-testid="account-sync-byok-notice">
+    <div v-show="showModal" class="account-sync-drawer" data-testid="account-sync-inline-panel">
+      <div class="byok-notice" data-testid="account-sync-byok-notice">
         {{ text.byokNotice }}
-      </NAlert>
+      </div>
 
       <NAlert
         v-if="notice"
@@ -44,20 +46,22 @@
       </NAlert>
 
       <template v-if="!currentUser">
-        <NTabs v-model:value="activeTab" type="segment" animated>
+        <NTabs v-model:value="activeTab" type="segment" size="small">
           <NTabPane name="login" :tab="text.tabLogin">
-            <NForm label-placement="top" class="auth-form" @submit.prevent="handleLogin">
-              <NFormItem :label="text.usernameLabel">
+            <NForm label-placement="top" size="small" :show-feedback="false" class="auth-form" @submit.prevent="handleLogin">
+              <NFormItem :label="text.usernameLabel" class="auth-field">
                 <NInput
                   v-model:value="form.username"
+                  size="small"
                   :placeholder="text.usernamePlaceholder"
                   :input-props="{ autocomplete: 'username' }"
                   data-testid="account-sync-login-username"
                 />
               </NFormItem>
-              <NFormItem :label="text.passwordLabel">
+              <NFormItem :label="text.passwordLabel" class="auth-field">
                 <NInput
                   v-model:value="form.password"
+                  size="small"
                   type="password"
                   show-password-on="click"
                   :placeholder="text.passwordPlaceholder"
@@ -67,6 +71,7 @@
               </NFormItem>
               <NButton
                 type="primary"
+                size="small"
                 block
                 :loading="busy"
                 data-testid="account-sync-login-submit"
@@ -78,18 +83,20 @@
           </NTabPane>
 
           <NTabPane name="register" :tab="text.tabRegister">
-            <NForm label-placement="top" class="auth-form" @submit.prevent="handleRegister">
-              <NFormItem :label="text.usernameLabel">
+            <NForm label-placement="top" size="small" :show-feedback="false" class="auth-form" @submit.prevent="handleRegister">
+              <NFormItem :label="text.usernameLabel" class="auth-field">
                 <NInput
                   v-model:value="form.username"
+                  size="small"
                   :placeholder="text.usernamePlaceholder"
                   :input-props="{ autocomplete: 'username' }"
                   data-testid="account-sync-register-username"
                 />
               </NFormItem>
-              <NFormItem :label="text.passwordLabel">
+              <NFormItem :label="text.passwordLabel" class="auth-field">
                 <NInput
                   v-model:value="form.password"
+                  size="small"
                   type="password"
                   show-password-on="click"
                   :placeholder="text.passwordPlaceholder"
@@ -97,9 +104,10 @@
                   data-testid="account-sync-register-password"
                 />
               </NFormItem>
-              <NFormItem :label="text.confirmPasswordLabel">
+              <NFormItem :label="text.confirmPasswordLabel" class="auth-field">
                 <NInput
                   v-model:value="form.confirmPassword"
+                  size="small"
                   type="password"
                   show-password-on="click"
                   :placeholder="text.confirmPasswordPlaceholder"
@@ -109,6 +117,7 @@
               </NFormItem>
               <NButton
                 type="primary"
+                size="small"
                 block
                 :loading="busy"
                 data-testid="account-sync-register-submit"
@@ -124,21 +133,29 @@
       <template v-else>
         <div class="account-summary" data-testid="account-sync-summary">
           <div class="account-row">
-            <span class="account-label">{{ text.currentAccount }}</span>
             <strong>{{ currentUser.username }}</strong>
             <NTag v-if="membershipEnabled" size="small" :type="currentUser.tier === 'pro' ? 'info' : 'default'">
               {{ currentUser.tier === 'pro' ? 'Pro' : 'Free' }}
             </NTag>
+            <a
+              v-if="currentUser.role === 'admin'"
+              class="admin-console-link"
+              :href="`${props.baseUrl}/admin`"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {{ isZh ? '管理后台' : 'Admin' }}
+            </a>
           </div>
-          <div class="account-row">
-            <span class="account-label">{{ text.syncStateLabel }}</span>
+          <div class="account-row account-row--muted">
             <span>{{ syncSummaryText }}</span>
           </div>
         </div>
 
-        <NSpace vertical :size="10" class="sync-actions">
+        <NSpace vertical :size="6" class="sync-actions">
           <NButton
             type="primary"
+            size="small"
             block
             :loading="busy && activeAction === 'push'"
             :disabled="busy"
@@ -149,6 +166,7 @@
           </NButton>
           <NButton
             secondary
+            size="small"
             block
             :loading="busy && activeAction === 'pull'"
             :disabled="busy"
@@ -160,6 +178,7 @@
           <NButton
             quaternary
             type="error"
+            size="small"
             block
             :loading="busy && activeAction === 'logout'"
             :disabled="busy"
@@ -170,8 +189,8 @@
           </NButton>
         </NSpace>
       </template>
-    </NModal>
-  </template>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -182,13 +201,14 @@ import {
   NButton,
   NForm,
   NFormItem,
+  NIcon,
   NInput,
-  NModal,
   NSpace,
   NTabPane,
   NTabs,
   NTag,
 } from 'naive-ui'
+import { Cloud, ChevronDown } from '@lucide/vue'
 import type { AppServices } from '../../types/services'
 import {
   UserSyncError,
@@ -339,11 +359,13 @@ onMounted(async () => {
   }
 })
 
-function openModal() {
-  notice.value = null
-  form.password = ''
-  form.confirmPassword = ''
-  showModal.value = true
+function togglePanel() {
+  if (!showModal.value) {
+    notice.value = null
+    form.password = ''
+    form.confirmPassword = ''
+  }
+  showModal.value = !showModal.value
 }
 
 function errorMessage(err: unknown): string {
@@ -514,25 +536,59 @@ async function handleLogout() {
 </script>
 
 <style scoped>
+.account-sync-inline {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .account-sync-trigger {
+  width: 100%;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 13px;
+  justify-content: flex-start;
+}
+
+.account-sync-trigger-body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.account-sync-chevron {
+  margin-left: auto;
+  opacity: 0.65;
+  transition: transform 160ms ease;
+}
+
+.account-sync-chevron--open {
+  transform: rotate(180deg);
+}
+
+.account-sync-drawer {
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--gp-surface, var(--n-card-color, #ffffff));
+  border: 1px solid var(--gp-border, var(--n-border-color, rgba(24, 24, 27, 0.09)));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .sync-status-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background-color: var(--n-warning-color, #f0a020);
+  background-color: var(--gp-copper, #d96b43);
   display: inline-block;
-  margin-right: 5px;
+  flex-shrink: 0;
 }
 
 .sync-status-dot--synced {
-  background-color: var(--n-success-color, #18a058);
+  background-color: var(--gp-accent, #0f766e);
 }
 
 .account-sync-username {
@@ -543,42 +599,64 @@ async function handleLogout() {
 }
 
 .byok-notice {
-  margin-bottom: 12px;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--gp-muted, #52525b);
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--gp-surface-muted, rgba(128, 128, 128, 0.08));
 }
 
 .sync-feedback {
-  margin-bottom: 12px;
+  font-size: 12px;
 }
 
 .auth-form {
-  margin-top: 10px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-field {
+  margin-bottom: 0;
 }
 
 .account-summary {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: 4px;
+  padding: 8px;
   border-radius: 8px;
-  background: var(--n-color-embedded, rgba(128, 128, 128, 0.08));
-  margin-bottom: 14px;
-  font-size: 13px;
+  background: var(--gp-surface-muted, rgba(128, 128, 128, 0.08));
+  font-size: 12px;
 }
 
 .account-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
-.account-label {
-  color: var(--n-text-color-3, #888);
-  min-width: 68px;
+.account-row--muted {
+  font-size: 11px;
+  color: var(--gp-muted, #52525b);
+}
+
+.admin-console-link {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gp-accent, #0f766e);
+  text-decoration: none;
+}
+
+.admin-console-link:hover {
+  text-decoration: underline;
 }
 
 .sync-actions {
-  margin-top: 4px;
+  margin-top: 2px;
 }
 </style>

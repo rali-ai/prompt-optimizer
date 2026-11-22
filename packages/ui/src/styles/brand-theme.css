@@ -180,6 +180,11 @@ body {
   padding-inline: 0;
 }
 
+.gp-desktop-shell--collapsed .gp-sidebar-nav .account-sync-trigger-body,
+.gp-desktop-shell--collapsed .gp-sidebar-nav .account-sync-drawer {
+  display: none !important;
+}
+
 /* Elevated Bespoke Cards & Primary Buttons */
 .main-content-wrapper .n-card {
   border-radius: 16px !important;
