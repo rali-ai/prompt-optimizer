@@ -31,6 +31,7 @@ import path from 'node:path'
 export const LIBRARY_FILES = ['categories.json', 'prompts.json', 'learn.json']
 export const PROMPT_LANGUAGES = ['zh', 'en']
 export const KINDS = ['text', 'image']
+export const TRACKS = ['course', 'pattern']
 // target 决定导入优化器的哪个工作区，也决定提示词是文字类还是图片类。
 export const TARGET_KINDS = { 'basic-user': 'text', 'basic-system': 'text', 'image-text2image': 'image' }
 export const TARGETS = Object.keys(TARGET_KINDS)
@@ -43,7 +44,6 @@ const PROMPT_FIELDS = ['id', 'title', 'category', 'tags', 'summary', 'target', '
 const TEXT_FIELDS = ['title', 'summary', 'prompt', 'variables']
 const LESSON_TEXT_FIELDS = ['title', 'summary', 'sections', 'before', 'after', 'exercise']
 const LESSON_FIELDS = ['id', 'track', ...LESSON_TEXT_FIELDS, 'en']
-export const TRACKS = ['course', 'pattern']
 
 export class LibraryError extends Error {
   constructor(dir, problems) {

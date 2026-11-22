@@ -7,6 +7,9 @@
 - `categories.json`：分类列表。
 - `prompts.json`：提示词列表。
 - `learn.json`：学习教程（方法论章节）。
+- `schema.mjs`：各端读取数据的唯一入口。`loadLibrary(dir)` 按本文的规则解析三个文件，有问题时一次列出全部问题。
+
+改完运行 `node scripts/validate-library.mjs`：结构问题和套话会让它失败，还没有提示词的分类只给提示。再运行 `pnpm miniprogram:data` 重新生成小程序数据。
 
 ## categories.json
 
@@ -49,7 +52,8 @@
 - `id` 只用小写字母、数字和连字符，同时充当优化器的导入码。英文版的导入码是 `<id>-en`，所以不要另起一个以 `-en` 结尾、和已有 id 撞车的 id。
 - `target` 为 `basic-user`（用户提示词）、`basic-system`（系统提示词）或 `image-text2image`（AI 绘图提示词），决定导入优化器的哪个工作区。
 - `prompt` 里的变量写成 `{{变量名}}`，每个变量都要在 `variables` 里列出，列出的变量也都要在 `prompt` 里用到。
-- `en` 必填，是英文版的 `title`、`summary`、`prompt`、`variables`，规则同上；变量名用英文，变量个数要和中文版一致。`tags`、`category`、`target`、`example`、`source` 两种语言共用。
+- `tags` 2 到 4 个，不能为空或重复。`summary` 是一句话，以句末标点结尾。中文标题、英文标题各自不能重复。
+- `en` 必填，是英文版的 `title`、`summary`、`prompt`、`variables`，规则同上；变量名用英文 snake_case，变量个数要和中文版一致。`tags`、`category`、`target`、`example`、`source` 两种语言共用。
 - `source` 可选，改编自外部提示词库时填写：`name` 来源名称，`url` 原文链接（http 或 https），`license` 可选，许可证。网站详情页底部展示为带链接的署名，小程序展示为一行文字。
 
 ## learn.json
