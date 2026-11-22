@@ -79,6 +79,19 @@ export function openDatabase(dbPath) {
       value TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS password_reset_codes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      email TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_reset_codes_email_created
+      ON password_reset_codes(email, created_at DESC);
   `);
 
   const userColumns = db.prepare('PRAGMA table_info(users)').all();
@@ -101,6 +114,27 @@ export function openDatabase(dbPath) {
     ON CONFLICT(key) DO UPDATE SET
       value = excluded.value,
       updated_at = excluded.updated_at
+  `);
+  const stmtDeleteSetting = db.prepare('DELETE FROM app_settings WHERE key = ?');
+  const stmtGetLatestResetCode = db.prepare(`
+    SELECT * FROM password_reset_codes
+    WHERE email = ? AND used_at IS NULL AND expires_at > ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `);
+  const stmtInvalidateUserResetCodes = db.prepare(`
+    UPDATE password_reset_codes
+    SET used_at = ?
+    WHERE user_id = ? AND used_at IS NULL
+  `);
+  const stmtInsertResetCode = db.prepare(`
+    INSERT INTO password_reset_codes (id, user_id, email, code_hash, attempts, expires_at, used_at, created_at)
+    VALUES (?, ?, ?, ?, 0, ?, NULL, ?)
+  `);
+  const stmtIncrementResetAttempts = db.prepare(`
+    UPDATE password_reset_codes
+    SET attempts = attempts + 1
+    WHERE id = ?
   `);
   const stmtInsertUser = db.prepare(`
     INSERT INTO users (id, username, email, password_hash, role, tier, tier_expires_at, disabled, created_at, updated_at)
@@ -285,6 +319,67 @@ export function openDatabase(dbPath) {
       const normalized = Boolean(enabled);
       stmtUpsertSetting.run('membership_enabled', normalized ? '1' : '0', Date.now());
       return normalized;
+    },
+
+    getMailSettings({ resendApiKey = '', mailFrom = '' } = {}) {
+      const dbKeyRow = stmtGetSetting.get('resend_api_key');
+      const dbFromRow = stmtGetSetting.get('mail_from');
+      const apiKey = dbKeyRow ? dbKeyRow.value.trim() : String(resendApiKey || '').trim();
+      const from = dbFromRow ? dbFromRow.value.trim() : String(mailFrom || '').trim();
+      const source = dbKeyRow ? 'db' : apiKey ? 'env' : 'none';
+      return { apiKey, from, source };
+    },
+
+    saveMailSettings({ apiKey, from }) {
+      const now = Date.now();
+      if (apiKey !== undefined) {
+        const cleanKey = String(apiKey ?? '').trim();
+        if (!cleanKey) {
+          stmtDeleteSetting.run('resend_api_key');
+        } else {
+          stmtUpsertSetting.run('resend_api_key', cleanKey, now);
+        }
+      }
+      if (from !== undefined) {
+        const cleanFrom = String(from ?? '').trim();
+        if (!cleanFrom) {
+          stmtDeleteSetting.run('mail_from');
+        } else {
+          stmtUpsertSetting.run('mail_from', cleanFrom, now);
+        }
+      }
+    },
+
+    getLatestActiveResetCode(email, now = Date.now()) {
+      if (!email) return null;
+      return stmtGetLatestResetCode.get(email, now) || null;
+    },
+
+    createPasswordResetCode({ userId, email, codeHash, ttlMs }) {
+      const now = Date.now();
+      const id = crypto.randomUUID();
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        stmtInvalidateUserResetCodes.run(now, userId);
+        stmtInsertResetCode.run(id, userId, email, codeHash, now + ttlMs, now);
+        db.exec('COMMIT');
+        return { id, expiresAt: now + ttlMs, createdAt: now };
+      } catch (err) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          // ignore
+        }
+        throw err;
+      }
+    },
+
+    incrementResetCodeAttempts(id) {
+      stmtIncrementResetAttempts.run(id);
+    },
+
+    markResetCodesUsed(userId) {
+      stmtInvalidateUserResetCodes.run(Date.now(), userId);
     },
   };
 }

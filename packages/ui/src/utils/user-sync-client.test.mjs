@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   UserSyncError,
   changePassword,
+  confirmPasswordReset,
   getConfig,
   getMe,
   login,
@@ -10,6 +11,7 @@ import {
   pullSync,
   pushSync,
   register,
+  requestPasswordReset,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
   updateProfile,
@@ -190,6 +192,12 @@ test('register with optional email, updateProfile, and changePassword send expec
   const u3 = await changePassword('Password123!', 'NewPass456!', '/user-api', fetchMock)
   assert.equal(u3.id, 'u2')
 
+  const r1 = await requestPasswordReset('bob@example.com', '/user-api', fetchMock)
+  assert.equal(r1.ok, true)
+
+  const r2 = await confirmPasswordReset('bob@example.com', '123456', 'ResetPass789!', '/user-api', fetchMock)
+  assert.equal(r2.ok, true)
+
   assert.deepEqual(calls, [
     {
       url: '/user-api/register',
@@ -205,6 +213,16 @@ test('register with optional email, updateProfile, and changePassword send expec
       url: '/user-api/me/password',
       method: 'POST',
       body: { currentPassword: 'Password123!', newPassword: 'NewPass456!' },
+    },
+    {
+      url: '/user-api/password-reset/request',
+      method: 'POST',
+      body: { email: 'bob@example.com' },
+    },
+    {
+      url: '/user-api/password-reset/confirm',
+      method: 'POST',
+      body: { email: 'bob@example.com', code: '123456', newPassword: 'ResetPass789!' },
     },
   ])
 })

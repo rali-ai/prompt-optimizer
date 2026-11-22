@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_MAIL_FROM } from './mailer.js';
 
 function parseBool(value, fallback = false) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -49,5 +50,9 @@ export function loadConfig(env = process.env) {
     rateLimitMax: parsePositiveInt(env.RATE_LIMIT_MAX, 20),
     rateLimitWindowMs: parsePositiveInt(env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
     sessionTtlMs: parsePositiveInt(env.SESSION_TTL_MS, 30 * 24 * 60 * 60 * 1000),
+    resendApiKey: (env.RESEND_API_KEY && env.RESEND_API_KEY.trim()) || '',
+    mailFrom: (env.MAIL_FROM && env.MAIL_FROM.trim()) || DEFAULT_MAIL_FROM,
+    passwordResetTtlMs: parsePositiveInt(env.PASSWORD_RESET_TTL_MS, 15 * 60 * 1000),
+    passwordResetCooldownMs: parsePositiveInt(env.PASSWORD_RESET_COOLDOWN_MS, 60 * 1000),
   };
 }

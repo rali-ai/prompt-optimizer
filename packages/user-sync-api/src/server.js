@@ -21,6 +21,12 @@ import {
 import { createRateLimiter } from './rate-limit.js';
 import { MAX_SYNC_BYTES, PayloadError, sanitizeSyncPayload } from './sanitize.js';
 import { renderAdminHtml } from './admin-page.js';
+import {
+  DEFAULT_MAIL_FROM,
+  maskApiKey,
+  sendPasswordResetEmail,
+  sendTestEmail,
+} from './mailer.js';
 
 const MAX_AUTH_BODY_BYTES = 16 * 1024;
 const MAX_SYNC_BODY_BYTES = MAX_SYNC_BYTES + 256 * 1024;
@@ -148,7 +154,22 @@ function validateCredentials(body) {
   return { username, password, email };
 }
 
-export function createApp(config) {
+const MAX_RESET_ATTEMPTS = 5;
+
+function hashResetCode(secret, userId, email, code) {
+  return crypto
+    .createHmac('sha256', secret)
+    .update(`${userId}:${email}:${code}`)
+    .digest('hex');
+}
+
+function timingSafeHexEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+}
+
+export function createApp(config, options = {}) {
+  const fetchImpl = options.fetchImpl || fetch;
   const db = openDatabase(config.dbPath);
   if (config.adminUsername && config.adminPassword) {
     db.bootstrapAdmin({
@@ -227,6 +248,32 @@ export function createApp(config) {
     return db.getMembershipEnabled(Boolean(config.membershipEnabled));
   }
 
+  function resolveMailConfig() {
+    const settings = db.getMailSettings({
+      resendApiKey: config.resendApiKey,
+      mailFrom: config.mailFrom || DEFAULT_MAIL_FROM,
+    });
+    const from = settings.from || DEFAULT_MAIL_FROM;
+    return {
+      apiKey: settings.apiKey,
+      from,
+      source: settings.source,
+      enabled: Boolean(settings.apiKey && from),
+    };
+  }
+
+  function buildAdminSettingsPayload() {
+    const mail = resolveMailConfig();
+    return {
+      membershipEnabled: isMembershipEnabled(),
+      emailResetEnabled: mail.enabled,
+      resendConfigured: mail.enabled,
+      resendKeyHint: maskApiKey(mail.apiKey),
+      mailFrom: mail.from,
+      mailSource: mail.source,
+    };
+  }
+
   async function handleRequest(req, res) {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     const pathname = url.pathname;
@@ -237,9 +284,11 @@ export function createApp(config) {
     }
 
     if (method === 'GET' && pathname === '/user-api/config') {
+      const mail = resolveMailConfig();
       return sendJson(res, 200, {
         membershipEnabled: isMembershipEnabled(),
         registrationEnabled: true,
+        emailResetEnabled: mail.enabled,
       });
     }
 
@@ -306,6 +355,111 @@ export function createApp(config) {
         secure: isSecureRequest(req, config.cookieSecure),
       });
       return sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearCookie });
+    }
+
+    if (method === 'POST' && pathname === '/user-api/password-reset/request') {
+      if (!checkRateLimit(req, res)) return;
+      const mail = resolveMailConfig();
+      if (!mail.enabled) {
+        return sendJson(res, 503, { error: '暂未配置邮件发信服务，请联系管理员重置密码' });
+      }
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      const email = validateOptionalEmail(body.email);
+      if (!email) {
+        throw new PayloadError('请输入有效的绑定邮箱地址', 400);
+      }
+
+      const genericMessage = '如果该邮箱已绑定账号，6 位验证码已发送，请查收邮件（含垃圾箱）';
+      const userRow = db.findUserByEmail(email);
+      if (!userRow || userRow.disabled) {
+        return sendJson(res, 200, { ok: true, message: genericMessage });
+      }
+
+      const now = Date.now();
+      const cooldownMs = config.passwordResetCooldownMs || 60 * 1000;
+      const recent = db.getLatestActiveResetCode(email, now);
+      if (recent && now - recent.created_at < cooldownMs) {
+        const waitSec = Math.max(1, Math.ceil((cooldownMs - (now - recent.created_at)) / 1000));
+        return sendJson(
+          res,
+          429,
+          { error: `发送过于频繁，请 ${waitSec} 秒后再试` },
+          { 'Retry-After': String(waitSec) },
+        );
+      }
+
+      const code = String(crypto.randomInt(100000, 1000000));
+      const ttlMs = config.passwordResetTtlMs || 15 * 60 * 1000;
+      const expiresMinutes = Math.max(1, Math.round(ttlMs / 60000));
+      try {
+        await sendPasswordResetEmail({
+          apiKey: mail.apiKey,
+          from: mail.from,
+          to: email,
+          username: userRow.username,
+          code,
+          expiresMinutes,
+          fetchImpl,
+        });
+      } catch (err) {
+        console.error('[user-sync-api] password reset email failed:', err?.message || err);
+        return sendJson(res, 502, {
+          error: '验证码邮件发送失败，请稍后重试或联系管理员检查发信配置',
+        });
+      }
+
+      db.createPasswordResetCode({
+        userId: userRow.id,
+        email,
+        codeHash: hashResetCode(config.secret, userRow.id, email, code),
+        ttlMs,
+      });
+
+      return sendJson(res, 200, { ok: true, message: genericMessage });
+    }
+
+    if (method === 'POST' && pathname === '/user-api/password-reset/confirm') {
+      if (!checkRateLimit(req, res)) return;
+      const mail = resolveMailConfig();
+      if (!mail.enabled) {
+        return sendJson(res, 503, { error: '暂未配置邮件发信服务，请联系管理员重置密码' });
+      }
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      const email = validateOptionalEmail(body.email);
+      const code = typeof body.code === 'string' ? body.code.trim() : '';
+      const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+      if (!email) {
+        throw new PayloadError('请输入有效的绑定邮箱地址', 400);
+      }
+      if (!/^\d{6}$/.test(code)) {
+        throw new PayloadError('请输入 6 位数字验证码', 400);
+      }
+      if (newPassword.length < 8 || newPassword.length > 128) {
+        throw new PayloadError('新密码长度需为 8 到 128 个字符', 400);
+      }
+
+      const record = db.getLatestActiveResetCode(email, Date.now());
+      if (!record || record.attempts >= MAX_RESET_ATTEMPTS) {
+        return sendJson(res, 400, { error: '验证码无效、已过期或错误次数过多，请重新获取' });
+      }
+
+      const expectedHash = hashResetCode(config.secret, record.user_id, email, code);
+      if (!timingSafeHexEqual(record.code_hash, expectedHash)) {
+        db.incrementResetCodeAttempts(record.id);
+        return sendJson(res, 400, { error: '验证码不正确，请检查后重试' });
+      }
+
+      const userRow = db.findUserById(record.user_id);
+      if (!userRow) {
+        return sendJson(res, 404, { error: '账号不存在' });
+      }
+      if (userRow.disabled) {
+        return sendJson(res, 403, { error: '账号已被停用' });
+      }
+
+      db.updateUserPassword(userRow.id, hashPassword(newPassword));
+      db.markResetCodesUsed(userRow.id);
+      return sendJson(res, 200, { ok: true, message: '密码已重置，请使用新密码登录' });
     }
 
     if (method === 'GET' && pathname === '/user-api/me') {
@@ -400,11 +554,15 @@ export function createApp(config) {
       const userRow = authenticate(req);
       const authenticated = Boolean(userRow && !userRow.disabled);
       const isAdmin = Boolean(authenticated && userRow.role === 'admin');
+      const settings = buildAdminSettingsPayload();
       const html = renderAdminHtml({
         authenticated,
         isAdmin,
         username: userRow?.username || '',
-        membershipEnabled: isMembershipEnabled(),
+        membershipEnabled: settings.membershipEnabled,
+        emailResetEnabled: settings.emailResetEnabled,
+        resendKeyHint: settings.resendKeyHint,
+        mailFrom: settings.mailFrom,
       });
       return sendHtml(res, 200, html, method === 'HEAD');
     }
@@ -412,29 +570,91 @@ export function createApp(config) {
     if (method === 'GET' && pathname === '/user-api/admin/settings') {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
-      return sendJson(res, 200, {
-        membershipEnabled: isMembershipEnabled(),
-      });
+      return sendJson(res, 200, buildAdminSettingsPayload());
     }
 
     if (method === 'PATCH' && pathname === '/user-api/admin/settings') {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
       const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
-      if (typeof body.membershipEnabled !== 'boolean') {
-        throw new PayloadError('membershipEnabled 必须为布尔值', 400);
+      let touched = false;
+
+      if (body.membershipEnabled !== undefined) {
+        if (typeof body.membershipEnabled !== 'boolean') {
+          throw new PayloadError('membershipEnabled 必须为布尔值', 400);
+        }
+        db.setMembershipEnabled(body.membershipEnabled);
+        touched = true;
       }
-      const nextValue = db.setMembershipEnabled(body.membershipEnabled);
-      return sendJson(res, 200, {
-        membershipEnabled: nextValue,
-      });
+
+      const mailPatch = {};
+      if (body.resendApiKey !== undefined) {
+        if (typeof body.resendApiKey !== 'string') {
+          throw new PayloadError('resendApiKey 必须为字符串', 400);
+        }
+        const trimmedKey = body.resendApiKey.trim();
+        if (trimmedKey && trimmedKey.length > 256) {
+          throw new PayloadError('resendApiKey 长度无效', 400);
+        }
+        mailPatch.apiKey = trimmedKey;
+        touched = true;
+      }
+
+      if (body.mailFrom !== undefined) {
+        if (typeof body.mailFrom !== 'string') {
+          throw new PayloadError('mailFrom 必须为字符串', 400);
+        }
+        const trimmedFrom = body.mailFrom.trim();
+        if (trimmedFrom.length > 256) {
+          throw new PayloadError('发件人地址过长', 400);
+        }
+        mailPatch.from = trimmedFrom;
+        touched = true;
+      }
+
+      if (!touched) {
+        throw new PayloadError('请提供至少一个可更新的设置字段', 400);
+      }
+
+      if (mailPatch.apiKey !== undefined || mailPatch.from !== undefined) {
+        db.saveMailSettings(mailPatch);
+      }
+
+      return sendJson(res, 200, buildAdminSettingsPayload());
+    }
+
+    if (method === 'POST' && pathname === '/user-api/admin/test-email') {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const mail = resolveMailConfig();
+      if (!mail.enabled) {
+        return sendJson(res, 400, { error: '请先配置并保存 Resend API Key 与发件人地址' });
+      }
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      const to = validateOptionalEmail(body.to);
+      if (!to) {
+        throw new PayloadError('请输入有效的测试收件邮箱地址', 400);
+      }
+      try {
+        const sent = await sendTestEmail({
+          apiKey: mail.apiKey,
+          from: mail.from,
+          to,
+          fetchImpl,
+        });
+        return sendJson(res, 200, { ok: true, id: sent.id, to });
+      } catch (err) {
+        return sendJson(res, 502, {
+          error: err instanceof Error ? err.message : '测试邮件发送失败',
+        });
+      }
     }
 
     if (method === 'GET' && pathname === '/user-api/admin/users') {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
       return sendJson(res, 200, {
-        membershipEnabled: isMembershipEnabled(),
+        ...buildAdminSettingsPayload(),
         users: db.listUsersWithSync(),
       });
     }

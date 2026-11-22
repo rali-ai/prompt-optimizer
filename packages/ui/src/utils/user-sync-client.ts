@@ -1,6 +1,7 @@
 export interface UserSyncConfig {
   membershipEnabled: boolean
   registrationEnabled: boolean
+  emailResetEnabled?: boolean
 }
 
 export interface SyncUser {
@@ -265,6 +266,38 @@ export async function changePassword(
     fetchImpl,
   )
   return res.user
+}
+
+export async function requestPasswordReset(
+  email: string,
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; message: string }> {
+  return requestJson<{ ok: boolean; message: string }>(
+    joinUrl(baseUrl, '/password-reset/request'),
+    {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    },
+    fetchImpl,
+  )
+}
+
+export async function confirmPasswordReset(
+  email: string,
+  code: string,
+  newPassword: string,
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; message: string }> {
+  return requestJson<{ ok: boolean; message: string }>(
+    joinUrl(baseUrl, '/password-reset/confirm'),
+    {
+      method: 'POST',
+      body: JSON.stringify({ email, code, newPassword }),
+    },
+    fetchImpl,
+  )
 }
 
 export async function login(

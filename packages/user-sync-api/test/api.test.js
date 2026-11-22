@@ -62,6 +62,7 @@ test('healthz, default config (MEMBERSHIP_ENABLED=false), and auto-persisted .se
     assert.deepEqual(await cfgRes.json(), {
       membershipEnabled: false,
       registrationEnabled: true,
+      emailResetEnabled: false,
     });
   } finally {
     await ctx.cleanup();
@@ -436,13 +437,14 @@ test('admin membership toggle persists across restarts and updates /config and /
       body: JSON.stringify({ membershipEnabled: true }),
     });
     assert.equal(enableRes.status, 200);
-    assert.deepEqual(await enableRes.json(), { membershipEnabled: true });
+    assert.equal((await enableRes.json()).membershipEnabled, true);
 
     // /config and /admin/users reflect enabled state immediately
     const cfgAfterEnable = await fetch(`${base1}/user-api/config`);
     assert.deepEqual(await cfgAfterEnable.json(), {
       membershipEnabled: true,
       registrationEnabled: true,
+      emailResetEnabled: false,
     });
     const usersAfterEnable = await fetch(`${base1}/user-api/admin/users`, {
       headers: { Cookie: adminCookie },
@@ -467,6 +469,7 @@ test('admin membership toggle persists across restarts and updates /config and /
     assert.deepEqual(await cfgAfterRestart.json(), {
       membershipEnabled: true,
       registrationEnabled: true,
+      emailResetEnabled: false,
     });
 
     // Toggle back to false
@@ -482,12 +485,13 @@ test('admin membership toggle persists across restarts and updates /config and /
       body: JSON.stringify({ membershipEnabled: false }),
     });
     assert.equal(disableRes.status, 200);
-    assert.deepEqual(await disableRes.json(), { membershipEnabled: false });
+    assert.equal((await disableRes.json()).membershipEnabled, false);
 
     const cfgFinal = await fetch(`${base2}/user-api/config`);
     assert.deepEqual(await cfgFinal.json(), {
       membershipEnabled: false,
       registrationEnabled: true,
+      emailResetEnabled: false,
     });
   } finally {
     if (app1) await app1.close();
@@ -679,6 +683,197 @@ test('optional email registration, profile update, self password change, admin p
     assert.equal(listedDave.email, 'dave@example.com');
   } finally {
     await ctxApp.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Resend mail config via admin UI, test-email, password-reset request/confirm, cooldown, lockout & single-use', async () => {
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'mail', 'users.db');
+  const sentEmails = [];
+  const mockFetch = async (url, init) => {
+    assert.equal(url, 'https://api.resend.com/emails');
+    const authHeader = init?.headers?.Authorization || '';
+    const payload = JSON.parse(String(init?.body || '{}'));
+    sentEmails.push({ authHeader, payload });
+    return new Response(JSON.stringify({ id: `re_msg_${sentEmails.length}` }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  const app = createApp(
+    loadConfig({
+      USER_SYNC_HOST: '127.0.0.1',
+      USER_SYNC_PORT: '0',
+      USER_SYNC_DB_PATH: dbPath,
+      ADMIN_USERNAME: 'root_admin',
+      ADMIN_PASSWORD: 'AdminPassword123!',
+      RATE_LIMIT_MAX: '50',
+      RATE_LIMIT_WINDOW_MS: '60000',
+      PASSWORD_RESET_COOLDOWN_MS: '60000',
+    }),
+    { fetchImpl: mockFetch },
+  );
+
+  try {
+    const addr = await app.listen();
+    const baseUrl = `http://${addr.host}:${addr.port}`;
+
+    // Before configuring Resend: password-reset returns 503
+    const unconfiguredReq = await fetch(`${baseUrl}/user-api/password-reset/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'erin@example.com' }),
+    });
+    assert.equal(unconfiguredReq.status, 503);
+
+    // Register user with email
+    const regRes = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'erin',
+        email: 'erin@example.com',
+        password: 'OldPassword123!',
+      }),
+    });
+    assert.equal(regRes.status, 201);
+
+    // Login as admin and configure Resend via PATCH /admin/settings
+    const adminLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    const saveMailRes = await fetch(`${baseUrl}/user-api/admin/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        resendApiKey: 're_live_secret_987654321',
+        mailFrom: '高词 · GoPrmpt <noreply@goprmpt.com>',
+      }),
+    });
+    assert.equal(saveMailRes.status, 200);
+    const savedSettings = await saveMailRes.json();
+    assert.equal(savedSettings.emailResetEnabled, true);
+    assert.equal(savedSettings.resendKeyHint, 're_l••••4321');
+    assert.equal(JSON.stringify(savedSettings).includes('re_live_secret_987654321'), false);
+
+    // Public /config now exposes emailResetEnabled: true
+    const cfgRes = await fetch(`${baseUrl}/user-api/config`);
+    assert.equal((await cfgRes.json()).emailResetEnabled, true);
+
+    // Admin sends a test email
+    const testMailRes = await fetch(`${baseUrl}/user-api/admin/test-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ to: 'owner@example.com' }),
+    });
+    assert.equal(testMailRes.status, 200);
+    assert.equal(sentEmails.length, 1);
+    assert.equal(sentEmails[0].authHeader, 'Bearer re_live_secret_987654321');
+    assert.deepEqual(sentEmails[0].payload.to, ['owner@example.com']);
+
+    // Unknown email still returns 200 anti-enumeration and sends NO email
+    const ghostRes = await fetch(`${baseUrl}/user-api/password-reset/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'nobody@example.com' }),
+    });
+    assert.equal(ghostRes.status, 200);
+    assert.equal(sentEmails.length, 1);
+
+    // Known email sends a 6-digit code via Resend
+    const reqRes = await fetch(`${baseUrl}/user-api/password-reset/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'erin@example.com' }),
+    });
+    assert.equal(reqRes.status, 200);
+    assert.equal(sentEmails.length, 2);
+    const codeMatch = sentEmails[1].payload.text.match(/(\d{6})/);
+    assert.ok(codeMatch, 'reset email should contain a 6-digit code');
+    const code = codeMatch[1];
+
+    // Raw DB must never store plaintext 6-digit code
+    const rawResetRow = app.db.raw
+      .prepare('SELECT code_hash FROM password_reset_codes WHERE email = ?')
+      .get('erin@example.com');
+    assert.ok(rawResetRow);
+    assert.equal(rawResetRow.code_hash.includes(code), false);
+
+    // Immediate second request hits 60s cooldown -> 429
+    const cooldownRes = await fetch(`${baseUrl}/user-api/password-reset/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'erin@example.com' }),
+    });
+    assert.equal(cooldownRes.status, 429);
+
+    // Wrong code -> 400
+    const wrongConfirm = await fetch(`${baseUrl}/user-api/password-reset/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'erin@example.com',
+        code: code === '000000' ? '111111' : '000000',
+        newPassword: 'ResetPassword789!',
+      }),
+    });
+    assert.equal(wrongConfirm.status, 400);
+
+    // Correct code -> 200 and updates password
+    const okConfirm = await fetch(`${baseUrl}/user-api/password-reset/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'erin@example.com',
+        code,
+        newPassword: 'ResetPassword789!',
+      }),
+    });
+    assert.equal(okConfirm.status, 200);
+
+    // Replay same code -> 400
+    const replayConfirm = await fetch(`${baseUrl}/user-api/password-reset/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'erin@example.com',
+        code,
+        newPassword: 'AnotherPassword999!',
+      }),
+    });
+    assert.equal(replayConfirm.status, 400);
+
+    // Old password rejected, new password succeeds
+    const oldLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'erin', password: 'OldPassword123!' }),
+    });
+    assert.equal(oldLogin.status, 401);
+
+    const newLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'erin@example.com', password: 'ResetPassword789!' }),
+    });
+    assert.equal(newLogin.status, 200);
+
+    // Clearing key disables emailResetEnabled again
+    const clearRes = await fetch(`${baseUrl}/user-api/admin/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ resendApiKey: '' }),
+    });
+    assert.equal(clearRes.status, 200);
+    assert.equal((await clearRes.json()).emailResetEnabled, false);
+  } finally {
+    await app.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

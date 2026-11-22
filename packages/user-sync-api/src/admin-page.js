@@ -30,9 +30,18 @@ const BRAND_LOGO_SVG = `<svg width="30" height="30" viewBox="0 0 64 64" fill="no
   <path d="M46.5 12.5L48.3 18.2L54 20L48.3 21.8L46.5 27.5L44.7 21.8L39 20L44.7 18.2Z" fill="url(#gp-admin-copper)"/>
 </svg>`;
 
-export function renderAdminHtml({ authenticated, isAdmin, username, membershipEnabled }) {
+export function renderAdminHtml({
+  authenticated,
+  isAdmin,
+  username,
+  membershipEnabled,
+  emailResetEnabled = false,
+  resendKeyHint = '',
+  mailFrom = '高词 · GoPrmpt <noreply@goprmpt.com>',
+}) {
   const title = '高词 · GoPrmpt 用户与会员管理后台';
   const enabledFlag = Boolean(membershipEnabled);
+  const mailEnabledFlag = Boolean(emailResetEnabled);
   const statusBadge = enabledFlag
     ? '<span id="topMembershipBadge" class="badge badge-pro">会员体系：已启用</span>'
     : '<span id="topMembershipBadge" class="badge badge-free">会员体系：未启用（全站免费开放）</span>';
@@ -126,6 +135,57 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
         </div>
       </section>
 
+      <section class="card mail-card" id="mailSettingsCard">
+        <div class="card-head" style="margin-bottom:14px;">
+          <div>
+            <div class="switch-eyebrow">Resend 邮件发信通道</div>
+            <h2>邮箱验证码自助找回密码</h2>
+            <p class="muted" id="mailStatusDesc">
+              ${
+                mailEnabledFlag
+                  ? `已启用 Resend 发信（密钥 ${escapeHtml(resendKeyHint || '已保存')}），工作台与管理后台登录页已自动开放「忘记密码」邮箱验证重置。`
+                  : '尚未配置 Resend API Key：保存密钥并验证发信域名后，工作台登录页将自动开启「忘记密码」邮箱验证码找回。'
+              }
+            </p>
+          </div>
+          <span id="mailStatusBadge" class="badge ${mailEnabledFlag ? 'badge-ok' : 'badge-free'}">
+            ${mailEnabledFlag ? '发信通道：已启用' : '发信通道：未配置'}
+          </span>
+        </div>
+
+        <form id="mailSettingsForm" class="mail-form-grid">
+          <label>Resend API Key
+            <input
+              id="resendApiKeyInput"
+              type="password"
+              autocomplete="off"
+              placeholder="${mailEnabledFlag ? `当前已保存 ${escapeHtml(resendKeyHint)}，留空则保持不变` : '粘贴 re_ 开头的 Resend API Key'}"
+            />
+          </label>
+          <label>发件人地址（需与 Resend 已验证域名一致）
+            <input
+              id="mailFromInput"
+              type="text"
+              value="${escapeHtml(mailFrom)}"
+              placeholder="高词 · GoPrmpt <noreply@goprmpt.com>"
+            />
+          </label>
+          <div class="mail-form-actions">
+            <button id="saveMailBtn" class="btn btn-primary" type="submit">保存发信配置</button>
+            <button id="clearMailKeyBtn" class="btn btn-danger" type="button" ${mailEnabledFlag ? '' : 'style="display:none"'}>停用并清空 Key</button>
+          </div>
+        </form>
+
+        <div class="mail-test-row">
+          <input id="testMailToInput" type="email" class="search-input" style="flex:1;min-width:220px;" placeholder="输入你的收件邮箱测试发信（如 123@qq.com）" />
+          <button id="sendTestMailBtn" class="btn" type="button" ${mailEnabledFlag ? '' : 'disabled'}>发送测试邮件</button>
+        </div>
+
+        <div class="mail-guide">
+          <span>配置步骤：1. 登录 <a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer">resend.com</a> 添加域名 <code>goprmpt.com</code> 并把生成的 DNS 记录加到域名解析中 → 2. 在 <a href="https://resend.com/api-keys" target="_blank" rel="noopener noreferrer">API Keys</a> 新建只含 Sending access 的密钥粘贴到上方保存 → 3. 点击「发送测试邮件」确认收到即完成。</span>
+        </div>
+      </section>
+
       <section class="stats-grid" aria-label="运营统计概览">
         <div class="stat-card">
           <div class="stat-label">注册用户总数</div>
@@ -209,6 +269,13 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
       const tempPwdBannerEl = document.getElementById('tempPwdBanner');
       const tempPwdTitleEl = document.getElementById('tempPwdTitle');
       const tempPwdCodeEl = document.getElementById('tempPwdCode');
+      const mailStatusBadgeEl = document.getElementById('mailStatusBadge');
+      const mailStatusDescEl = document.getElementById('mailStatusDesc');
+      const resendApiKeyInputEl = document.getElementById('resendApiKeyInput');
+      const mailFromInputEl = document.getElementById('mailFromInput');
+      const clearMailKeyBtnEl = document.getElementById('clearMailKeyBtn');
+      const sendTestMailBtnEl = document.getElementById('sendTestMailBtn');
+      const testMailToInputEl = document.getElementById('testMailToInput');
       let latestTempPassword = '';
 
       let currentMembershipEnabled = ${enabledFlag ? 'true' : 'false'};
@@ -254,6 +321,23 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
         topBadgeEl.textContent = currentMembershipEnabled
           ? '会员体系：已启用'
           : '会员体系：未启用（全站免费开放）';
+      }
+
+      function renderMailState(info) {
+        const enabled = Boolean(info.emailResetEnabled);
+        mailStatusBadgeEl.className = enabled ? 'badge badge-ok' : 'badge badge-free';
+        mailStatusBadgeEl.textContent = enabled ? '发信通道：已启用' : '发信通道：未配置';
+        mailStatusDescEl.textContent = enabled
+          ? '已启用 Resend 发信（密钥 ' + (info.resendKeyHint || '已保存') + '），工作台与管理后台登录页已自动开放「忘记密码」邮箱验证重置。'
+          : '尚未配置 Resend API Key：保存密钥并验证发信域名后，工作台登录页将自动开启「忘记密码」邮箱验证码找回。';
+        resendApiKeyInputEl.placeholder = enabled
+          ? '当前已保存 ' + (info.resendKeyHint || '') + '，留空则保持不变'
+          : '粘贴 re_ 开头的 Resend API Key';
+        if (info.mailFrom) {
+          mailFromInputEl.value = info.mailFrom;
+        }
+        clearMailKeyBtnEl.style.display = enabled ? 'inline-flex' : 'none';
+        sendTestMailBtnEl.disabled = !enabled;
       }
 
       function renderStats(users) {
@@ -346,6 +430,7 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
             return;
           }
           renderMembershipState(Boolean(body.membershipEnabled));
+          renderMailState(body);
           allUsers = Array.isArray(body.users) ? body.users : [];
           renderStats(allUsers);
           renderRows();
@@ -521,6 +606,96 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
         tempPwdBannerEl.style.display = 'none';
       });
 
+      document.getElementById('mailSettingsForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const saveBtn = document.getElementById('saveMailBtn');
+        const keyVal = resendApiKeyInputEl.value.trim();
+        const fromVal = mailFromInputEl.value.trim();
+        const payload = { mailFrom: fromVal };
+        if (keyVal) {
+          payload.resendApiKey = keyVal;
+        }
+        saveBtn.disabled = true;
+        try {
+          const res = await fetch('/user-api/admin/settings', {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '保存邮件配置失败', true);
+            return;
+          }
+          resendApiKeyInputEl.value = '';
+          renderMailState(body);
+          showNotice(
+            body.emailResetEnabled
+              ? 'Resend 发信配置已保存并立即生效，建议立刻发一封测试邮件确认送达。'
+              : '发件人地址已更新（当前未配置 API Key，邮箱找回暂未开启）。'
+          );
+        } catch (err) {
+          showNotice('网络异常：' + err.message, true);
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+
+      clearMailKeyBtnEl.addEventListener('click', async () => {
+        if (!window.confirm('确定清空已保存的 Resend API Key 吗？清空后前端将暂停邮箱自助找回密码。')) {
+          return;
+        }
+        clearMailKeyBtnEl.disabled = true;
+        try {
+          const res = await fetch('/user-api/admin/settings', {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resendApiKey: '' }),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '清空失败', true);
+            return;
+          }
+          resendApiKeyInputEl.value = '';
+          renderMailState(body);
+          showNotice('已清空数据库保存的 Resend API Key。');
+        } catch (err) {
+          showNotice('网络异常：' + err.message, true);
+        } finally {
+          clearMailKeyBtnEl.disabled = false;
+        }
+      });
+
+      sendTestMailBtnEl.addEventListener('click', async () => {
+        const to = testMailToInputEl.value.trim();
+        if (!to) {
+          showNotice('请先输入测试收件邮箱地址', true);
+          return;
+        }
+        sendTestMailBtnEl.disabled = true;
+        try {
+          const res = await fetch('/user-api/admin/test-email', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to }),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '测试邮件发送失败', true);
+            return;
+          }
+          showNotice('测试邮件已发往 ' + body.to + '，请检查收件箱（或垃圾箱）。');
+        } catch (err) {
+          showNotice('网络异常：' + err.message, true);
+        } finally {
+          sendTestMailBtnEl.disabled = false;
+        }
+      });
+
       document.getElementById('refreshBtn').addEventListener('click', loadUsers);
       document.getElementById('logoutBtn').addEventListener('click', async () => {
         await fetch('/user-api/logout', { method: 'POST', credentials: 'same-origin' });
@@ -554,6 +729,27 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
           </label>
           <button type="submit" class="btn btn-primary" style="width:100%;height:40px;margin-top:6px;">登录管理后台</button>
         </form>
+        ${
+          mailEnabledFlag
+            ? `
+        <div class="login-reset-toggle">
+          <button id="toggleResetBtn" type="button" class="link-btn">忘记密码？用绑定邮箱重置</button>
+        </div>
+        <form id="resetForm" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+          <label>已绑定的管理员邮箱
+            <input id="resetEmail" type="email" autocomplete="email" placeholder="name@example.com" required />
+          </label>
+          <div class="reset-code-row">
+            <input id="resetCode" type="text" inputmode="numeric" maxlength="6" placeholder="6 位验证码" />
+            <button id="sendResetCodeBtn" type="button" class="btn btn-sm">发送验证码</button>
+          </div>
+          <label>新密码（至少 8 位）
+            <input id="resetNewPwd" type="password" autocomplete="new-password" minlength="8" required />
+          </label>
+          <button id="confirmResetBtn" type="submit" class="btn btn-primary" style="width:100%;height:38px;">确认重置密码</button>
+        </form>`
+            : ''
+        }
         <div class="login-footer">
           <a href="/">← 返回高词工作台</a>
         </div>
@@ -562,6 +758,11 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
     <script>
       const form = document.getElementById('loginForm');
       const notice = document.getElementById('loginNotice');
+      function showLoginNotice(msg, isError) {
+        notice.textContent = msg;
+        notice.className = isError ? 'notice notice-error' : 'notice notice-ok';
+        notice.style.display = 'block';
+      }
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         notice.style.display = 'none';
@@ -576,24 +777,82 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
           });
           const body = await res.json();
           if (!res.ok) {
-            notice.textContent = body.error || '登录失败';
-            notice.className = 'notice notice-error';
-            notice.style.display = 'block';
+            showLoginNotice(body.error || '登录失败', true);
             return;
           }
           if (body.user?.role !== 'admin') {
-            notice.textContent = '该账号没有管理员权限';
-            notice.className = 'notice notice-error';
-            notice.style.display = 'block';
+            showLoginNotice('该账号没有管理员权限', true);
             return;
           }
           location.reload();
         } catch (err) {
-          notice.textContent = '网络异常：' + err.message;
-          notice.className = 'notice notice-error';
-          notice.style.display = 'block';
+          showLoginNotice('网络异常：' + err.message, true);
         }
       });
+
+      const toggleResetBtn = document.getElementById('toggleResetBtn');
+      const resetForm = document.getElementById('resetForm');
+      if (toggleResetBtn && resetForm) {
+        toggleResetBtn.addEventListener('click', () => {
+          const open = resetForm.style.display !== 'none';
+          resetForm.style.display = open ? 'none' : 'block';
+          toggleResetBtn.textContent = open ? '忘记密码？用绑定邮箱重置' : '收起邮箱重置';
+        });
+        const sendCodeBtn = document.getElementById('sendResetCodeBtn');
+        sendCodeBtn.addEventListener('click', async () => {
+          const email = document.getElementById('resetEmail').value.trim();
+          if (!email) {
+            showLoginNotice('请输入已绑定的邮箱地址', true);
+            return;
+          }
+          sendCodeBtn.disabled = true;
+          try {
+            const res = await fetch('/user-api/password-reset/request', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email }),
+            });
+            const body = await res.json();
+            if (!res.ok) {
+              showLoginNotice(body.error || '发送失败', true);
+            } else {
+              showLoginNotice(body.message || '验证码已发送，请查收邮件。', false);
+            }
+          } catch (err) {
+            showLoginNotice('网络异常：' + err.message, true);
+          } finally {
+            sendCodeBtn.disabled = false;
+          }
+        });
+        resetForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const email = document.getElementById('resetEmail').value.trim();
+          const code = document.getElementById('resetCode').value.trim();
+          const newPassword = document.getElementById('resetNewPwd').value;
+          const submitBtn = document.getElementById('confirmResetBtn');
+          submitBtn.disabled = true;
+          try {
+            const res = await fetch('/user-api/password-reset/confirm', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email, code, newPassword }),
+            });
+            const body = await res.json();
+            if (!res.ok) {
+              showLoginNotice(body.error || '重置失败', true);
+              return;
+            }
+            resetForm.reset();
+            resetForm.style.display = 'none';
+            toggleResetBtn.textContent = '忘记密码？用绑定邮箱重置';
+            showLoginNotice('密码已重置，请使用新密码登录。', false);
+          } catch (err) {
+            showLoginNotice('网络异常：' + err.message, true);
+          } finally {
+            submitBtn.disabled = false;
+          }
+        });
+      }
     </script>`;
 
   return `<!doctype html>
@@ -870,6 +1129,22 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
     .login-footer { margin-top: 16px; text-align: center; font-size: 13px; }
     .login-footer a { color: var(--accent); text-decoration: none; font-weight: 500; }
     .login-footer a:hover { text-decoration: underline; }
+    .login-reset-toggle { margin-top: 12px; text-align: center; }
+    .link-btn { background: none; border: none; padding: 0; color: var(--accent); font-size: 13px; font-weight: 500; cursor: pointer; }
+    .link-btn:hover { text-decoration: underline; }
+    .reset-code-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    .reset-code-row input { margin-top: 0; flex: 1; }
+    .mail-form-grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
+    .mail-form-grid label { margin: 0; }
+    .mail-form-actions { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+    .mail-test-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+    .mail-guide { margin-top: 12px; font-size: 12px; line-height: 1.6; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+    .mail-guide a { color: var(--accent); font-weight: 500; text-decoration: none; }
+    .mail-guide a:hover { text-decoration: underline; }
+    .mail-guide code { padding: 1px 5px; border-radius: 5px; background: var(--chrome); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    @media (max-width: 900px) {
+      .mail-form-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>${bodyContent}</body>

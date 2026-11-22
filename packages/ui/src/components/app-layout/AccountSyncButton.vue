@@ -61,7 +61,14 @@
       <template v-if="!currentUser">
         <NTabs v-model:value="activeTab" type="segment" size="small">
           <NTabPane name="login" :tab="text.tabLogin">
-            <NForm label-placement="top" size="small" :show-feedback="false" class="auth-form" @submit.prevent="handleLogin">
+            <NForm
+              v-if="!showForgotReset"
+              label-placement="top"
+              size="small"
+              :show-feedback="false"
+              class="auth-form"
+              @submit.prevent="handleLogin"
+            >
               <NFormItem :label="text.loginIdentifierLabel" class="auth-field">
                 <NInput
                   v-model:value="form.username"
@@ -92,6 +99,98 @@
               >
                 {{ text.loginButton }}
               </NButton>
+              <div v-if="emailResetEnabled" class="forgot-link-row">
+                <button
+                  type="button"
+                  class="inline-text-btn"
+                  data-testid="account-sync-forgot-toggle"
+                  @click="openForgotReset"
+                >
+                  {{ text.forgotPasswordLink }}
+                </button>
+              </div>
+            </NForm>
+
+            <NForm
+              v-else
+              label-placement="top"
+              size="small"
+              :show-feedback="false"
+              class="auth-form"
+              data-testid="account-sync-reset-form"
+              @submit.prevent="handleConfirmReset"
+            >
+              <NFormItem :label="text.resetEmailLabel" class="auth-field">
+                <NInput
+                  v-model:value="resetForm.email"
+                  size="small"
+                  :placeholder="text.emailPlaceholder"
+                  :input-props="{ type: 'email', autocomplete: 'email' }"
+                  data-testid="account-sync-reset-email"
+                />
+              </NFormItem>
+              <div class="reset-code-bar">
+                <NInput
+                  v-model:value="resetForm.code"
+                  size="small"
+                  :maxlength="6"
+                  :placeholder="text.resetCodePlaceholder"
+                  :input-props="{ inputmode: 'numeric', autocomplete: 'one-time-code' }"
+                  data-testid="account-sync-reset-code"
+                />
+                <NButton
+                  secondary
+                  size="small"
+                  :loading="busy && activeAction === 'reset-send'"
+                  :disabled="busy || resetCooldownSec > 0"
+                  data-testid="account-sync-reset-send"
+                  @click="handleRequestResetCode"
+                >
+                  {{ resetCooldownSec > 0 ? `${resetCooldownSec}s` : text.sendResetCodeButton }}
+                </NButton>
+              </div>
+              <NFormItem :label="text.newPasswordLabel" class="auth-field">
+                <NInput
+                  v-model:value="resetForm.newPassword"
+                  size="small"
+                  type="password"
+                  show-password-on="click"
+                  :placeholder="text.passwordPlaceholder"
+                  :input-props="{ autocomplete: 'new-password' }"
+                  data-testid="account-sync-reset-new-password"
+                />
+              </NFormItem>
+              <NFormItem :label="text.confirmPasswordLabel" class="auth-field">
+                <NInput
+                  v-model:value="resetForm.confirmNewPassword"
+                  size="small"
+                  type="password"
+                  show-password-on="click"
+                  :placeholder="text.confirmPasswordPlaceholder"
+                  :input-props="{ autocomplete: 'new-password' }"
+                  data-testid="account-sync-reset-confirm-password"
+                />
+              </NFormItem>
+              <NButton
+                type="primary"
+                size="small"
+                block
+                :loading="busy && activeAction === 'reset-confirm'"
+                :disabled="busy"
+                data-testid="account-sync-reset-submit"
+                @click="handleConfirmReset"
+              >
+                {{ text.confirmResetButton }}
+              </NButton>
+              <div class="forgot-link-row">
+                <button
+                  type="button"
+                  class="inline-text-btn"
+                  @click="showForgotReset = false"
+                >
+                  {{ text.backToLoginLink }}
+                </button>
+              </div>
             </NForm>
           </NTabPane>
 
@@ -311,7 +410,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, reactive, ref, type Ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref, type Ref } from 'vue'
 import { i18n } from '../../plugins/i18n'
 import {
   NAlert,
@@ -330,6 +429,7 @@ import type { AppServices } from '../../types/services'
 import {
   UserSyncError,
   changePassword,
+  confirmPasswordReset,
   getConfig,
   getMe,
   login,
@@ -337,6 +437,7 @@ import {
   pullSync,
   pushSync,
   register,
+  requestPasswordReset,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
   updateProfile,
@@ -390,6 +491,16 @@ const text = computed(() =>
         okEmailUpdated: '邮箱已保存',
         okPasswordChanged: '密码已更新，下次请使用新密码登录',
         errEmptyPasswordFields: '请输入当前密码和新密码',
+        forgotPasswordLink: '忘记密码？用邮箱重置',
+        backToLoginLink: '← 返回账号登录',
+        resetEmailLabel: '已绑定邮箱',
+        resetCodePlaceholder: '6 位验证码',
+        sendResetCodeButton: '发验证码',
+        confirmResetButton: '确认重置密码',
+        errResetEmailRequired: '请输入已绑定的邮箱地址',
+        errResetCodeRequired: '请输入 6 位数字验证码',
+        okResetSent: '验证码已发送，请查收邮件（含垃圾箱）',
+        okResetDone: '密码已重置，请使用新密码登录',
         passwordLabel: '密码',
         passwordPlaceholder: '至少 8 位字符',
         confirmPasswordLabel: '确认密码',
@@ -437,6 +548,16 @@ const text = computed(() =>
         okEmailUpdated: 'Email saved',
         okPasswordChanged: 'Password updated',
         errEmptyPasswordFields: 'Please enter current and new passwords',
+        forgotPasswordLink: 'Forgot password? Reset via email',
+        backToLoginLink: '← Back to sign in',
+        resetEmailLabel: 'Bound email',
+        resetCodePlaceholder: '6-digit code',
+        sendResetCodeButton: 'Send code',
+        confirmResetButton: 'Reset password',
+        errResetEmailRequired: 'Please enter your bound email address',
+        errResetCodeRequired: 'Please enter the 6-digit verification code',
+        okResetSent: 'Verification code sent. Check your inbox (and spam folder).',
+        okResetDone: 'Password reset. Please sign in with your new password.',
         passwordLabel: 'Password',
         passwordPlaceholder: 'At least 8 characters',
         confirmPasswordLabel: 'Confirm password',
@@ -463,20 +584,32 @@ const text = computed(() =>
 
 const available = ref(false)
 const membershipEnabled = ref(false)
+const emailResetEnabled = ref(false)
 const currentUser = ref<SyncUser | null>(null)
 const lastSyncVersion = ref(0)
 const lastSyncUpdatedAt = ref<number | null>(null)
 
 const showModal = ref(false)
 const showSecurity = ref(false)
+const showForgotReset = ref(false)
+const resetCooldownSec = ref(0)
+let resetCooldownTimer: ReturnType<typeof setInterval> | null = null
 const activeTab = ref<'login' | 'register'>('login')
 const busy = ref(false)
-const activeAction = ref<'auth' | 'push' | 'pull' | 'logout' | 'profile' | 'password' | null>(null)
+const activeAction = ref<
+  'auth' | 'push' | 'pull' | 'logout' | 'profile' | 'password' | 'reset-send' | 'reset-confirm' | null
+>(null)
 const notice = ref<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null)
 const form = reactive({ username: '', email: '', password: '', confirmPassword: '' })
 const securityForm = reactive({
   email: '',
   currentPassword: '',
+  newPassword: '',
+  confirmNewPassword: '',
+})
+const resetForm = reactive({
+  email: '',
+  code: '',
   newPassword: '',
   confirmNewPassword: '',
 })
@@ -504,6 +637,7 @@ onMounted(async () => {
     const cfg = await getConfig(props.baseUrl)
     available.value = true
     membershipEnabled.value = Boolean(cfg.membershipEnabled)
+    emailResetEnabled.value = Boolean(cfg.emailResetEnabled)
     const user = await getMe(props.baseUrl)
     currentUser.value = user
     if (user) {
@@ -515,6 +649,99 @@ onMounted(async () => {
   }
 })
 
+onUnmounted(() => {
+  if (resetCooldownTimer) {
+    clearInterval(resetCooldownTimer)
+    resetCooldownTimer = null
+  }
+})
+
+function startResetCooldown(seconds = 60) {
+  resetCooldownSec.value = seconds
+  if (resetCooldownTimer) clearInterval(resetCooldownTimer)
+  resetCooldownTimer = setInterval(() => {
+    if (resetCooldownSec.value <= 1) {
+      resetCooldownSec.value = 0
+      if (resetCooldownTimer) {
+        clearInterval(resetCooldownTimer)
+        resetCooldownTimer = null
+      }
+    } else {
+      resetCooldownSec.value -= 1
+    }
+  }, 1000)
+}
+
+function openForgotReset() {
+  notice.value = null
+  showForgotReset.value = true
+  if (form.username.includes('@') && !resetForm.email) {
+    resetForm.email = form.username.trim()
+  }
+}
+
+async function handleRequestResetCode() {
+  if (busy.value || resetCooldownSec.value > 0) return
+  const email = resetForm.email.trim()
+  if (!email) {
+    notice.value = { type: 'error', text: text.value.errResetEmailRequired }
+    return
+  }
+  busy.value = true
+  activeAction.value = 'reset-send'
+  notice.value = null
+  try {
+    const res = await requestPasswordReset(email, props.baseUrl)
+    notice.value = { type: 'success', text: res.message || text.value.okResetSent }
+    startResetCooldown(60)
+  } catch (err) {
+    notice.value = { type: 'error', text: errorMessage(err) }
+  } finally {
+    busy.value = false
+    activeAction.value = null
+  }
+}
+
+async function handleConfirmReset() {
+  if (busy.value) return
+  const email = resetForm.email.trim()
+  const code = resetForm.code.trim()
+  if (!email) {
+    notice.value = { type: 'error', text: text.value.errResetEmailRequired }
+    return
+  }
+  if (!/^\d{6}$/.test(code)) {
+    notice.value = { type: 'error', text: text.value.errResetCodeRequired }
+    return
+  }
+  if (resetForm.newPassword.length < 8) {
+    notice.value = { type: 'error', text: text.value.errPasswordShort }
+    return
+  }
+  if (resetForm.newPassword !== resetForm.confirmNewPassword) {
+    notice.value = { type: 'error', text: text.value.errPasswordMismatch }
+    return
+  }
+  busy.value = true
+  activeAction.value = 'reset-confirm'
+  notice.value = null
+  try {
+    const res = await confirmPasswordReset(email, code, resetForm.newPassword, props.baseUrl)
+    form.username = email
+    form.password = ''
+    resetForm.code = ''
+    resetForm.newPassword = ''
+    resetForm.confirmNewPassword = ''
+    showForgotReset.value = false
+    notice.value = { type: 'success', text: res.message || text.value.okResetDone }
+  } catch (err) {
+    notice.value = { type: 'error', text: errorMessage(err) }
+  } finally {
+    busy.value = false
+    activeAction.value = null
+  }
+}
+
 function togglePanel() {
   if (!showModal.value) {
     notice.value = null
@@ -524,6 +751,7 @@ function togglePanel() {
     getConfig(props.baseUrl)
       .then((cfg) => {
         membershipEnabled.value = Boolean(cfg.membershipEnabled)
+        emailResetEnabled.value = Boolean(cfg.emailResetEnabled)
       })
       .catch(() => {
         // ignore transient refresh errors
@@ -973,5 +1201,30 @@ async function handleLogout() {
 .security-divider {
   height: 1px;
   background: var(--gp-border, rgba(24, 24, 27, 0.08));
+}
+
+.forgot-link-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.inline-text-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--gp-accent, #0f766e);
+  cursor: pointer;
+}
+
+.inline-text-btn:hover {
+  text-decoration: underline;
+}
+
+.reset-code-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 </style>
