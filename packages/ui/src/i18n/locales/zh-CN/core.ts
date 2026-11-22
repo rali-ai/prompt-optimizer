@@ -88,7 +88,7 @@ const messages = {
     "context": "上下文",
     "copySuccess": "复制成功",
     "copyFailed": "复制失败",
-    "appName": "提示词优化器",
+    "appName": "词工坊",
     "selectFile": "选择文件",
     "exporting": "导出中...",
     "importing": "导入中...",

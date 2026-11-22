@@ -1,11 +1,11 @@
 {
   "extName": {
-    "message": "提示词优化器"
+    "message": "词工坊 · GoPrmpt Studio"
   },
   "extDesc": {
-    "message": "大模型提示词优化工具：一键优化提示词并支持多轮迭代改进测试，支持版本回溯。支持主流AI模型(OpenAI/Gemini/DeepSeek等)，完全开源，纯客户端处理保障数据安全。"
+    "message": "词工坊（GoPrmpt Studio）：把模糊想法变成稳定好用的 AI 指令，支持一键改写、多轮迭代对比与版本回溯，兼容主流大模型，数据保存在本地浏览器。"
   },
   "extShortName": {
-    "message": "提示词优化器"
+    "message": "词工坊"
   }
 }

@@ -1,11 +1,11 @@
 {
   "extName": {
-    "message": "提示词优化器"
+    "message": "GoPrmpt Studio"
   },
   "extDesc": {
-    "message": "Large Language Model Prompt Optimization Tool: One-click prompt optimization with multi-round iterative improvements and version tracking. Supports major AI models (OpenAI/Gemini/DeepSeek etc.), fully open-source, client-side processing ensures data security."
+    "message": "GoPrmpt Studio: Turn rough ideas into reliable AI prompts with one-click rewriting, side-by-side testing, and version history. Works with major LLM providers with local-first storage."
   },
   "extShortName": {
-    "message": "提示词优化器"
+    "message": "GoPrmpt Studio"
   }
 }

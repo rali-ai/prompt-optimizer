@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="gp-bg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="52%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="gp-sheen" x1="12" y1="6" x2="46" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#gp-bg)"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="15.25" stroke="url(#gp-sheen)" stroke-width="1.5"/>
+  <!-- Stylized geometric open G prism -->
+  <path d="M44.5 23.5A15.5 15.5 0 1 0 47.5 34H33.5" stroke="#ffffff" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Inner prism bar accent -->
+  <path d="M33.5 34H47.5V41.5A15.5 15.5 0 0 1 32 47.5" stroke="#e0f2fe" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
+  <!-- Precision 4-point AI spark at top-right opening -->
+  <path d="M46.5 13L48.2 18.3L53.5 20L48.2 21.7L46.5 27L44.8 21.7L39.5 20L44.8 18.3Z" fill="#ffffff"/>
+</svg>
