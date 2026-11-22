@@ -1,7 +1,7 @@
 // 小程序运行时用的提示词库规则。数据本身的校验在 library/schema.mjs，生成 data/library.js 时已经做过。
 
 // target 决定提示词属于文字还是图片，以及「去优化」时在优化页预选哪种优化方式
-// （mode 是核心分包 goprmpt/utils/templates.js 里的优化方式 id）。
+// （mode 是 goprmpt-lite/utils/i18n.js 里的 MODE_IDS，即 mp-server 支持的优化方式）。
 const TARGETS = {
   'basic-user': { kind: 'text', label: '用户提示词', mode: 'general' },
   'basic-system': { kind: 'text', label: '系统提示词', mode: 'system' },
