@@ -1,7 +1,4 @@
-// 提示词库数据的共享规则。小程序运行时和 scripts/build-miniprogram-data.mjs 都用这一份。
-
-// id 只用小写字母、数字和连字符。
-const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+// 小程序运行时用的提示词库规则。数据本身的校验在 library/schema.mjs，生成 data/library.js 时已经做过。
 
 // target 决定提示词属于文字还是图片，以及「去优化」时在优化页预选哪种优化方式
 // （mode 是核心分包 goprmpt/utils/templates.js 里的优化方式 id）。
@@ -31,4 +28,4 @@ function fillVariables(text, values) {
   })
 }
 
-module.exports = { ID_PATTERN, TARGETS, extractVariables, fillVariables }
+module.exports = { TARGETS, extractVariables, fillVariables }

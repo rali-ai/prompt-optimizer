@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
-import { LIBRARY_FILES, PROMPT_LANGUAGES, loadLibrary, toPromptSource } from './library-data.mjs'
+import { LIBRARY_FILES, loadLibrary, promptSources } from '../library/schema.mjs'
 
 const siteDir = path.dirname(fileURLToPath(import.meta.url))
 const libraryDir = path.resolve(siteDir, process.env.LIBRARY_DIR ?? '../library')
@@ -34,15 +34,8 @@ function promptLibrary() {
       return render(library)
     },
     generateBundle() {
-      const categoryById = new Map(library.categories.map((category) => [category.id, category]))
-      for (const prompt of library.prompts) {
-        for (const language of PROMPT_LANGUAGES) {
-          this.emitFile({
-            type: 'asset',
-            fileName: `api/public/prompt-source/${prompt.importCodes[language]}`,
-            source: JSON.stringify(toPromptSource(prompt, categoryById.get(prompt.category), language))
-          })
-        }
+      for (const { importCode, data } of promptSources(library)) {
+        this.emitFile({ type: 'asset', fileName: `api/public/prompt-source/${importCode}`, source: JSON.stringify(data) })
       }
     }
   }

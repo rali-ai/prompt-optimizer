@@ -6,7 +6,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PROMPT_LANGUAGES, loadLibrary, variableNameError } from '../library-data.mjs'
+import { PROMPT_LANGUAGES, loadLibrary, variableNameError } from '../../library/schema.mjs'
 
 const siteDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const distDir = path.resolve(siteDir, process.argv[2] ?? 'dist')
