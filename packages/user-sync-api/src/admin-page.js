@@ -326,7 +326,7 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
             '<td>' + fmtDate(u.syncUpdatedAt) + '</td>' +
             '<td>' + stateBadge + '</td>' +
             '<td class="op-cell">' +
-              '<button class="btn btn-sm btn-accent-outline" data-act="pro30" data-id="' + esc(u.id) + '">设为 Pro +30天</button>' +
+              '<button class="btn btn-sm" data-act="pro30" data-id="' + esc(u.id) + '">设为 Pro +30天</button>' +
               '<button class="btn btn-sm" data-act="pro365" data-id="' + esc(u.id) + '">设为 Pro +1年</button>' +
               '<button class="btn btn-sm" data-act="free" data-id="' + esc(u.id) + '">恢复免费</button>' +
               resetPwdBtn +
@@ -791,12 +791,11 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
       transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
     }
     .btn:hover:not(:disabled) { background: var(--chrome); border-color: rgba(24, 24, 27, 0.18); }
+    .btn:active:not(:disabled) { background: #E9E6DC; transform: translateY(0.5px); }
     .btn:disabled { opacity: 0.55; cursor: not-allowed; }
     .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 8px; }
     .btn-primary { background: var(--accent); border-color: var(--accent); color: #FAF9F5; }
     .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #FAF9F5; }
-    .btn-accent-outline { border-color: var(--border-strong); color: var(--accent); background: var(--accent-soft); }
-    .btn-accent-outline:hover:not(:disabled) { background: var(--accent); color: #FAF9F5; }
     .btn-danger { border-color: rgba(185, 28, 28, 0.32); color: var(--danger); }
     .btn-danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); }
 
