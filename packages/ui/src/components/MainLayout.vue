@@ -49,7 +49,7 @@
       <!-- 主要内容区域 - 严格控制在剩余空间内 -->
       <NLayoutContent has-sider
         style="flex: 1; min-height: 0; overflow: hidden;"
-        :content-style="isCompact ? 'height: 100%; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;' : 'height: 100%; max-height: 100%; min-height: 0; box-sizing: border-box; padding: 24px clamp(16px, 2vw, 48px) 40px; display: flex; flex-direction: column; align-items: stretch; overflow: hidden;'"
+        :content-style="isCompact ? 'height: 100%; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;' : 'height: 100%; max-height: 100%; min-height: 0; box-sizing: border-box; padding: 14px clamp(16px, 2vw, 32px) 18px; display: flex; flex-direction: column; align-items: stretch; overflow: hidden;'"
       >
         <div ref="contentRoot" class="main-content-wrapper">
           <slot name="main"></slot>
@@ -84,7 +84,7 @@ import { useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { NLayout, NLayoutHeader, NLayoutContent, NFlex, NText } from 'naive-ui'
 import ToastUI from './Toast.vue'
-import logoImage from '../assets/logo.png'
+import logoImage from '../assets/logo.svg'
 import AppPreviewImage from './media/AppPreviewImage.vue'
 import { i18n } from '../plugins/i18n'
 
@@ -94,12 +94,12 @@ const locale = computed(() => i18n.global.locale.value)
 // Logo图片配置
 const logoSrc = logoImage
 
-// 创建简单的SVG fallback logo
+// 创建简单的SVG fallback logo（深翠玉 + 暖铜星芒）
 const createFallbackSvg = () => {
   const svg = `data:image/svg+xml,${encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-      <rect width="32" height="32" rx="6" fill="#3b82f6"/>
-      <text x="16" y="21" text-anchor="middle" fill="white" font-family="system-ui" font-size="14" font-weight="bold">P</text>
+      <rect width="32" height="32" rx="8" fill="#0F766E"/>
+      <text x="16" y="21" text-anchor="middle" fill="#FAF9F5" font-family="system-ui" font-size="14" font-weight="bold">G</text>
     </svg>
   `)}`
   return svg

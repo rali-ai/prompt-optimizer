@@ -1,28 +1,29 @@
 <template>
   <header class="compact-navigation">
     <NButton quaternary class="compact-main-menu" :aria-label="t('workspace.menu')" data-testid="compact-global-menu"
-      @click="menu = true"><template #icon><NIcon size="18"><Menu2 /></NIcon></template>{{ t('workspace.functions') }}</NButton>
+      @click="menu = true"><template #icon><NIcon size="18"><Menu2 :stroke-width="1.75" /></NIcon></template>{{ t('workspace.functions') }}</NButton>
     <button type="button" class="compact-mode-button" :aria-label="t('workspace.switchMode')"
       data-testid="compact-mode-select" @click="modes = true">
-      <strong>{{ currentLabel }}</strong><NIcon size="14"><ChevronDown /></NIcon>
+      <strong>{{ currentLabel }}</strong><NIcon size="14"><ChevronDown :stroke-width="1.75" /></NIcon>
     </button>
     <div v-show="!isFavorites" id="compact-workspace-tools" />
     <NButton v-if="isFavorites" quaternary circle :aria-label="t('workspace.returnToWorkspace')"
-      @click="goWorkspace"><template #icon><NIcon :size="16"><ArrowBackUp /></NIcon></template></NButton>
+      @click="goWorkspace"><template #icon><NIcon :size="16"><ArrowBackUp :stroke-width="1.75" /></NIcon></template></NButton>
   </header>
   <AdaptiveModal v-model:show="menu" presentation="sheet" :auto-focus="false"
     :title="t('workspace.functions')" class="compact-menu-sheet" data-testid="compact-functions-panel">
     <button v-if="isFavorites" type="button" class="compact-menu-row" @click="goWorkspace">
-      <NIcon :size="16"><ArrowBackUp /></NIcon><span>{{ t('workspace.returnToWorkspace') }}</span><NIcon :size="16"><ChevronRight /></NIcon>
+      <NIcon :size="16"><ArrowBackUp :stroke-width="1.75" /></NIcon><span>{{ t('workspace.returnToWorkspace') }}</span><NIcon :size="16"><ChevronRight :stroke-width="1.75" /></NIcon>
     </button>
     <div class="compact-function-grid">
       <button v-for="item in entries" :key="item.action" type="button" class="compact-function-tile"
         :data-testid="`compact-menu-${item.action}`" @click="open(item.action)">
-        <span aria-hidden="true" style="font-size: 20px; line-height: 1">{{ item.icon }}</span><span>{{ t(item.label) }}</span>
+        <NIcon :size="18" aria-hidden="true"><component :is="item.icon" :stroke-width="1.75" /></NIcon><span>{{ t(item.label) }}</span>
         <NBadge v-if="item.action === 'data' && backupReminderDue" dot />
       </button>
     </div>
     <div class="compact-menu-preferences">
+      <!-- account-sync-slot -->
       <div class="compact-menu-preference"><span class="compact-menu-preference-label">{{ t('workspace.theme') }}</span><ThemeToggleUI /></div>
       <div class="compact-menu-preference"><span class="compact-menu-preference-label">{{ t('workspace.language') }}</span><LanguageSwitchDropdown /></div>
     </div>
@@ -40,7 +41,7 @@
         <button v-for="item in group.items" :key="item.path" type="button" class="compact-mode-choice"
           :data-testid="`compact-mode-${item.path.slice(1).replace('/', '-')}`"
           :aria-current="item.path === workspacePath ? 'page' : undefined" @click="selectMode(item.path)">
-          <span>{{ t(item.label) }}</span><NIcon v-if="item.path === workspacePath" size="16"><Check /></NIcon>
+          <span>{{ t(item.label) }}</span><NIcon v-if="item.path === workspacePath" size="16"><Check :stroke-width="1.75" /></NIcon>
         </button>
       </div>
     </section>
@@ -51,7 +52,19 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton, NIcon, NBadge } from 'naive-ui'
-import { Menu as Menu2, ChevronDown, ChevronRight, Undo2 as ArrowBackUp, Check } from '@lucide/vue'
+import {
+  Menu as Menu2,
+  ChevronDown,
+  ChevronRight,
+  Undo2 as ArrowBackUp,
+  Check,
+  Star,
+  History,
+  FileText,
+  SlidersHorizontal,
+  Braces,
+  Database,
+} from '@lucide/vue'
 import { router } from '../../router'
 import { releaseCompactOverlayHistory } from '../../composables/ui/useCompactModalBack'
 import AdaptiveModal from '../common/AdaptiveModal.vue'
@@ -93,12 +106,12 @@ const labels: Record<string, string> = {
 const isFavorites = computed(() => router.currentRoute.value.path === '/favorites')
 const currentLabel = computed(() => t(isFavorites.value ? 'nav.favorites' : labels[router.currentRoute.value.path] || labels[props.workspacePath] || 'workspace.title'))
 const entries = [
-  { action: 'favorites', label: 'nav.favorites', icon: '⭐' },
-  { action: 'history', label: 'nav.history', icon: '📜' },
-  { action: 'templates', label: 'nav.templates', icon: '📝' },
-  { action: 'models', label: 'nav.modelManager', icon: '⚙️' },
-  { action: 'variables', label: 'nav.variableManager', icon: '🔣' },
-  { action: 'data', label: 'nav.dataManager', icon: '💾' },
+  { action: 'favorites', label: 'nav.favorites', icon: Star },
+  { action: 'history', label: 'nav.history', icon: History },
+  { action: 'templates', label: 'nav.templates', icon: FileText },
+  { action: 'models', label: 'nav.modelManager', icon: SlidersHorizontal },
+  { action: 'variables', label: 'nav.variableManager', icon: Braces },
+  { action: 'data', label: 'nav.dataManager', icon: Database },
 ]
 const open = async (action: string) => {
   menu.value = false
