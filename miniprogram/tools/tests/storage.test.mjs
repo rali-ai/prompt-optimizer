@@ -1,46 +1,20 @@
+// 简版的本机数据：存储键前缀、优化历史。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { installWx, requireMp } from './wx-mock.mjs'
 
-const settings = requireMp('./goprmpt/utils/settings.js')
-const history = requireMp('./goprmpt/utils/history.js')
+const history = requireMp('./goprmpt-lite/utils/history.js')
+const i18n = requireMp('./goprmpt-lite/utils/i18n.js')
+const api = requireMp('./goprmpt-lite/utils/api.js')
 
-test('every storage key written by the package carries the goprmpt: prefix', () => {
+test('every storage key written by the lite package carries the goprmpt_ prefix', async () => {
   const wx = installWx()
-  settings.save({ providerId: 'kimi', baseUrl: 'https://api.moonshot.cn/v1', apiKey: 'k', model: 'm' })
+  wx.reply((options) => ({ statusCode: 200, data: options.url.endsWith('/login') ? { token: 't', expiresAt: Date.now() + 3600e3 } : { result: 'r', remaining: 1 } }))
   history.add({ mode: 'general', input: 'a', output: 'b' })
-  history.remove('missing')
-  history.clear()
+  i18n.setPreference('en')
+  await api.optimize({ mode: 'general', prompt: 'x', lang: 'zh' })
 
-  assert.ok(wx.store.size > 0)
-  for (const key of wx.store.keys()) {
-    assert.ok(key.startsWith('goprmpt:'), key)
-  }
-})
-
-test('settings default to the first preset and round-trip trimmed values', () => {
-  installWx()
-  const initial = settings.load()
-  assert.equal(initial.providerId, settings.PROVIDERS[0].id)
-  assert.equal(initial.baseUrl, settings.PROVIDERS[0].baseUrl)
-  assert.equal(initial.apiKey, '')
-  assert.equal(settings.isReady(initial), false)
-
-  settings.save({ providerId: 'zhipu', baseUrl: ' https://open.bigmodel.cn/api/paas/v4 ', apiKey: ' key ', model: 'glm' })
-  const loaded = settings.load()
-  assert.deepEqual(loaded, { providerId: 'zhipu', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', apiKey: 'key', model: 'glm' })
-  assert.equal(settings.isReady(loaded), true)
-})
-
-test('presets cover the required providers with HTTPS endpoints', () => {
-  const names = settings.PROVIDERS.map((p) => p.name)
-  for (const name of ['DeepSeek', '通义千问', '智谱 GLM', 'Kimi', 'OpenAI']) {
-    assert.ok(names.includes(name), name)
-  }
-  for (const p of settings.PROVIDERS.filter((x) => x.id !== 'custom')) {
-    assert.match(p.baseUrl, /^https:\/\//)
-    assert.ok(p.model, p.id + ' has a model')
-  }
+  assert.deepEqual([...wx.store.keys()].sort(), ['goprmpt_history', 'goprmpt_lang', 'goprmpt_session'])
 })
 
 test('history keeps newest first, supports get/remove/clear and caps its size', () => {
@@ -71,9 +45,10 @@ test('history keeps newest first, supports get/remove/clear and caps its size', 
   assert.equal(records[0].input, String(history.LIMIT + 4))
 })
 
-test('formatTime shows 今天 for today and a date otherwise', () => {
+test('formatTime shows today in the UI language and a date otherwise', () => {
   const now = new Date(2026, 10, 21, 18, 0).getTime()
-  assert.equal(history.formatTime(new Date(2026, 10, 21, 9, 5).getTime(), now), '今天 09:05')
-  assert.equal(history.formatTime(new Date(2026, 2, 3, 14, 30).getTime(), now), '03-03 14:30')
-  assert.equal(history.formatTime(new Date(2025, 2, 3, 14, 30).getTime(), now), '2025-03-03')
+  assert.equal(history.formatTime(new Date(2026, 10, 21, 9, 5).getTime(), now, 'zh'), '今天 09:05')
+  assert.equal(history.formatTime(new Date(2026, 10, 21, 9, 5).getTime(), now, 'en'), 'Today 09:05')
+  assert.equal(history.formatTime(new Date(2026, 2, 3, 14, 30).getTime(), now, 'zh'), '03-03 14:30')
+  assert.equal(history.formatTime(new Date(2025, 2, 3, 14, 30).getTime(), now, 'en'), '2025-03-03')
 })

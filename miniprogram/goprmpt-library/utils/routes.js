@@ -8,8 +8,8 @@ const ROUTES = {
   lesson: ROOT + 'lesson/lesson'
 }
 
-// 核心分包 goprmpt 的优化页。本分包只通过页面跳转依赖核心分包，不跨分包 require。
-const OPTIMIZER_PAGE = '/goprmpt/pages/optimize/optimize'
+// 简版分包 goprmpt-lite 的优化页。本分包只通过页面跳转依赖简版，不跨分包 require。
+const OPTIMIZER_PAGE = '/goprmpt-lite/pages/optimize/optimize'
 
 function url(name, query) {
   const path = ROUTES[name]

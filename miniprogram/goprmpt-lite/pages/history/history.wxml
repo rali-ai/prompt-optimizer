@@ -1,0 +1,30 @@
+<view wx:if="{{t}}" class="gp-page">
+  <view class="gp-row-between header">
+    <view class="gp-muted">{{t.history.note}}</view>
+    <view wx:if="{{records.length}}" class="gp-link clear" hover-class="gp-pressed" bindtap="onClearAll">{{t.history.clear}}</view>
+  </view>
+
+  <view wx:if="{{!records.length}}" class="gp-empty">{{t.history.empty}}</view>
+
+  <view wx:for="{{records}}" wx:key="id" class="gp-card record">
+    <view class="gp-row-between">
+      <view class="gp-row">
+        <view class="gp-tag">{{item.modeName}}</view>
+        <view class="gp-tag">{{item.langName}}</view>
+      </view>
+      <view class="gp-muted time">{{item.time}}</view>
+    </view>
+
+    <view wx:if="{{item.iterateInput}}" class="direction">{{t.history.direction}}{{item.iterateInput}}</view>
+    <view class="label">{{t.history.original}}</view>
+    <view class="gp-clamp-2 excerpt before">{{item.input}}</view>
+    <view class="label">{{t.history.result}} · {{t.aiLabel}}</view>
+    <view class="gp-clamp-2 excerpt">{{item.output}}</view>
+
+    <view class="gp-row actions">
+      <view class="gp-btn gp-btn-small" hover-class="gp-pressed" data-id="{{item.id}}" bindtap="onReuse">{{t.history.reuse}}</view>
+      <view class="gp-btn gp-btn-small" hover-class="gp-pressed" data-id="{{item.id}}" bindtap="onCopy">{{t.history.copyResult}}</view>
+      <view class="delete" hover-class="gp-pressed" data-id="{{item.id}}" bindtap="onDelete">{{t.history.delete}}</view>
+    </view>
+  </view>
+</view>

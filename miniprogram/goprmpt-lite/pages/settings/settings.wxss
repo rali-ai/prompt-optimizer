@@ -1,0 +1,10 @@
+@import "../../styles/theme.wxss";
+
+.note {
+  font-size: var(--gp-font-sm);
+  color: var(--gp-text-2);
+}
+
+.note + .note {
+  margin-top: 16rpx;
+}
