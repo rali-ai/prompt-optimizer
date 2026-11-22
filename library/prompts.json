@@ -1498,7 +1498,7 @@
     ],
     "summary": "设计一份问真实行为、不带引导的用户访谈提纲。",
     "target": "basic-user",
-    "prompt": "为一次用户访谈设计提纲。访谈约 {{时长}} 分钟，受访者是{{受访者}}。\n\n【研究目标】\n{{研究目标}}\n\n设计原则：\n- 问过去发生过的具体行为，不问对未来的设想。例如问“上一次你是怎么……的”，不问“你会不会用……”。\n- 不问引导性问题，问题里不暗示答案，也不提我们的产品方案。\n- 每个主问题配 1 到 2 个追问，用来挖原因和细节。\n\n输出：\n1. 开场白：说明来意、时长和录音授权，约 80 字。\n2. 热身问题：2 个，了解受访者背景。\n3. 核心问题：按研究目标分组，共 8 到 12 个，每个注明对应哪个研究目标。\n4. 收尾问题：2 个，其中一个是“还有什么我没问到、但你觉得重要的”。\n5. 注意事项：3 条，提醒访谈者容易犯的错。",
+    "prompt": "为一次用户访谈设计提纲。访谈约 {{时长}} 分钟，受访者是{{受访者}}。\n\n【研究目标】\n{{研究目标}}\n\n设计原则：\n- 问过去发生过的具体行为，不问对未来的设想。例如问“上一次你是怎么……的”，不问“你会不会用……”。\n- 不问引导性问题，问题里不暗示答案，也不提我们的产品方案。\n- 每个主问题配 1 到 2 个追问，用来挖原因和细节。\n\n输出：\n1. 开场白：说明来意、时长和录音授权，约 80 字。\n2. 热身问题：2 个，了解受访者背景。\n3. 核心问题：按研究目标分组，共 8 到 12 个，每个注明对应哪个研究目标。\n4. 收尾问题：2 个，其中一个是“还有什么我没问到、但你觉得重要的”。\n5. 注意事项：3 条，提醒访谈者容易犯的错。\n\n如果研究目标是空的，或者只是“了解用户需求”这种说不清要弄明白什么的话，先帮我改写成 2 到 3 条具体的研究问题，请我确认后再出提纲。\n受访者条件没说清时，在开头列出你假定的筛选条件，请我确认。\n问题里不预设受访者有过某种经历；不确定对方是否做过的事，先用一个是非问题确认，再往下问细节。",
     "variables": [
       {
         "name": "研究目标",
@@ -1519,7 +1519,7 @@
     "en": {
       "title": "User interview guide",
       "summary": "Designs an interview guide that asks about real past behavior instead of leading questions.",
-      "prompt": "Design a guide for a user interview of about {{minutes}} minutes with {{participant}}.\n\n[Research goals]\n{{research_goals}}\n\nPrinciples:\n- Ask about specific things people actually did in the past, not what they imagine doing. Ask \"Walk me through the last time you ...\", not \"Would you use ...\".\n- No leading questions. Do not hint at the answer or mention our product ideas.\n- Give each main question 1 to 2 follow-ups that dig into reasons and details.\n\nOutput:\n1. Opening: purpose, length and recording consent, about 50 words.\n2. Warm-up: 2 questions about the participant's background.\n3. Core questions: 8 to 12, grouped by research goal, each labeled with the goal it serves.\n4. Closing: 2 questions, one of them \"Is there anything I didn't ask that you think matters?\"\n5. Interviewer notes: 3 common mistakes to avoid.",
+      "prompt": "Design a guide for a user interview of about {{minutes}} minutes with {{participant}}.\n\n[Research goals]\n{{research_goals}}\n\nPrinciples:\n- Ask about specific things people actually did in the past, not what they imagine doing. Ask \"Walk me through the last time you ...\", not \"Would you use ...\".\n- No leading questions. Do not hint at the answer or mention our product ideas.\n- Give each main question 1 to 2 follow-ups that dig into reasons and details.\n\nOutput:\n1. Opening: purpose, length and recording consent, about 50 words.\n2. Warm-up: 2 questions about the participant's background.\n3. Core questions: 8 to 12, grouped by research goal, each labeled with the goal it serves.\n4. Closing: 2 questions, one of them \"Is there anything I didn't ask that you think matters?\"\n5. Interviewer notes: 3 common mistakes to avoid.\n\nIf the research goals are empty, or as vague as \"understand user needs\", first rewrite them as 2 or 3 specific research questions and ask me to confirm before writing the guide.\nIf the participant criteria are unclear, list the screening criteria you are assuming at the top and ask me to confirm.\nDo not assume the participant has had a particular experience. If you are not sure they have done something, confirm it with a yes-or-no question before asking for details.",
       "variables": [
         {
           "name": "research_goals",
@@ -1694,7 +1694,7 @@
     ],
     "summary": "把业务目标拆成有公式、有口径、能落到行动的指标树。",
     "target": "basic-user",
-    "prompt": "帮我把一个业务目标拆成指标树。\n\n【业务目标】\n{{业务目标}}\n\n【业务模式】\n{{业务模式}}\n\n拆解方法：\n1. 先选一个最能代表目标的核心指标，说明为什么选它，以及它可能被怎样“刷”出来。\n2. 把核心指标拆成 2 到 4 个可以相乘或相加的驱动指标，写出公式，例如“销售额 = 访客数 × 转化率 × 客单价”。\n3. 每个驱动指标再往下拆一层，拆到团队能直接采取行动为止。\n4. 每个指标写清定义和统计口径：分子、分母、时间范围、去重规则。\n\n输出：\n1. 指标树：用缩进列表表示层级。\n2. 指标定义表：| 指标 | 定义 | 口径 | 负责团队 | 能影响它的动作 |\n3. 2 个护栏指标：防止为了核心指标牺牲用户体验或长期价值。",
+    "prompt": "帮我把一个业务目标拆成指标树。\n\n【业务目标】\n{{业务目标}}\n\n【业务模式】\n{{业务模式}}\n\n拆解方法：\n1. 先选一个最能代表目标的核心指标，说明为什么选它，以及它可能被怎样“刷”出来。\n2. 把核心指标拆成 2 到 4 个可以相乘或相加的驱动指标，写出公式，例如“销售额 = 访客数 × 转化率 × 客单价”。\n3. 每个驱动指标再往下拆一层，拆到团队能直接采取行动为止。\n4. 每个指标写清定义和统计口径：分子、分母、时间范围、去重规则。\n\n输出：\n1. 指标树：用缩进列表表示层级。\n2. 指标定义表：| 指标 | 定义 | 口径 | 负责团队 | 能影响它的动作 |\n3. 2 个护栏指标：防止为了核心指标牺牲用户体验或长期价值。\n\n规则：\n- 只按我给的业务模式拆。业务模式里没提到的环节，比如有没有续费、有没有广告收入，不要假设它存在，在指标树里标【待确认：……】。\n- 统计口径是你的建议，不是事实：每个口径后面标“建议”。取决于公司现有数据定义的地方，比如“活跃”怎么算、按下单还是按支付计，写明需要和数据团队确认。\n- 不给任何指标编基线数字或目标值。\n- 如果业务目标或业务模式只有一句笼统的话，不够拆到第二层，先问我最多 3 个问题，不要开始拆。",
     "variables": [
       {
         "name": "业务目标",
@@ -1710,7 +1710,7 @@
     "en": {
       "title": "Metric tree breakdown",
       "summary": "Breaks a business goal into a metric tree with formulas, definitions and levers teams can pull.",
-      "prompt": "Help me break a business goal into a metric tree.\n\n[Business goal]\n{{goal}}\n\n[Business model]\n{{business_model}}\n\nMethod:\n1. Pick one core metric that best represents the goal. Explain why, and how it could be gamed.\n2. Break the core metric into 2 to 4 driver metrics that multiply or add up to it, with the formula, for example \"Revenue = Visitors × Conversion rate × Average order value\".\n3. Break each driver down one more level, until a team can act on it directly.\n4. Define every metric precisely: numerator, denominator, time window, deduplication rule.\n\nOutput:\n1. The metric tree as an indented list.\n2. Definitions table: | Metric | Definition | How it is counted | Owning team | Actions that move it |\n3. 2 guardrail metrics that stop the team from hitting the core metric at the expense of user experience or long-term value.",
+      "prompt": "Help me break a business goal into a metric tree.\n\n[Business goal]\n{{goal}}\n\n[Business model]\n{{business_model}}\n\nMethod:\n1. Pick one core metric that best represents the goal. Explain why, and how it could be gamed.\n2. Break the core metric into 2 to 4 driver metrics that multiply or add up to it, with the formula, for example \"Revenue = Visitors × Conversion rate × Average order value\".\n3. Break each driver down one more level, until a team can act on it directly.\n4. Define every metric precisely: numerator, denominator, time window, deduplication rule.\n\nOutput:\n1. The metric tree as an indented list.\n2. Definitions table: | Metric | Definition | How it is counted | Owning team | Actions that move it |\n3. 2 guardrail metrics that stop the team from hitting the core metric at the expense of user experience or long-term value.\n\nRules:\n- Break it down only from the business model I gave. If the model does not mention something, such as renewals or ad revenue, do not assume it exists; mark it [to confirm: ...] in the tree.\n- Definitions are your suggestions, not facts: label each one \"suggested\". Where it depends on how the company already defines its data, such as what counts as \"active\" or whether orders count at checkout or at payment, say it needs confirming with the data team.\n- Do not invent baseline numbers or targets for any metric.\n- If the goal or business model is a single vague sentence that cannot support a second level, ask me up to 3 questions before breaking it down.",
       "variables": [
         {
           "name": "goal",
@@ -2187,7 +2187,7 @@
       "种草",
       "社交媒体"
     ],
-    "summary": "用你的真实体验写一篇像朋友分享、又不踩广告法的种草笔记。",
+    "summary": "种草笔记：用你的真实使用体验推荐一件产品，像朋友分享，又不踩广告法。",
     "target": "basic-user",
     "prompt": "写一篇小红书笔记，推荐{{产品}}。\n\n【真实信息】\n卖点：{{卖点}}\n我的使用体验：{{使用体验}}\n\n写法：\n1. 标题不超过 20 个字，写具体的使用场景或效果，可以带 1 个表情符号。\n2. 正文 300 到 500 字，第一人称，像跟朋友分享：先讲我遇到的问题，再讲怎么用上这个产品，最后讲用了以后的变化。\n3. 至少写一个缺点，或者说明不适合哪些人，让内容更可信。\n4. 结尾放 5 到 8 个话题标签。\n\n合规要求：\n- 不用“最”“第一”“国家级”这类绝对化用语。\n- 不写医疗或治疗效果，不承诺具体的效果数字。\n- 只写我提供的体验，不编造使用时长和前后对比数据。\n\n如果没有提供使用体验，先问我用下来的真实感受，不要替我编。",
     "variables": [
@@ -2209,7 +2209,7 @@
     ],
     "en": {
       "title": "Product recommendation post for social media",
-      "summary": "Writes a friend-to-friend product recommendation post from your real experience, without hype.",
+      "summary": "Product recommendation post: recommends one product from your real experience, friend to friend, without hype or ad-law trouble.",
       "prompt": "Write a social media post recommending {{product}}, in the style of a Xiaohongshu or Instagram recommendation.\n\n[Real information]\nSelling points: {{selling_points}}\nMy experience using it: {{experience}}\n\nHow to write it:\n1. Headline under 12 words that names a specific use or result. One emoji is fine.\n2. Body of 150 to 250 words in the first person, like telling a friend: the problem I had, how I started using this, what changed.\n3. Include at least one downside or a type of person it does not suit; it makes the post believable.\n4. End with 5 to 8 hashtags.\n\nCompliance:\n- No superlatives like \"best ever\", \"number one\" or \"miracle\".\n- No medical or therapeutic claims, and no promised results with numbers.\n- Use only the experience I gave. Do not invent how long I used it or before-and-after figures.\n\nIf I gave no experience, ask me how it actually went instead of making it up.",
       "variables": [
         {
@@ -2283,7 +2283,7 @@
     ],
     "summary": "按秒数写出带画面、台词和字幕的短视频口播脚本。",
     "target": "basic-user",
-    "prompt": "写一条 {{时长}} 秒的短视频口播脚本，主题是{{主题}}，发在{{平台}}。\n\n结构：\n1. 开头 3 秒：一句话抛出观众关心的问题，或一个反常识的结论，让人停下来。\n2. 中段：讲 2 到 3 个要点，每个配一个具体例子或画面。\n3. 结尾：一句话总结，加一个明确的动作引导，例如关注，或在评论区回答一个问题。\n\n口播总字数按每秒约 4 个字控制。\n\n输出表格：| 时间 | 画面 / 镜头 | 口播台词 | 屏幕字幕 |\n字幕是口播里的关键词，不超过 12 个字。\n\n口播要口语化，像在对一个人说话。用到数据时只用补充信息里的。\n\n【补充信息】\n{{补充信息}}",
+    "prompt": "写一条 {{时长}} 秒的短视频口播脚本，主题是{{主题}}，发在{{平台}}。\n\n结构：\n1. 开头 3 秒：一句话抛出观众关心的问题，或一个反常识的结论，让人停下来。\n2. 中段：讲 2 到 3 个要点，每个配一个具体例子或画面。\n3. 结尾：一句话总结，加一个明确的动作引导，例如关注，或在评论区回答一个问题。\n\n口播总字数按每秒约 4 个字控制。\n\n输出表格：| 时间 | 画面 / 镜头 | 口播台词 | 屏幕字幕 |\n字幕是口播里的关键词，不超过 12 个字。\n\n口播要口语化，像在对一个人说话。\n\n事实约束：\n- 数字、价格、研究结论、产品参数只用补充信息里的；补充信息是“无”时，脚本里不出现任何具体数字和引用。\n- 例子可以用一看就是示意的日常场景，但不要编成“我朋友上周……”这类假装真实的经历，也不要编用户评价。\n- 主题涉及健康、医疗、理财、法律时，只讲常识性做法，不给诊断和收益承诺；拿不准的说法改成“建议咨询专业人士”。\n- 如果主题太宽，{{时长}} 秒讲不清（比如只写了“理财”），先给我 3 个更窄的切入角度让我选，不要直接写。\n\n【补充信息】\n{{补充信息}}",
     "variables": [
       {
         "name": "主题",
@@ -2309,7 +2309,7 @@
     "en": {
       "title": "Short video voiceover script",
       "summary": "Writes a timed short-video script with shots, voiceover lines and on-screen captions.",
-      "prompt": "Write a {{seconds}}-second voiceover script for a short video about {{topic}}, to be posted on {{platform}}.\n\nStructure:\n1. First 3 seconds: one line that raises a question viewers care about or a counterintuitive claim, so they stop scrolling.\n2. Middle: 2 to 3 points, each with a concrete example or visual.\n3. End: a one-line wrap-up and a clear call to action, such as follow, or answer a question in the comments.\n\nBudget about 2.5 spoken words per second.\n\nOutput a table: | Time | Visual / shot | Voiceover | On-screen caption |\nCaptions are keywords from the voiceover, 6 words or fewer.\n\nKeep the voiceover conversational, as if talking to one person. Use numbers only from the extra information.\n\n[Extra information]\n{{extra_info}}",
+      "prompt": "Write a {{seconds}}-second voiceover script for a short video about {{topic}}, to be posted on {{platform}}.\n\nStructure:\n1. First 3 seconds: one line that raises a question viewers care about or a counterintuitive claim, so they stop scrolling.\n2. Middle: 2 to 3 points, each with a concrete example or visual.\n3. End: a one-line wrap-up and a clear call to action, such as follow, or answer a question in the comments.\n\nBudget about 2.5 spoken words per second.\n\nOutput a table: | Time | Visual / shot | Voiceover | On-screen caption |\nCaptions are keywords from the voiceover, 6 words or fewer.\n\nKeep the voiceover conversational, as if talking to one person.\n\nStick to the facts:\n- Take numbers, prices, research findings and product specs only from the extra information. If it says \"none\", the script contains no specific numbers or citations.\n- Examples can be everyday scenes that are clearly illustrative, but do not dress them up as real events like \"my friend last week...\" and do not invent customer reviews.\n- If the topic touches health, medicine, money or law, stick to common-sense practice, with no diagnoses and no promised returns. Where you are unsure, say \"check with a professional\".\n- If the topic is too broad for {{seconds}} seconds (just \"investing\", say), offer me 3 narrower angles to choose from instead of writing the script.\n\n[Extra information]\n{{extra_info}}",
       "variables": [
         {
           "name": "topic",
@@ -2387,7 +2387,7 @@
     ],
     "summary": "从四个方向给出 12 条品牌口号，并说明各自适合用在哪里。",
     "target": "basic-user",
-    "prompt": "为{{品牌}}想品牌口号。\n\n【品牌信息】\n做什么：{{业务}}\n想留给人的感觉：{{品牌调性}}\n主要客户：{{客户}}\n\n给出 12 条候选，分 4 个方向，每个方向 3 条：\n- 说清我们做什么\n- 说出客户得到的好处\n- 表达态度或价值观\n- 押韵或有节奏感，方便口头传播\n\n要求：每条不超过 {{字数}} 个字；不和知名品牌的口号雷同；不用“极致”“领先”“赋能”这类空词。\n每条后面用一句话说明适合用在哪里，例如门头、包装、广告片结尾。\n最后挑出你最推荐的 2 条，说明理由。",
+    "prompt": "为{{品牌}}想品牌口号。\n\n【品牌信息】\n做什么：{{业务}}\n想留给人的感觉：{{品牌调性}}\n主要客户：{{客户}}\n\n给出 12 条候选，分 4 个方向，每个方向 3 条：\n- 说清我们做什么\n- 说出客户得到的好处\n- 表达态度或价值观\n- 押韵或有节奏感，方便口头传播\n\n要求：每条不超过 {{字数}} 个字；不用“极致”“领先”“颠覆”这类空词。\n口号只根据上面的品牌信息来写，不暗示品牌信息里没有的资质、历史、产地或效果，比如“百年”“第一”“有机”。\n你没法核对所有已有的口号，所以不要保证不撞车：凡是让你联想到某个知名品牌口号的候选，直接换掉；最后提醒我正式使用前做一次商标和口号检索。\n如果“做什么”或“主要客户”没填，或者只有一两个字，先问我补充，不要开始写。\n每条后面用一句话说明适合用在哪里，例如门头、包装、广告片结尾。\n最后挑出你最推荐的 2 条，说明理由。",
     "variables": [
       {
         "name": "品牌",
@@ -2418,7 +2418,7 @@
     "en": {
       "title": "Brand slogan options",
       "summary": "Gives 12 slogan options in four directions and says where each one works best.",
-      "prompt": "Come up with slogans for {{brand}}.\n\n[About the brand]\nWhat it does: {{business}}\nThe feeling it should leave: {{brand_tone}}\nMain customers: {{customers}}\n\nGive 12 candidates in 4 directions, 3 each:\n- Say plainly what we do\n- Name the benefit the customer gets\n- Express an attitude or value\n- Rhyme or rhythm that makes it easy to repeat\n\nEach slogan has {{max_words}} words or fewer, does not echo a well-known brand's slogan, and avoids empty words like \"ultimate\", \"leading\" or \"empower\".\nAfter each, add one sentence on where it fits best, such as the shop sign, packaging or the end of an ad.\nFinish with your 2 top picks and why.",
+      "prompt": "Come up with slogans for {{brand}}.\n\n[About the brand]\nWhat it does: {{business}}\nThe feeling it should leave: {{brand_tone}}\nMain customers: {{customers}}\n\nGive 12 candidates in 4 directions, 3 each:\n- Say plainly what we do\n- Name the benefit the customer gets\n- Express an attitude or value\n- Rhyme or rhythm that makes it easy to repeat\n\nEach slogan has {{max_words}} words or fewer and avoids empty words like \"ultimate\", \"leading\" or \"revolutionary\".\nBase every slogan only on the brand details above. Do not imply credentials, history, origin or results the details do not mention, such as \"since 1920\", \"number one\" or \"organic\".\nYou cannot check every slogan already out there, so do not promise originality. Drop any candidate that reminds you of a well-known brand's slogan, and at the end remind me to run a trademark and slogan search before using one.\nIf \"what it does\" or \"main customers\" is empty or only a word or two, ask me to fill it in before you start.\nAfter each, add one sentence on where it fits best, such as the shop sign, packaging or the end of an ad.\nFinish with your 2 top picks and why.",
       "variables": [
         {
           "name": "brand",
@@ -4417,7 +4417,7 @@
       "干货",
       "知识分享"
     ],
-    "summary": "把你懂的一个技巧或经验写成读者愿意收藏的小红书干货笔记。",
+    "summary": "干货笔记：不推荐产品，把你懂的一个技巧或经验写成读者愿意收藏的小红书教程。",
     "target": "basic-user",
     "prompt": "把下面这些经验写成一篇小红书干货笔记，主题是{{主题}}，读者是{{读者}}。\n\n【我的经验和要点】\n{{要点}}\n\n写法：\n1. 开头两三句：说清这篇解决读者的什么问题，用我自己踩过的坑或真实场景引出来，不写“姐妹们”式的空喊。\n2. 正文分 3 到 6 条，每条一个小标题加两三句说明。每条都要具体到读者看完就能照做，比如写出步骤、工具名、数量、时间，不写“要坚持”“心态很重要”这类正确的废话。\n3. 至少一条写“我试过但不推荐的做法”以及原因，让内容更可信。\n4. 结尾一句话总结，再抛一个具体问题引导评论，比如“你们一般怎么……”。\n5. 全文 400 到 700 字，段落短，可以用少量表情符号做分隔，不要每句都加。\n6. 最后给 5 到 8 个话题标签，大词和细分词搭配。\n\n只写我提供的经验。我没给出的步骤和数据，用【待补充：……】标出，不要替我编。\n涉及健康、医疗、理财建议的，只写个人经验，并加一句“仅为个人经验，不构成专业建议”。",
     "variables": [
@@ -4439,7 +4439,7 @@
     ],
     "en": {
       "title": "Xiaohongshu how-to post",
-      "summary": "Turns a skill or lesson you know well into a practical Xiaohongshu (RED) post people will want to save.",
+      "summary": "How-to post: no product to push, just a skill or lesson you know well, written as a Xiaohongshu (RED) guide people will want to save.",
       "prompt": "Turn the experience below into a practical how-to post for Xiaohongshu (RED). Topic: {{topic}}. Audience: {{audience}}.\n\n[My experience and key points]\n{{key_points}}\n\nHow to write it:\n1. Opening, two or three sentences: say what problem this solves for the reader, leading in with a mistake I made or a real situation. No empty hype.\n2. Body: 3 to 6 tips, each with a short heading and two or three sentences. Each tip must be specific enough to act on right away, with steps, tool names, amounts or times. No true-but-useless advice like \"stay consistent\" or \"mindset matters\".\n3. At least one tip covers \"something I tried but don't recommend\" and why, to make it more credible.\n4. End with a one-line summary and a specific question to invite comments, such as \"How do you usually ...?\".\n5. 300 to 500 words, short paragraphs. A few emoji as dividers are fine, but not on every line.\n6. Finish with 5 to 8 hashtags, mixing broad and niche ones.\n\nUse only the experience I gave. If a step or figure is missing, mark it [to add: ...] instead of making it up.\nFor anything touching health, medicine or money, write it as personal experience and add one line: \"Personal experience only, not professional advice.\"",
       "variables": [
         {
