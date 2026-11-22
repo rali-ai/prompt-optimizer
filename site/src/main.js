@@ -1,30 +1,14 @@
 import './styles.css'
+import { OPTIMIZER_URL, initSiteChrome, renderSiteFooter, renderSiteHeader, siteBackground } from './shell.js'
 
 const STORAGE_KEY = 'prompt-optimizer-site-locale'
-const THEME_STORAGE_KEY = 'prompt-optimizer-site-theme'
 const SUPPORTED_LOCALES = ['zh-CN', 'en']
-const THEME_MODES = ['system', 'dark', 'light']
 
 const translations = {
   'zh-CN': {
     htmlLang: 'zh-CN',
     title: '提示词优化器',
     description: '开源提示词工具。用自己的模型改写给 AI 的指令，并排比较改写前后的回答，保存满意的版本。',
-    brandAriaLabel: '提示词优化器首页',
-    nav: {
-      product: '优化器',
-      github: 'GitHub',
-      githubLabel: '开源仓库',
-      themeAria: '切换主题模式',
-      themeLabels: {
-        system: '自动',
-        dark: '深',
-        light: '浅'
-      },
-      locale: 'EN',
-      localeAria: '切换到英文',
-      menuAria: '切换导航菜单'
-    },
     hero: {
       title: '提示词优化器',
       lead: '贴入你准备发给 AI 的指令，改写后用同一个模型测试两版，看看哪份回答更符合你的要求。',
@@ -109,33 +93,12 @@ const translations = {
           href: 'https://github.com/rali-ai/prompt-optimizer'
         }
       ]
-    },
-    footer: {
-      title: '提示词优化器',
-      body: '让提示词优化回到真实结果。',
-      product: '产品',
-      github: 'GitHub'
     }
   },
   en: {
     htmlLang: 'en',
     title: '提示词优化器 | Rewrite and test AI prompts',
     description: 'An open-source tool to rewrite prompts with your own models, compare actual responses, and save prompts for reuse.',
-    brandAriaLabel: '提示词优化器 home',
-    nav: {
-      product: 'Optimizer',
-      github: 'GitHub',
-      githubLabel: 'Open-source repository',
-      themeAria: 'Switch theme mode',
-      themeLabels: {
-        system: 'Auto',
-        dark: 'Dark',
-        light: 'Light'
-      },
-      locale: '中文',
-      localeAria: 'Switch to Chinese',
-      menuAria: 'Toggle navigation menu'
-    },
     hero: {
       title: '提示词优化器',
       lead: 'Paste a prompt, rewrite it, and test both versions with the same model. See which answer fits your task better.',
@@ -220,12 +183,6 @@ const translations = {
           href: 'https://github.com/rali-ai/prompt-optimizer'
         }
       ]
-    },
-    footer: {
-      title: '提示词优化器',
-      body: 'Bring prompt optimization back to real outputs.',
-      product: 'Product',
-      github: 'GitHub'
     }
   }
 }
@@ -246,137 +203,27 @@ function getInitialLocale() {
   return SUPPORTED_LOCALES.includes(browserLocale) ? browserLocale : 'zh-CN'
 }
 
-function normalizeThemeMode(themeMode) {
-  if (THEME_MODES.includes(themeMode)) return themeMode
-  return 'system'
-}
-
-function getInitialThemeMode() {
-  return normalizeThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY) || 'system')
-}
-
-function resolveTheme(themeMode) {
-  if (themeMode === 'light' || themeMode === 'dark') return themeMode
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function getNextThemeMode(themeMode) {
-  if (themeMode === 'system') return 'dark'
-  if (themeMode === 'dark') return 'light'
-  return 'system'
-}
-
-function renderLocaleButton(copy) {
-  return `
-    <button class="locale-switch" type="button" data-locale-toggle="true" aria-label="${copy.nav.localeAria}">
-      ${copy.nav.locale}
-    </button>
-  `
-}
-
-function renderThemeButton(copy, themeMode) {
-  return `
-    <button class="theme-switch" type="button" data-theme-toggle="true" aria-label="${copy.nav.themeAria}" title="${copy.nav.themeAria}">
-      <span class="theme-switch__icon" aria-hidden="true">${renderThemeIcon(themeMode)}</span>
-      <span class="theme-switch__label">${copy.nav.themeLabels[themeMode]}</span>
-    </button>
-  `
-}
-
-function renderThemeIcon(themeMode) {
-  if (themeMode === 'dark') {
-    return `
-      <svg viewBox="0 0 24 24" role="img" focusable="false">
-        <path d="M21 12.79A9 9 0 0 1 11.21 3a7.5 7.5 0 1 0 9.79 9.79Z" fill="currentColor" />
-      </svg>
-    `
-  }
-
-  if (themeMode === 'light') {
-    return `
-      <svg viewBox="0 0 24 24" role="img" focusable="false">
-        <circle cx="12" cy="12" r="4.2" fill="currentColor" />
-        <path d="M12 1.5v3M12 19.5v3M4.57 4.57l2.12 2.12M17.31 17.31l2.12 2.12M1.5 12h3M19.5 12h3M4.57 19.43l2.12-2.12M17.31 6.69l2.12-2.12" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8" />
-      </svg>
-    `
-  }
-
-  return `
-    <svg viewBox="0 0 24 24" role="img" focusable="false">
-      <rect x="4" y="5" width="16" height="11" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.8" />
-      <path d="M8 19h8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8" />
-      <path d="M10 16.5h4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8" />
-    </svg>
-  `
-}
-
-function renderGithubPill(copy) {
-  return `
-    <a class="github-pill" href="https://github.com/rali-ai/prompt-optimizer" target="_blank" rel="noopener" aria-label="${copy.nav.githubLabel}">
-      <span class="github-pill__icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" role="img" focusable="false">
-          <path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.52.1.7-.23.7-.5v-1.95c-2.86.62-3.46-1.21-3.46-1.21-.47-1.18-1.14-1.5-1.14-1.5-.93-.64.07-.63.07-.63 1.03.07 1.57 1.06 1.57 1.06.91 1.56 2.4 1.1 2.98.84.09-.66.36-1.1.65-1.35-2.28-.26-4.67-1.14-4.67-5.08 0-1.12.4-2.04 1.05-2.76-.1-.26-.46-1.31.1-2.73 0 0 .86-.28 2.82 1.05a9.8 9.8 0 0 1 5.13 0c1.96-1.33 2.82-1.05 2.82-1.05.56 1.42.2 2.47.1 2.73.66.72 1.05 1.64 1.05 2.76 0 3.95-2.39 4.82-4.67 5.08.37.32.7.95.7 1.92v2.84c0 .28.18.61.7.5A10.5 10.5 0 0 0 12 1.5Z" fill="currentColor"/>
-        </svg>
-      </span>
-      <span class="github-pill__text">${copy.nav.github}</span>
-    </a>
-  `
-}
-
-function renderNav(copy, themeMode) {
-  return `
-    <a href="https://goprmpt.net" target="_blank" rel="noopener">${copy.nav.product}</a>
-    ${renderGithubPill(copy)}
-    ${renderThemeButton(copy, themeMode)}
-    ${renderLocaleButton(copy)}
-  `
-}
-
-function renderApp(locale, themeMode) {
+function renderApp(locale) {
   const copy = translations[locale]
-  const resolvedTheme = resolveTheme(themeMode)
   const menuExpanded = document.querySelector('.site-menu-button')?.getAttribute('aria-expanded') ?? 'false'
-  const focusedToggle = document.activeElement?.closest('.locale-switch, .theme-switch')
-  const focusedRegion = focusedToggle?.closest('header, footer')?.localName
+  const focusedRegion = document.activeElement?.closest('.locale-switch')?.closest('header, footer')?.localName
 
   document.documentElement.lang = copy.htmlLang
   document.documentElement.dataset.locale = locale
-  document.documentElement.dataset.theme = resolvedTheme
-  document.documentElement.dataset.themeMode = themeMode
   document.title = copy.title
 
   const descriptionMeta = document.querySelector('meta[name="description"]')
   const ogDescriptionMeta = document.querySelector('meta[property="og:description"]')
   const ogTitleMeta = document.querySelector('meta[property="og:title"]')
-  const themeColorMeta = document.querySelector('meta[name="theme-color"]')
 
   if (descriptionMeta) descriptionMeta.setAttribute('content', copy.description)
   if (ogDescriptionMeta) ogDescriptionMeta.setAttribute('content', copy.description)
   if (ogTitleMeta) ogTitleMeta.setAttribute('content', copy.title)
-  if (themeColorMeta) themeColorMeta.setAttribute('content', resolvedTheme === 'dark' ? '#081120' : '#f8fbfe')
 
   document.querySelector('#app').innerHTML = `
     <div class="site-shell">
-      <div class="site-background" aria-hidden="true">
-        <div class="site-glow site-glow--left"></div>
-        <div class="site-glow site-glow--right"></div>
-        <div class="site-grid"></div>
-      </div>
-
-      <header class="site-header">
-        <a class="site-brand" href="/" aria-label="${copy.brandAriaLabel}">
-          <img src="/images/logo.png" alt="" class="site-brand__logo" />
-          <span class="site-brand__text">提示词优化器</span>
-        </a>
-        <button class="site-menu-button" type="button" aria-expanded="${menuExpanded}" aria-controls="site-nav" aria-label="${copy.nav.menuAria}">
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
-        <nav class="site-nav" id="site-nav" aria-label="Primary">
-          ${renderNav(copy, themeMode)}
-        </nav>
-      </header>
+      ${siteBackground}
+      ${renderSiteHeader({ locale, showLocale: true, menuExpanded })}
 
       <main>
         <section class="hero">
@@ -384,7 +231,7 @@ function renderApp(locale, themeMode) {
             <h1 class="hero-title">${copy.hero.title}</h1>
             <p class="hero-lead">${copy.hero.lead}</p>
             <div class="hero-actions">
-              <a class="button button--primary" href="https://goprmpt.net" target="_blank" rel="noopener">${copy.hero.primary}</a>
+              <a class="button button--primary" href="${OPTIMIZER_URL}" target="_blank" rel="noopener">${copy.hero.primary}</a>
             </div>
             <p class="hero-setup" id="hero-setup">${copy.hero.setupNote}</p>
           </div>
@@ -475,18 +322,7 @@ function renderApp(locale, themeMode) {
         </section>
       </main>
 
-      <footer class="site-footer">
-        <div class="site-footer__copy">
-          <strong>${copy.footer.title}</strong>
-          <p>${copy.footer.body}</p>
-        </div>
-        <div class="site-footer__links">
-          <a href="https://goprmpt.net" target="_blank" rel="noopener">${copy.footer.product}</a>
-          <a href="https://github.com/rali-ai/prompt-optimizer" target="_blank" rel="noopener">${copy.footer.github}</a>
-          ${renderThemeButton(copy, themeMode)}
-          ${renderLocaleButton(copy)}
-        </div>
-      </footer>
+      ${renderSiteFooter({ locale, showLocale: true })}
     </div>
 
     <dialog class="image-preview" id="image-preview" aria-label="${copy.imagePreview.title}">
@@ -506,40 +342,12 @@ function renderApp(locale, themeMode) {
     </dialog>
   `
 
-  bindInteractions(locale, themeMode)
   bindImagePreview(copy.imagePreview)
   bindMotionEffects()
 
   if (focusedRegion) {
-    const toggleClass = focusedToggle.classList.contains('locale-switch') ? 'locale-switch' : 'theme-switch'
-    document.querySelector(`${focusedRegion} .${toggleClass}`)?.focus({ preventScroll: true })
+    document.querySelector(`${focusedRegion} .locale-switch`)?.focus({ preventScroll: true })
   }
-}
-
-function bindInteractions(locale, themeMode) {
-  const menuButton = document.querySelector('.site-menu-button')
-  menuButton.addEventListener('click', () => {
-    const expanded = menuButton.getAttribute('aria-expanded') === 'true'
-    menuButton.setAttribute('aria-expanded', String(!expanded))
-  })
-
-  document.querySelectorAll('[data-locale-toggle="true"]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const nextLocale = locale === 'zh-CN' ? 'en' : 'zh-CN'
-      window.localStorage.setItem(STORAGE_KEY, nextLocale)
-      currentLocale = nextLocale
-      renderApp(currentLocale, currentThemeMode)
-    })
-  })
-
-  document.querySelectorAll('[data-theme-toggle="true"]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const nextThemeMode = getNextThemeMode(themeMode)
-      window.localStorage.setItem(THEME_STORAGE_KEY, nextThemeMode)
-      currentThemeMode = nextThemeMode
-      renderApp(currentLocale, currentThemeMode)
-    })
-  })
 }
 
 function bindImagePreview(copy) {
@@ -635,29 +443,14 @@ function bindMotionEffects() {
 }
 
 let currentLocale = getInitialLocale()
-let currentThemeMode = getInitialThemeMode()
 
-document.addEventListener('pointerdown', (event) => {
-  if (event.target.closest('.site-header')) return
-  document.querySelector('.site-menu-button[aria-expanded="true"]')?.setAttribute('aria-expanded', 'false')
+initSiteChrome()
+
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('[data-locale-toggle]')) return
+  currentLocale = currentLocale === 'zh-CN' ? 'en' : 'zh-CN'
+  window.localStorage.setItem(STORAGE_KEY, currentLocale)
+  renderApp(currentLocale)
 })
 
-document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape') return
-  const menuButton = document.querySelector('.site-menu-button[aria-expanded="true"]')
-  if (!menuButton) return
-  menuButton.setAttribute('aria-expanded', 'false')
-  menuButton.focus()
-})
-
-const colorSchemeMedia = window.matchMedia('(prefers-color-scheme: dark)')
-
-if (typeof colorSchemeMedia.addEventListener === 'function') {
-  colorSchemeMedia.addEventListener('change', () => {
-    if (currentThemeMode === 'system') {
-      renderApp(currentLocale, currentThemeMode)
-    }
-  })
-}
-
-renderApp(currentLocale, currentThemeMode)
+renderApp(currentLocale)

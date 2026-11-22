@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "verify": "node scripts/verify-prompt-source.mjs",
     "preview": "vite preview"
   },
   "devDependencies": {
