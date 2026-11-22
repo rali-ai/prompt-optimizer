@@ -10,7 +10,7 @@ export const chromeCopy = {
     nav: {
       product: '优化器',
       library: '提示词库',
-      learn: '学习',
+      learn: '教程与写法',
       github: 'GitHub',
       githubLabel: '开源仓库',
       themeAria: '切换主题模式',
@@ -26,15 +26,15 @@ export const chromeCopy = {
     footer: {
       title: '提示词优化器',
       body: '让提示词优化回到真实结果。',
-      product: '产品',
+      product: '优化器',
       github: 'GitHub'
     }
   },
   en: {
-    brandAriaLabel: '提示词优化器 home',
+    brandAriaLabel: 'Prompt Optimizer home',
     nav: {
       product: 'Optimizer',
-      library: 'Prompt library',
+      library: 'Prompt Library',
       learn: 'Learn',
       github: 'GitHub',
       githubLabel: 'Open-source repository',
@@ -51,13 +51,22 @@ export const chromeCopy = {
     footer: {
       title: '提示词优化器',
       body: 'Bring prompt optimization back to real outputs.',
-      product: 'Product',
+      product: 'Optimizer',
       github: 'GitHub'
     }
   }
 }
 
-let themeMode = normalizeThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY))
+function readStoredTheme() {
+  if (typeof window === 'undefined') return 'system'
+  try {
+    return normalizeThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY))
+  } catch {
+    return 'system'
+  }
+}
+
+let themeMode = readStoredTheme()
 
 function normalizeThemeMode(value) {
   return THEME_MODES.includes(value) ? value : 'system'
@@ -130,7 +139,7 @@ function renderLocaleButton(copy) {
 
 function renderGithubPill(copy) {
   return `
-    <a class="github-pill" href="${GITHUB_URL}" target="_blank" rel="noopener" aria-label="${copy.nav.githubLabel}">
+    <a class="github-pill" href="${GITHUB_URL}" target="_blank" rel="noopener noreferrer" aria-label="${copy.nav.githubLabel}">
       <span class="github-pill__icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" role="img" focusable="false">
           <path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.52.1.7-.23.7-.5v-1.95c-2.86.62-3.46-1.21-3.46-1.21-.47-1.18-1.14-1.5-1.14-1.5-.93-.64.07-.63.07-.63 1.03.07 1.57 1.06 1.57 1.06.91 1.56 2.4 1.1 2.98.84.09-.66.36-1.1.65-1.35-2.28-.26-4.67-1.14-4.67-5.08 0-1.12.4-2.04 1.05-2.76-.1-.26-.46-1.31.1-2.73 0 0 .86-.28 2.82 1.05a9.8 9.8 0 0 1 5.13 0c1.96-1.33 2.82-1.05 2.82-1.05.56 1.42.2 2.47.1 2.73.66.72 1.05 1.64 1.05 2.76 0 3.95-2.39 4.82-4.67 5.08.37.32.7.95.7 1.92v2.84c0 .28.18.61.7.5A10.5 10.5 0 0 0 12 1.5Z" fill="currentColor"/>
@@ -153,8 +162,8 @@ export const siteBackground = `
   </div>
 `
 
-export function renderSiteHeader({ locale = 'zh-CN', current = '', showLocale = false, menuExpanded = 'false' } = {}) {
-  const copy = chromeCopy[locale]
+export function renderSiteHeader({ locale = 'zh-CN', current = '', showLocale = true, menuExpanded = 'false' } = {}) {
+  const copy = chromeCopy[locale] ?? chromeCopy['zh-CN']
   return `
     <header class="site-header">
       <a class="site-brand" href="/" aria-label="${copy.brandAriaLabel}">
@@ -167,7 +176,7 @@ export function renderSiteHeader({ locale = 'zh-CN', current = '', showLocale = 
         <span></span>
       </button>
       <nav class="site-nav" id="site-nav" aria-label="Primary">
-        <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener">${copy.nav.product}</a>
+        <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.nav.product}</a>
         ${renderPageLink('/library/', copy.nav.library, current)}
         ${renderPageLink('/learn/', copy.nav.learn, current)}
         ${renderGithubPill(copy)}
@@ -178,8 +187,8 @@ export function renderSiteHeader({ locale = 'zh-CN', current = '', showLocale = 
   `
 }
 
-export function renderSiteFooter({ locale = 'zh-CN', current = '', showLocale = false } = {}) {
-  const copy = chromeCopy[locale]
+export function renderSiteFooter({ locale = 'zh-CN', current = '', showLocale = true } = {}) {
+  const copy = chromeCopy[locale] ?? chromeCopy['zh-CN']
   return `
     <footer class="site-footer">
       <div class="site-footer__copy">
@@ -187,10 +196,10 @@ export function renderSiteFooter({ locale = 'zh-CN', current = '', showLocale = 
         <p>${copy.footer.body}</p>
       </div>
       <div class="site-footer__links">
-        <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener">${copy.footer.product}</a>
+        <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.footer.product}</a>
         ${renderPageLink('/library/', copy.nav.library, current)}
         ${renderPageLink('/learn/', copy.nav.learn, current)}
-        <a href="${GITHUB_URL}" target="_blank" rel="noopener">${copy.footer.github}</a>
+        <a href="${GITHUB_URL}" target="_blank" rel="noopener noreferrer">${copy.footer.github}</a>
         ${renderThemeButton(copy)}
         ${showLocale ? renderLocaleButton(copy) : ''}
       </div>
@@ -211,7 +220,7 @@ export function applyTheme() {
   })
 }
 
-export function initSiteChrome() {
+export function initSiteChrome({ onLocaleToggle } = {}) {
   applyTheme()
 
   document.addEventListener('click', (event) => {
@@ -224,8 +233,17 @@ export function initSiteChrome() {
 
     if (event.target.closest('[data-theme-toggle]')) {
       themeMode = getNextThemeMode(themeMode)
-      window.localStorage.setItem(THEME_STORAGE_KEY, themeMode)
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, themeMode)
+      } catch {
+        // Storage unavailable
+      }
       applyTheme()
+      return
+    }
+
+    if (onLocaleToggle && event.target.closest('[data-locale-toggle]')) {
+      onLocaleToggle()
     }
   })
 
