@@ -1,6 +1,6 @@
-<view wx:if="{{missing}}" class="gp-empty">没有找到这一课</view>
+<view wx:if="{{missing}}" class="gp-empty">{{t.lesson.missing}}</view>
 
-<view wx:else class="gp-page">
+<view wx:elif="{{t}}" class="gp-page">
   <view class="head">
     <view class="gp-title">{{lesson.title}}</view>
     <view wx:if="{{lesson.summary}}" class="gp-muted summary">{{lesson.summary}}</view>
@@ -14,15 +14,15 @@
   </view>
 
   <view wx:if="{{lesson.before || lesson.after}}" class="gp-card">
-    <view class="gp-section-title">改写前后</view>
+    <view class="gp-section-title">{{t.lesson.compare}}</view>
     <block wx:if="{{lesson.before}}">
-      <view class="gp-compare-label">改写前</view>
+      <view class="gp-compare-label">{{t.lesson.before}}</view>
       <view class="gp-compare-box gp-compare-before">
         <text class="gp-text" user-select="{{true}}">{{lesson.before}}</text>
       </view>
     </block>
     <block wx:if="{{lesson.after}}">
-      <view class="gp-compare-label">改写后</view>
+      <view class="gp-compare-label">{{t.lesson.after}}</view>
       <view class="gp-compare-box gp-compare-after">
         <text class="gp-text" user-select="{{true}}">{{lesson.after}}</text>
       </view>
@@ -30,8 +30,8 @@
   </view>
 
   <view wx:if="{{lesson.exercise}}" class="gp-card">
-    <view class="gp-section-title">练习</view>
+    <view class="gp-section-title">{{t.lesson.exercise}}</view>
     <text class="gp-text exercise" user-select="{{true}}">{{lesson.exercise}}</text>
-    <view class="gp-btn gp-btn-primary practice" hover-class="gp-pressed" bindtap="onPractice">去优化页练习</view>
+    <view class="gp-btn gp-btn-primary practice" hover-class="gp-pressed" bindtap="onPractice">{{t.lesson.practice}}</view>
   </view>
 </view>

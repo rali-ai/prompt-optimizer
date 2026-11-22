@@ -1,14 +1,17 @@
-// 小程序静态检查，没有微信开发者工具时用来兜底。用法：node miniprogram/tools/check.mjs
-// 检查：JSON 能解析；app.json 里每个页面四件套齐全；require 和 @import 指向存在的文件且不出本包；
+// 小程序静态检查，没有微信开发者工具时用来兜底。用法：node miniprogram/tools/check.mjs [项目目录]
+// 检查：JSON 能解析；app.json 里每个页面四件套齐全；require 和 @import 指向存在的文件，且只引用本包或主包；
 // 页面跳转地址都是已注册页面；分包不用 getApp()，本地存储只经 utils/storage.js，跳转只经 utils/routes.js；
-// WXML 绑定的事件处理函数在页面 JS 里存在；三份 theme.wxss 一致。
+// WXML 绑定的事件处理函数在页面 JS 里存在；两份 theme.wxss 一致。
+// 简版 goprmpt-lite/ 要能原样拷进别人的小程序，额外要求完全自包含：只引用自己目录里的文件、只跳转自己的页面、
+// 组件只用自己目录里的、网络请求只经 utils/api.js、存储键前缀是 goprmpt_、config.js 里有 API_BASE。
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
+export const LITE_ROOT = 'goprmpt-lite'
 const ROUTE_LITERAL = /['"`](\/[\w-]+(?:\/[\w-]+)*\/pages\/[\w-]+\/[\w-]+(?:\?[^'"`]*)?)['"`]/g
-const THEMES = ['goprmpt/styles/theme.wxss', 'goprmpt-library/styles/theme.wxss', 'styles/theme.wxss']
+const THEMES = [LITE_ROOT + '/styles/theme.wxss', 'styles/theme.wxss']
 
 function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -20,7 +23,7 @@ function walk(dir) {
 
 const read = (file) => fs.readFileSync(file, 'utf8')
 
-// root：小程序项目目录（含 app.json）。返回 { errors, pages, files }。
+// root：小程序项目目录（含 app.json）。返回 { errors, pages, files, lite }，lite 表示 app.json 注册了简版分包。
 export function checkMiniprogram(root) {
   const rel = (file) => path.relative(root, file).replace(/\\/g, '/')
   const errors = []
@@ -42,6 +45,7 @@ export function checkMiniprogram(root) {
   const app = json['app.json'] || { pages: [] }
   const subPackages = app.subPackages || app.subpackages || []
   const roots = subPackages.map((p) => p.root)
+  const lite = roots.includes(LITE_ROOT)
   const pages = new Set(app.pages)
   for (const sub of subPackages) for (const page of sub.pages) pages.add(sub.root + '/' + page)
   for (const page of pages) {
@@ -50,13 +54,19 @@ export function checkMiniprogram(root) {
     }
   }
 
-  // 文件属于哪个分包；外壳返回 ''。
+  // 文件属于哪个分包；主包返回 ''。
   const packageOf = (file) => roots.find((r) => rel(file).startsWith(r + '/')) || ''
+  const isLite = (file) => lite && packageOf(file) === LITE_ROOT
 
+  // 分包可以引用本包和主包；简版只能引用自己目录里的文件；主包只能引用主包。
   const checkTarget = (from, target, kind) => {
+    const own = packageOf(from)
+    const to = packageOf(target)
     if (!fs.existsSync(target)) {
       fail(from, kind + ' 指向不存在的文件 ' + rel(target))
-    } else if (packageOf(target) !== packageOf(from)) {
+    } else if (isLite(from) && to !== LITE_ROOT) {
+      fail(from, kind + ' 越出了简版目录，简版必须自包含：' + rel(target))
+    } else if (to !== own && to !== '') {
       fail(from, kind + ' 越出了本包：' + rel(target))
     }
   }
@@ -64,6 +74,7 @@ export function checkMiniprogram(root) {
   const checkPageUrl = (file, url) => {
     const page = url.split('?')[0].replace(/^\//, '')
     if (!pages.has(page)) fail(file, '跳转地址不是已注册的页面：' + url)
+    else if (isLite(file) && !url.startsWith('/' + LITE_ROOT + '/')) fail(file, '简版只能跳转自己的页面：' + url)
   }
 
   // 3. 各分包 utils/routes.js 的路由表
@@ -99,10 +110,13 @@ export function checkMiniprogram(root) {
     if (!pkg) continue
     if (/\bgetApp\s*\(/.test(source)) fail(file, '分包里不能用 getApp()，不依赖外壳的全局状态')
     if (/\bwx\.(get|set|remove|clear)Storage(Sync)?\b/.test(source) && name !== pkg + '/utils/storage.js') {
-      fail(file, '本地存储只能经 utils/storage.js（统一加 goprmpt: 前缀）')
+      fail(file, '本地存储只能经 utils/storage.js（统一加 goprmpt_ 前缀）')
     }
     if (/\bwx\.(navigateTo|redirectTo|reLaunch|switchTab)\b/.test(source) && name !== pkg + '/utils/routes.js') {
       fail(file, '页面跳转只能经 utils/routes.js')
+    }
+    if (isLite(file) && /\bwx\.(request|uploadFile|downloadFile|connectSocket)\b/.test(source) && name !== LITE_ROOT + '/utils/api.js') {
+      fail(file, '简版的网络请求只能经 utils/api.js（地址统一来自 config.js）')
     }
     for (const match of source.matchAll(/\broutes\.go\(\s*['"]([\w-]+)['"]/g)) {
       if (!routeTable[pkg] || !routeTable[pkg][match[1]]) fail(file, 'routes.go 用了未定义的页面名：' + match[1])
@@ -139,16 +153,40 @@ export function checkMiniprogram(root) {
     if (read(theme) !== read(themes[0])) fail(theme, '和 ' + rel(themes[0]) + ' 不一致，请同步')
   }
 
-  return { errors, pages: pages.size, files: files.length }
+  // 8. 简版自包含
+  if (lite) {
+    for (const file of byExt('.json').filter(isLite)) {
+      const components = (json[rel(file)] || {}).usingComponents || {}
+      for (const [tag, ref] of Object.entries(components)) {
+        if (!ref.startsWith('.')) {
+          fail(file, '简版的组件只能用自己目录里的相对路径：' + tag + ' → ' + ref)
+          continue
+        }
+        checkTarget(file, path.resolve(path.dirname(file), ref) + '.js', 'usingComponents')
+      }
+    }
+    const storageFile = path.join(root, LITE_ROOT, 'utils', 'storage.js')
+    if (fs.existsSync(storageFile) && createRequire(storageFile)(storageFile).PREFIX !== 'goprmpt_') {
+      fail(storageFile, '简版的存储键前缀必须是 goprmpt_')
+    }
+    const configFile = path.join(root, LITE_ROOT, 'config.js')
+    if (!fs.existsSync(configFile)) fail(configFile, '缺少简版配置文件')
+    else if (!/^https?:\/\/[^/]+/.test(String(createRequire(configFile)(configFile).API_BASE || ''))) {
+      fail(configFile, 'API_BASE 必须是 http(s) 地址')
+    }
+  }
+
+  return { errors, pages: pages.size, files: files.length, lite }
 }
 
 const self = fileURLToPath(import.meta.url)
 if (process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === self.toLowerCase()) {
-  const result = checkMiniprogram(path.resolve(path.dirname(self), '..'))
+  const result = checkMiniprogram(path.resolve(process.argv[2] || path.join(path.dirname(self), '..')))
+  if (!result.lite) result.errors.push('app.json：没有注册简版分包 ' + LITE_ROOT)
   if (result.errors.length) {
     console.error('小程序检查发现 ' + result.errors.length + ' 个问题：')
     for (const error of result.errors) console.error('  - ' + error)
     process.exit(1)
   }
-  console.log('小程序检查通过：' + result.pages + ' 个页面，' + result.files + ' 个文件')
+  console.log('小程序检查通过：' + result.pages + ' 个页面，' + result.files + ' 个文件，简版自包含')
 }

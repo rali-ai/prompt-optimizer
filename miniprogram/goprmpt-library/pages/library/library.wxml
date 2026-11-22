@@ -1,8 +1,8 @@
-<view class="gp-page">
+<view wx:if="{{t}}" class="gp-page">
   <input
     class="gp-input search"
     value="{{query}}"
-    placeholder="搜索标题、用途或标签"
+    placeholder="{{t.library.search}}"
     placeholder-class="gp-placeholder"
     confirm-type="search"
     bindinput="onSearch"
@@ -41,7 +41,7 @@
     </view>
   </scroll-view>
 
-  <view wx:if="{{!items.length}}" class="gp-empty">没有找到相关提示词</view>
+  <view wx:if="{{!items.length}}" class="gp-empty">{{t.library.empty}}</view>
 
   <view
     wx:for="{{items}}"
@@ -58,7 +58,7 @@
     <view class="gp-clamp-2 item-summary">{{item.summary}}</view>
     <view wx:if="{{item.tags.length || item.fallback}}" class="tags">
       <view wx:for="{{item.tags}}" wx:for-item="tag" wx:key="*this" class="gp-tag">{{tag}}</view>
-      <view wx:if="{{item.fallback}}" class="gp-tag">暂无英文版</view>
+      <view wx:if="{{item.fallback}}" class="gp-tag">{{t.library.noEnglish}}</view>
     </view>
   </view>
 </view>

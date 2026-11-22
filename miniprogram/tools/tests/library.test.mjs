@@ -6,7 +6,7 @@ const schema = requireMp('./goprmpt-library/utils/schema.js')
 const library = requireMp('./goprmpt-library/utils/library.js')
 const markdown = requireMp('./goprmpt-library/utils/markdown.js')
 const libraryRoutes = requireMp('./goprmpt-library/utils/routes.js')
-const templates = requireMp('./goprmpt/utils/templates.js')
+const liteI18n = requireMp('./goprmpt-lite/utils/i18n.js')
 
 test('extractVariables lists each {{variable}} once, in order', () => {
   assert.deepEqual(schema.extractVariables('{{甲}} 和 {{ 乙 }}，再说一次 {{甲}}'), ['甲', '乙'])
@@ -26,7 +26,7 @@ test('fillVariables inserts values literally', () => {
 })
 
 test('every library target preselects a mode that the optimizer offers', () => {
-  const modeIds = templates.MODE_OPTIONS.map((m) => m.id)
+  const modeIds = liteI18n.MODE_IDS
   for (const [target, info] of Object.entries(schema.TARGETS)) {
     assert.ok(modeIds.includes(info.mode), target + ' -> ' + info.mode)
   }
@@ -80,7 +80,8 @@ test('the generated library loads and its prompts resolve by id', () => {
   assert.ok(all.length > 0)
   for (const p of all) {
     assert.equal(library.getPrompt(p.id), p)
-    assert.ok(library.categoryName(p.category), p.id + ' has a category name')
+    assert.ok(library.categoryName(p.category, 'zh'), p.id + ' has a category name')
+    assert.ok(library.categoryName(p.category, 'en'), p.id + ' has a category name in the English view')
   }
   assert.equal(library.getPrompt('missing'), null)
 })
@@ -95,6 +96,27 @@ test('markdown turns lesson bodies into display blocks', () => {
     { type: 'quote', text: '引用' },
     { type: 'code', text: 'code {{x}}' }
   ])
+})
+
+test('categoryName uses the English name when the data has one', () => {
+  // 生成数据里的分类目前只有中文名；英文界面退回中文名，数据补上 en.name 后自动用英文。
+  const first = library.categories()[0]
+  const expected = first.en && first.en.name ? first.en.name : first.name
+  assert.equal(library.categoryName(first.id, 'en'), expected)
+  assert.equal(library.categoryName(first.id, 'zh'), first.name)
+  assert.equal(library.categoryName('missing', 'zh'), '')
+})
+
+test('localizeLesson switches to the English version only when there is one', () => {
+  const lesson = { id: 'l1', title: '第 1 课', sections: [], en: { title: 'Lesson 1', sections: [] } }
+  assert.equal(library.localizeLesson(lesson, 'en').title, 'Lesson 1')
+  assert.equal(library.localizeLesson(lesson, 'en').id, 'l1')
+  assert.equal(library.localizeLesson(lesson, 'zh').title, '第 1 课')
+  assert.equal(library.localizeLesson({ id: 'l2', title: '只有中文', sections: [] }, 'en').title, '只有中文')
+})
+
+test('the library opens the optimizer in the lite package', () => {
+  assert.equal(libraryRoutes.OPTIMIZER_PAGE, '/goprmpt-lite/pages/optimize/optimize')
 })
 
 test('library routes stay under /goprmpt-library/ and encode query values', () => {

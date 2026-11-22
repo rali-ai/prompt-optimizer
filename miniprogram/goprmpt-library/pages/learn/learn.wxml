@@ -1,10 +1,10 @@
-<view class="gp-page">
+<view wx:if="{{t}}" class="gp-page">
   <view class="intro">
-    <view class="gp-title">学写提示词</view>
-    <view class="gp-muted">每课一个方法，配改写前后的例子和一道练习</view>
+    <view class="gp-title">{{t.learn.title}}</view>
+    <view class="gp-muted">{{t.learn.subtitle}}</view>
   </view>
 
-  <view wx:if="{{!lessons.length}}" class="gp-empty">课程正在整理中，敬请期待</view>
+  <view wx:if="{{!lessons.length}}" class="gp-empty">{{t.learn.empty}}</view>
 
   <view
     wx:for="{{lessons}}"

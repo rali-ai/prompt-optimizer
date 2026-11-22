@@ -1,0 +1,128 @@
+<view wx:if="{{t}}" class="gp-page">
+  <view class="gp-row-between header">
+    <view>
+      <view class="gp-title">{{t.optimize.title}}</view>
+      <view class="gp-muted">{{t.optimize.subtitle}}</view>
+    </view>
+    <view class="gp-row">
+      <view class="header-link" hover-class="gp-pressed" bindtap="onOpenHistory">{{t.optimize.history}}</view>
+      <view class="header-link" hover-class="gp-pressed" bindtap="onOpenSettings">{{t.optimize.settings}}</view>
+    </view>
+  </view>
+
+  <view class="gp-card">
+    <view class="gp-row-between">
+      <view class="gp-section-title">{{t.optimize.inputTitle}}</view>
+      <view wx:if="{{input}}" class="gp-muted" hover-class="gp-pressed" bindtap="onClear">{{t.optimize.clear}}</view>
+    </view>
+    <textarea
+      class="gp-textarea input"
+      value="{{input}}"
+      maxlength="-1"
+      disable-default-padding="{{true}}"
+      placeholder="{{t.optimize.placeholder}}"
+      placeholder-class="gp-placeholder"
+      bindinput="onInput"
+    />
+    <view class="gp-muted count">{{input.length}} {{t.optimize.chars}}</view>
+
+    <view class="gp-section-title samples-title">{{t.optimize.samplesTitle}}</view>
+    <scroll-view scroll-x="{{true}}" class="samples">
+      <view class="sample-row">
+        <view
+          wx:for="{{samples}}"
+          wx:key="id"
+          class="gp-chip"
+          hover-class="gp-pressed"
+          data-id="{{item.id}}"
+          bindtap="onPickSample"
+        >{{item.title}}</view>
+      </view>
+    </scroll-view>
+  </view>
+
+  <view class="gp-card">
+    <view class="gp-section-title">{{t.optimize.modeTitle}}</view>
+    <view class="gp-chips">
+      <view
+        wx:for="{{modes}}"
+        wx:key="id"
+        class="gp-chip {{item.id === modeId ? 'gp-chip-on' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="onPickMode"
+      >{{item.name}}</view>
+    </view>
+    <view class="gp-muted">{{modeDesc}}</view>
+
+    <view class="gp-section-title lang-title">{{t.optimize.langTitle}}</view>
+    <view class="gp-segment">
+      <view
+        wx:for="{{t.languages}}"
+        wx:key="id"
+        class="gp-segment-item {{item.id === lang ? 'gp-segment-on' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="onPickLang"
+      >{{item.name}}</view>
+    </view>
+  </view>
+
+  <view
+    class="gp-btn gp-btn-primary {{phase !== 'idle' ? 'gp-btn-disabled' : ''}}"
+    hover-class="gp-pressed"
+    bindtap="onOptimize"
+  >{{phase === 'optimizing' ? t.optimize.optimizing : t.optimize.start}}</view>
+
+  <view wx:if="{{error}}" class="gp-error error">
+    <text class="gp-text">{{error}}</text>
+  </view>
+
+  <view wx:if="{{result}}" id="result" class="gp-card result">
+    <view class="gp-row-between result-head">
+      <view class="gp-section-title result-title">{{roundLabel}}</view>
+      <view class="gp-segment view-switch">
+        <view class="gp-segment-item {{view === 'after' ? 'gp-segment-on' : ''}}" data-view="after" bindtap="onSwitchView">{{t.optimize.after}}</view>
+        <view class="gp-segment-item {{view === 'compare' ? 'gp-segment-on' : ''}}" data-view="compare" bindtap="onSwitchView">{{t.optimize.compare}}</view>
+      </view>
+    </view>
+    <view class="gp-tag ai-label">{{t.aiLabel}}</view>
+
+    <view wx:if="{{view === 'after'}}" class="result-text">
+      <text class="gp-text" user-select="{{true}}">{{result}}</text>
+    </view>
+    <view wx:else>
+      <view class="gp-compare-label">{{t.optimize.before}}</view>
+      <view class="gp-compare-box gp-compare-before">
+        <text class="gp-text" user-select="{{true}}">{{before}}</text>
+      </view>
+      <view class="gp-compare-label">{{t.optimize.after}}</view>
+      <view class="gp-compare-box gp-compare-after">
+        <text class="gp-text" user-select="{{true}}">{{result}}</text>
+      </view>
+    </view>
+
+    <view wx:if="{{remainingLabel}}" class="gp-muted remaining">{{remainingLabel}}</view>
+
+    <view class="gp-actions result-actions">
+      <view class="gp-btn" hover-class="gp-pressed" bindtap="onCopy">{{t.optimize.copy}}</view>
+      <view class="gp-btn {{showIterate ? 'gp-chip-on' : ''}}" hover-class="gp-pressed" bindtap="onToggleIterate">{{t.optimize.iterate}}</view>
+    </view>
+
+    <view wx:if="{{showIterate}}" class="iterate">
+      <textarea
+        class="gp-textarea iterate-input"
+        value="{{iterateInput}}"
+        maxlength="-1"
+        auto-height="{{true}}"
+        disable-default-padding="{{true}}"
+        placeholder="{{t.optimize.iteratePlaceholder}}"
+        placeholder-class="gp-placeholder"
+        bindinput="onIterateInput"
+      />
+      <view
+        class="gp-btn gp-btn-primary {{phase !== 'idle' ? 'gp-btn-disabled' : ''}}"
+        hover-class="gp-pressed"
+        bindtap="onIterate"
+      >{{phase === 'iterating' ? t.optimize.iterating : t.optimize.iterateStart}}</view>
+    </view>
+  </view>
+</view>
