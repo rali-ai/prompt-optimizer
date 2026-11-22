@@ -877,3 +877,94 @@ test('Resend mail config via admin UI, test-email, password-reset request/confir
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('browser extension CORS allowlist and Bearer token bidirectional sync (web origin stays cookie-only)', async () => {
+  const ctx = await startTestApp();
+  try {
+    const extOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+
+    // Preflight from Chrome/Edge extension origin -> 204 with exact ACAO
+    const preflight = await fetch(`${ctx.baseUrl}/user-api/sync`, {
+      method: 'OPTIONS',
+      headers: { Origin: extOrigin },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('access-control-allow-origin'), extOrigin);
+    assert.match(preflight.headers.get('access-control-allow-headers') || '', /Authorization/);
+
+    // Untrusted web origin gets NO CORS header
+    const evilPreflight = await fetch(`${ctx.baseUrl}/user-api/config`, {
+      headers: { Origin: 'https://evil.example' },
+    });
+    assert.equal(evilPreflight.status, 200);
+    assert.equal(evilPreflight.headers.get('access-control-allow-origin'), null);
+
+    // Web register does NOT leak bearer token in JSON body
+    const webReg = await fetch(`${ctx.baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'extsyncuser', password: 'Password123!' }),
+    });
+    assert.equal(webReg.status, 201);
+    const webRegBody = await webReg.json();
+    assert.equal('token' in webRegBody, false);
+
+    // Extension login returns Bearer token and CORS header
+    const extLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: extOrigin,
+        'X-Client-Type': 'extension',
+      },
+      body: JSON.stringify({ username: 'extsyncuser', password: 'Password123!' }),
+    });
+    assert.equal(extLogin.status, 200);
+    assert.equal(extLogin.headers.get('access-control-allow-origin'), extOrigin);
+    const extLoginBody = await extLogin.json();
+    assert.equal(typeof extLoginBody.token, 'string');
+    assert.ok(extLoginBody.token.length > 20);
+
+    // Extension uses ONLY Authorization: Bearer (zero Cookie) to push & pull sync
+    const meRes = await fetch(`${ctx.baseUrl}/user-api/me`, {
+      headers: {
+        Origin: extOrigin,
+        Authorization: `Bearer ${extLoginBody.token}`,
+      },
+    });
+    assert.equal(meRes.status, 200);
+    assert.equal((await meRes.json()).user.username, 'extsyncuser');
+
+    const pushRes = await fetch(`${ctx.baseUrl}/user-api/sync`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: extOrigin,
+        Authorization: `Bearer ${extLoginBody.token}`,
+      },
+      body: JSON.stringify({
+        expectedVersion: 0,
+        data: {
+          favorites: [{ id: 'ext-fav-1', title: '插件收藏' }],
+          models: [{ apiKey: 'sk-must-strip' }],
+        },
+      }),
+    });
+    assert.equal(pushRes.status, 200);
+    assert.equal((await pushRes.json()).version, 1);
+
+    // Website Cookie session reads the exact data pushed from the extension!
+    const webCookie = extractCookieHeader(webReg);
+    const webPull = await fetch(`${ctx.baseUrl}/user-api/sync`, {
+      headers: { Cookie: webCookie },
+    });
+    assert.equal(webPull.status, 200);
+    const webPullBody = await webPull.json();
+    assert.equal(webPullBody.version, 1);
+    assert.deepEqual(webPullBody.data, {
+      favorites: [{ id: 'ext-fav-1', title: '插件收藏' }],
+    });
+  } finally {
+    await ctx.cleanup();
+  }
+});

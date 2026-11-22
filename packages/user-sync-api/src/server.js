@@ -30,6 +30,37 @@ import {
 
 const MAX_AUTH_BODY_BYTES = 16 * 1024;
 const MAX_SYNC_BODY_BYTES = MAX_SYNC_BYTES + 256 * 1024;
+const EXTENSION_ORIGIN_REGEX = /^(chrome|moz)-extension:\/\/[a-zA-Z0-9._-]+$/;
+
+function getAllowedExtensionOrigin(req) {
+  const origin = req.headers.origin;
+  if (typeof origin !== 'string') return null;
+  return EXTENSION_ORIGIN_REGEX.test(origin) ? origin : null;
+}
+
+function isExtensionClient(req) {
+  if (getAllowedExtensionOrigin(req)) return true;
+  const clientType = req.headers['x-client-type'];
+  return typeof clientType === 'string' && clientType.trim().toLowerCase() === 'extension';
+}
+
+function applyExtensionCors(req, res) {
+  const allowedOrigin = getAllowedExtensionOrigin(req);
+  if (!allowedOrigin) return false;
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Client-Type');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  return true;
+}
+
+function extractBearerToken(req) {
+  const auth = req.headers.authorization;
+  if (typeof auth !== 'string') return '';
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
 
 function sendJson(res, statusCode, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
@@ -184,8 +215,11 @@ export function createApp(config, options = {}) {
   });
 
   function authenticate(req) {
-    const cookies = parseCookies(req.headers.cookie);
-    const token = cookies[SESSION_COOKIE_NAME];
+    let token = extractBearerToken(req);
+    if (!token) {
+      const cookies = parseCookies(req.headers.cookie);
+      token = cookies[SESSION_COOKIE_NAME] || '';
+    }
     if (!token) return null;
     const claims = verifySessionToken(token, config.secret);
     if (!claims) return null;
@@ -232,16 +266,17 @@ export function createApp(config, options = {}) {
     return true;
   }
 
-  function setSessionCookieHeader(req, userRow) {
+  function issueSession(req, userRow) {
     const token = createSessionToken(
       { userId: userRow.id, role: userRow.role },
       config.secret,
       config.sessionTtlMs,
     );
-    return buildSessionCookie(token, {
+    const cookie = buildSessionCookie(token, {
       secure: isSecureRequest(req, config.cookieSecure),
       maxAgeSec: config.sessionTtlMs / 1000,
     });
+    return { token, cookie };
   }
 
   function isMembershipEnabled() {
@@ -278,6 +313,12 @@ export function createApp(config, options = {}) {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     const pathname = url.pathname;
     const method = (req.method || 'GET').toUpperCase();
+
+    if (method === 'OPTIONS' && pathname.startsWith('/user-api/')) {
+      res.writeHead(204, { 'Cache-Control': 'no-store' });
+      res.end();
+      return;
+    }
 
     if (method === 'GET' && pathname === '/user-api/healthz') {
       return sendJson(res, 200, { ok: true });
@@ -323,8 +364,10 @@ export function createApp(config, options = {}) {
         throw err;
       }
 
-      const cookie = setSessionCookieHeader(req, userRow);
-      return sendJson(res, 201, { user: serializeUser(userRow) }, { 'Set-Cookie': cookie });
+      const { token, cookie } = issueSession(req, userRow);
+      const payload = { user: serializeUser(userRow) };
+      if (isExtensionClient(req)) payload.token = token;
+      return sendJson(res, 201, payload, { 'Set-Cookie': cookie });
     }
 
     if (method === 'POST' && pathname === '/user-api/login') {
@@ -346,8 +389,10 @@ export function createApp(config, options = {}) {
         return sendJson(res, 403, { error: '账号已被停用' });
       }
 
-      const cookie = setSessionCookieHeader(req, userRow);
-      return sendJson(res, 200, { user: serializeUser(userRow) }, { 'Set-Cookie': cookie });
+      const { token, cookie } = issueSession(req, userRow);
+      const payload = { user: serializeUser(userRow) };
+      if (isExtensionClient(req)) payload.token = token;
+      return sendJson(res, 200, payload, { 'Set-Cookie': cookie });
     }
 
     if (method === 'POST' && pathname === '/user-api/logout') {
@@ -511,8 +556,10 @@ export function createApp(config, options = {}) {
         throw new PayloadError('新密码长度需为 8 到 128 个字符', 400);
       }
       const updated = db.updateUserPassword(userRow.id, hashPassword(newPassword));
-      const cookie = setSessionCookieHeader(req, updated);
-      return sendJson(res, 200, { ok: true, user: serializeUser(updated) }, { 'Set-Cookie': cookie });
+      const { token, cookie } = issueSession(req, updated);
+      const payload = { ok: true, user: serializeUser(updated) };
+      if (isExtensionClient(req)) payload.token = token;
+      return sendJson(res, 200, payload, { 'Set-Cookie': cookie });
     }
 
     if (method === 'GET' && pathname === '/user-api/sync') {
@@ -729,6 +776,7 @@ export function createApp(config, options = {}) {
   }
 
   const server = http.createServer((req, res) => {
+    applyExtensionCors(req, res);
     handleRequest(req, res).catch((err) => {
       if (err instanceof PayloadError) {
         return sendJson(res, err.statusCode, { error: err.message });

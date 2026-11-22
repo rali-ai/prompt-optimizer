@@ -49,6 +49,42 @@ export class UserSyncError extends Error {
 }
 
 const DEFAULT_BASE_URL = '/user-api'
+export const EXTENSION_SYNC_BASE_URL = 'https://goprmpt.net/user-api'
+const EXTENSION_TOKEN_STORAGE_KEY = 'goprmpt_extension_sync_token'
+
+export function isExtensionRuntime(): boolean {
+  if (typeof window === 'undefined' || !window.location) return false
+  return (
+    window.location.protocol === 'chrome-extension:' ||
+    window.location.protocol === 'moz-extension:'
+  )
+}
+
+export function resolveDefaultSyncBaseUrl(): string {
+  return isExtensionRuntime() ? EXTENSION_SYNC_BASE_URL : DEFAULT_BASE_URL
+}
+
+function readStoredToken(): string {
+  if (!isExtensionRuntime()) return ''
+  try {
+    return window.localStorage?.getItem(EXTENSION_TOKEN_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function writeStoredToken(token: string | null): void {
+  if (!isExtensionRuntime()) return
+  try {
+    if (!token) {
+      window.localStorage?.removeItem(EXTENSION_TOKEN_STORAGE_KEY)
+    } else {
+      window.localStorage?.setItem(EXTENSION_TOKEN_STORAGE_KEY, token)
+    }
+  } catch {
+    // ignore storage quota/privacy errors
+  }
+}
 
 const FORBIDDEN_KEYS = new Set([
   'models',
@@ -150,13 +186,17 @@ async function requestJson<T>(
   init: RequestInit,
   fetchImpl: typeof fetch = fetch,
 ): Promise<T> {
+  const extMode = isExtensionRuntime()
+  const bearer = extMode ? readStoredToken() : ''
   let response: Response
   try {
     response = await fetchImpl(url, {
-      credentials: 'same-origin',
+      credentials: extMode ? 'omit' : 'same-origin',
       ...init,
       headers: {
         Accept: 'application/json',
+        ...(extMode ? { 'X-Client-Type': 'extension' } : {}),
+        ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
         ...(init.body ? { 'Content-Type': 'application/json' } : {}),
         ...(init.headers || {}),
       },
@@ -198,6 +238,9 @@ export async function getMe(
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SyncUser | null> {
+  if (isExtensionRuntime() && !readStoredToken()) {
+    return null
+  }
   try {
     const res = await requestJson<{ user: SyncUser }>(
       joinUrl(baseUrl, '/me'),
@@ -207,6 +250,7 @@ export async function getMe(
     return res.user
   } catch (err) {
     if (err instanceof UserSyncError && err.status === 401) {
+      writeStoredToken(null)
       return null
     }
     throw err
@@ -224,7 +268,7 @@ export async function register(
   if (typeof email === 'string' && email.trim()) {
     payload.email = email.trim()
   }
-  const res = await requestJson<{ user: SyncUser }>(
+  const res = await requestJson<{ user: SyncUser; token?: string }>(
     joinUrl(baseUrl, '/register'),
     {
       method: 'POST',
@@ -232,6 +276,9 @@ export async function register(
     },
     fetchImpl,
   )
+  if (typeof res.token === 'string' && res.token) {
+    writeStoredToken(res.token)
+  }
   return res.user
 }
 
@@ -257,7 +304,7 @@ export async function changePassword(
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SyncUser> {
-  const res = await requestJson<{ ok: boolean; user: SyncUser }>(
+  const res = await requestJson<{ ok: boolean; user: SyncUser; token?: string }>(
     joinUrl(baseUrl, '/me/password'),
     {
       method: 'POST',
@@ -265,6 +312,9 @@ export async function changePassword(
     },
     fetchImpl,
   )
+  if (typeof res.token === 'string' && res.token) {
+    writeStoredToken(res.token)
+  }
   return res.user
 }
 
@@ -306,7 +356,7 @@ export async function login(
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SyncUser> {
-  const res = await requestJson<{ user: SyncUser }>(
+  const res = await requestJson<{ user: SyncUser; token?: string }>(
     joinUrl(baseUrl, '/login'),
     {
       method: 'POST',
@@ -314,6 +364,9 @@ export async function login(
     },
     fetchImpl,
   )
+  if (typeof res.token === 'string' && res.token) {
+    writeStoredToken(res.token)
+  }
   return res.user
 }
 
@@ -321,7 +374,11 @@ export async function logout(
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  await requestJson<{ ok: boolean }>(joinUrl(baseUrl, '/logout'), { method: 'POST' }, fetchImpl)
+  try {
+    await requestJson<{ ok: boolean }>(joinUrl(baseUrl, '/logout'), { method: 'POST' }, fetchImpl)
+  } finally {
+    writeStoredToken(null)
+  }
 }
 
 export async function pullSync(

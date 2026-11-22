@@ -28,6 +28,10 @@
     "contextMenus",
     "sidePanel"
   ],
+  "host_permissions": [
+    "https://goprmpt.net/*",
+    "https://goprmpt.com/*"
+  ],
   "homepage_url": "https://goprmpt.com",
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline';",

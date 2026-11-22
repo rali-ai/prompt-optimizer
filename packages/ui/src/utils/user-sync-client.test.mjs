@@ -1,17 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  EXTENSION_SYNC_BASE_URL,
   UserSyncError,
   changePassword,
   confirmPasswordReset,
   getConfig,
   getMe,
+  isExtensionRuntime,
   login,
   logout,
   pullSync,
   pushSync,
   register,
   requestPasswordReset,
+  resolveDefaultSyncBaseUrl,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
   updateProfile,
@@ -225,4 +228,67 @@ test('register with optional email, updateProfile, and changePassword send expec
       body: { email: 'bob@example.com', code: '123456', newPassword: 'ResetPass789!' },
     },
   ])
+})
+
+test('extension runtime resolves goprmpt.net baseUrl and authenticates with stored Bearer token', async () => {
+  const prevWindow = globalThis.window
+  const storage = new Map()
+  globalThis.window = {
+    location: { protocol: 'chrome-extension:' },
+    localStorage: {
+      getItem: (k) => (storage.has(k) ? storage.get(k) : null),
+      setItem: (k, v) => storage.set(k, String(v)),
+      removeItem: (k) => storage.delete(k),
+    },
+  }
+
+  try {
+    assert.equal(isExtensionRuntime(), true)
+    assert.equal(resolveDefaultSyncBaseUrl(), EXTENSION_SYNC_BASE_URL)
+
+    // Without token stored, getMe skips network call and returns null
+    let fetchCalls = 0
+    const emptyMe = await getMe(EXTENSION_SYNC_BASE_URL, async () => {
+      fetchCalls += 1
+      return jsonResponse({})
+    })
+    assert.equal(emptyMe, null)
+    assert.equal(fetchCalls, 0)
+
+    const seen = []
+    const fetchMock = async (url, init) => {
+      seen.push({ url, credentials: init?.credentials, headers: init?.headers })
+      if (url.endsWith('/login')) {
+        return jsonResponse({
+          user: { id: 'u9', username: 'extuser', role: 'user', tier: 'free', tierExpiresAt: null, disabled: false, createdAt: 1, updatedAt: 1 },
+          token: 'ext_signed_token_xyz',
+        })
+      }
+      if (url.endsWith('/me')) {
+        return jsonResponse({
+          user: { id: 'u9', username: 'extuser', role: 'user', tier: 'free', tierExpiresAt: null, disabled: false, createdAt: 1, updatedAt: 1 },
+        })
+      }
+      return jsonResponse({ ok: true })
+    }
+
+    const user = await login('extuser', 'Password123!', EXTENSION_SYNC_BASE_URL, fetchMock)
+    assert.equal(user.username, 'extuser')
+
+    const me = await getMe(EXTENSION_SYNC_BASE_URL, fetchMock)
+    assert.equal(me?.username, 'extuser')
+
+    await logout(EXTENSION_SYNC_BASE_URL, fetchMock)
+
+    assert.equal(seen[0].credentials, 'omit')
+    assert.equal(seen[0].headers['X-Client-Type'], 'extension')
+    assert.equal(seen[1].headers.Authorization, 'Bearer ext_signed_token_xyz')
+    assert.equal(storage.size, 0)
+  } finally {
+    if (prevWindow === undefined) {
+      delete globalThis.window
+    } else {
+      globalThis.window = prevWindow
+    }
+  }
 })

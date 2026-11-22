@@ -438,6 +438,7 @@ import {
   pushSync,
   register,
   requestPasswordReset,
+  resolveDefaultSyncBaseUrl,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
   updateProfile,
@@ -452,7 +453,7 @@ export interface AccountSyncButtonProps {
 }
 
 const props = withDefaults(defineProps<AccountSyncButtonProps>(), {
-  baseUrl: '/user-api',
+  baseUrl: () => resolveDefaultSyncBaseUrl(),
 })
 
 const emit = defineEmits<{
