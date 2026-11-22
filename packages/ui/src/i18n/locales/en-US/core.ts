@@ -156,7 +156,7 @@ const messages = {
   "nav": {
     "home": "Home",
     "dashboard": "Dashboard",
-    "promptOptimizer": "提示词优化器",
+    "promptOptimizer": "GoPrmpt",
     "modelManager": "Model Manager",
     "history": "History",
     "templates": "Templates",

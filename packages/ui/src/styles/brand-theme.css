@@ -1,7 +1,9 @@
 /*
- * 高词 · GoPrmpt — Warm Alabaster + Deep Jade + Warm Copper Design Tokens
- * Light default: #FAF9F5 canvas, #F3F1EA chrome, #FFFFFF cards, #0F766E jade, #D96B43 copper
- * Dark mode:     #0D0E11 canvas, #15171C panels, #14B8A6 bright jade, #F59E0B warm amber
+ * 高词 · GoPrmpt — Warm Alabaster + Deep Jade + Warm Copper Studio Shell
+ * Completely distinct from upstream horizontal header layout:
+ * - Desktop: Left Warm-Stone Sidebar Rail + Slim Glass Top Mode Bar + Architectural Grid Canvas
+ * - Light default: #FAF9F5 canvas, #F3F1EA sidebar, #FFFFFF cards, #0F766E deep jade, #D96B43 warm copper
+ * - Dark mode:     #0D0E11 canvas, #111318 sidebar, #15171C cards, #14B8A6 bright jade, #F59E0B warm amber
  */
 
 :root {
@@ -9,15 +11,18 @@
   --gp-chrome: #F3F1EA;
   --gp-surface: #FFFFFF;
   --gp-surface-muted: #F7F5EE;
-  --gp-border: rgba(24, 24, 27, 0.08);
-  --gp-border-strong: rgba(15, 118, 110, 0.34);
+  --gp-border: rgba(24, 24, 27, 0.085);
+  --gp-border-strong: rgba(15, 118, 110, 0.36);
   --gp-ink: #18181B;
   --gp-muted: #52525B;
   --gp-accent: #0F766E;
   --gp-accent-hover: #0D9488;
+  --gp-accent-soft: rgba(15, 118, 110, 0.10);
   --gp-copper: #D96B43;
-  --gp-header-bg: rgba(250, 249, 245, 0.88);
-  --gp-shadow-card: 0 2px 12px -2px rgba(24, 24, 27, 0.05);
+  --gp-header-bg: rgba(250, 249, 245, 0.86);
+  --gp-grid: rgba(24, 24, 27, 0.026);
+  --gp-glow: rgba(15, 118, 110, 0.06);
+  --gp-shadow-card: 0 1px 2px rgba(24, 24, 27, 0.04), 0 10px 28px -14px rgba(24, 24, 27, 0.10);
 }
 
 html.dark,
@@ -27,17 +32,20 @@ html.dark,
   --gp-surface: #15171C;
   --gp-surface-muted: #1B1E25;
   --gp-border: rgba(255, 255, 255, 0.09);
-  --gp-border-strong: rgba(20, 184, 166, 0.42);
+  --gp-border-strong: rgba(20, 184, 166, 0.44);
   --gp-ink: #F4F4F5;
   --gp-muted: #A1A1AA;
   --gp-accent: #14B8A6;
   --gp-accent-hover: #2DD4BF;
+  --gp-accent-soft: rgba(20, 184, 166, 0.14);
   --gp-copper: #F59E0B;
-  --gp-header-bg: rgba(13, 14, 17, 0.88);
-  --gp-shadow-card: 0 6px 24px -6px rgba(0, 0, 0, 0.45);
+  --gp-header-bg: rgba(13, 14, 17, 0.86);
+  --gp-grid: rgba(255, 255, 255, 0.028);
+  --gp-glow: rgba(20, 184, 166, 0.10);
+  --gp-shadow-card: 0 8px 28px -8px rgba(0, 0, 0, 0.50);
 }
 
-/* Base Canvas */
+/* Base Editorial Typography & Canvas */
 html,
 body {
   background-color: var(--gp-bg);
@@ -46,61 +54,148 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Desktop Header — Editorial Linear/Claude.ai Style */
-.nav-header-enhanced {
-  min-height: 58px !important;
-  padding: 8px clamp(16px, 2vw, 28px) !important;
-  background: var(--gp-header-bg) !important;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+.gp-canvas-layout {
+  background-color: var(--gp-bg) !important;
+  background-image:
+    radial-gradient(circle at 12% 0%, var(--gp-glow), transparent 40%),
+    linear-gradient(var(--gp-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--gp-grid) 1px, transparent 1px);
+  background-size: 100% 100%, 36px 36px, 36px 36px;
+}
+
+.gp-brand-logo {
+  box-shadow: 0 4px 12px -3px rgba(15, 118, 110, 0.32);
+}
+
+/* Vertical Sidebar Action Rows inside .gp-sidebar-nav */
+.gp-sidebar-nav .page-destination-group,
+.gp-sidebar-nav .modal-action-group {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  width: 100% !important;
+  gap: 4px !important;
+  padding-right: 0 !important;
+  border-right: none !important;
+}
+
+.gp-sidebar-nav .page-destination-group {
+  padding-bottom: 10px !important;
   border-bottom: 1px solid var(--gp-border) !important;
-  box-shadow: 0 1px 0 0 var(--gp-border);
 }
 
-.nav-header-enhanced .brand-link {
-  padding: 4px 6px;
-  border-radius: 10px;
+.gp-sidebar-nav .modal-action-group .n-badge {
+  display: block;
+  width: 100%;
 }
 
-.nav-header-enhanced .logo-image {
-  border-radius: 9px !important;
-  box-shadow: 0 4px 12px -3px rgba(15, 118, 110, 0.28);
+.gp-sidebar-nav .action-button {
+  width: 100% !important;
+  height: 38px !important;
+  justify-content: flex-start !important;
+  padding: 0 11px !important;
+  border-radius: 10px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--gp-muted) !important;
+  font-weight: 500 !important;
+  font-size: 13px !important;
+  box-shadow: none !important;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
 }
 
-.nav-header-enhanced .theme-title {
-  font-weight: 700 !important;
-  letter-spacing: -0.02em;
+.gp-sidebar-nav .action-button:hover {
+  background: var(--gp-surface) !important;
+  color: var(--gp-ink) !important;
+  border-color: var(--gp-border) !important;
+}
+
+.gp-sidebar-nav .action-button.page-destination-active {
+  background: var(--gp-accent-soft) !important;
+  color: var(--gp-accent) !important;
+  border-color: var(--gp-border-strong) !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+
+.gp-sidebar-nav .action-button .n-button__icon {
+  margin-right: 9px !important;
+}
+
+/* Docked Utility Footer inside Sidebar */
+.gp-sidebar-nav .theme-toggle {
+  margin-top: auto !important;
+  width: 100% !important;
+  height: 36px !important;
+  justify-content: flex-start !important;
+  padding: 0 11px !important;
+  border-radius: 10px !important;
+  border: 1px solid var(--gp-border) !important;
+  background: var(--gp-surface) !important;
   color: var(--gp-ink) !important;
 }
 
-.nav-header-enhanced .core-navigation {
-  margin-left: 12px !important;
-  padding-left: 14px !important;
-  border-left: 1px solid var(--gp-border) !important;
+.gp-sidebar-nav .aux-icon-group {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 6px !important;
+  margin-left: 0 !important;
+  padding-top: 8px !important;
+  border-top: 1px solid var(--gp-border) !important;
 }
 
-/* Refined Action Buttons */
-.nav-header-enhanced .nav-actions .action-button {
-  border-radius: 10px !important;
-  padding-inline: 10px !important;
-  font-weight: 500;
-  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+.gp-sidebar-nav .aux-icon-group .n-button {
+  width: 100%;
+  justify-content: flex-start;
+  border-radius: 10px;
 }
 
-.nav-header-enhanced .nav-actions .action-button:hover {
-  transform: translateY(-1px);
+/* Collapsed Sidebar Rail State (66px) */
+.gp-desktop-shell--collapsed .gp-sidebar-nav .action-button,
+.gp-desktop-shell--collapsed .gp-sidebar-nav .theme-toggle {
+  justify-content: center !important;
+  padding: 0 !important;
 }
 
-/* Editorial Cards & Panels */
+.gp-desktop-shell--collapsed .gp-sidebar-nav .action-button-label,
+.gp-desktop-shell--collapsed .gp-sidebar-nav .theme-toggle-label {
+  display: none !important;
+}
+
+.gp-desktop-shell--collapsed .gp-sidebar-nav .action-button .n-button__icon,
+.gp-desktop-shell--collapsed .gp-sidebar-nav .theme-toggle .n-button__icon {
+  margin-right: 0 !important;
+}
+
+.gp-desktop-shell--collapsed .gp-sidebar-nav .aux-icon-group .n-button {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* Elevated Bespoke Cards & Primary Buttons */
 .main-content-wrapper .n-card {
-  border-radius: 14px !important;
-  border-color: var(--gp-border) !important;
+  border-radius: 16px !important;
+  border: 1px solid var(--gp-border) !important;
+  background-color: var(--gp-surface) !important;
   box-shadow: var(--gp-shadow-card);
   transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .main-content-wrapper .n-card:focus-within {
   border-color: var(--gp-border-strong) !important;
+}
+
+.gp-studio-root .n-button--primary-type:not(.n-button--quaternary-type):not(.n-button--text-type) {
+  border-radius: 10px;
+  font-weight: 600;
+  box-shadow: 0 6px 18px -6px rgba(15, 118, 110, 0.42);
+  transition: transform 140ms ease, box-shadow 180ms ease, filter 140ms ease;
+}
+
+.gp-studio-root .n-button--primary-type:not(.n-button--quaternary-type):not(.n-button--text-type):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px -6px rgba(15, 118, 110, 0.50);
 }
 
 /* Subtle Warm Scrollbars */

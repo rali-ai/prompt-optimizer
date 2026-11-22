@@ -156,7 +156,7 @@ const messages = {
   "nav": {
     "home": "首页",
     "dashboard": "仪表盘",
-    "promptOptimizer": "提示词优化器",
+    "promptOptimizer": "高词",
     "modelManager": "模型管理",
     "history": "历史记录",
     "templates": "功能提示词",

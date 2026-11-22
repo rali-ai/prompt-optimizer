@@ -1,71 +1,129 @@
 <template>
   <!-- 使用ToastUI包装整个布局以提供NMessageProvider -->
   <ToastUI>
-    <NLayout ref="layoutRoot" class="compact-viewport-frame" :style="{ height: isCompact ? '100dvh' : '100vh', maxHeight: isCompact ? '100dvh' : '100vh' }" style="position: fixed; inset: 0; width: 100vw;
-    overflow: hidden; display: flex; min-height: 0;"
-    content-style="height: 100%; max-height: 100%; min-height: 0; overflow: hidden;"
+    <NLayout
+      ref="layoutRoot"
+      class="compact-viewport-frame gp-studio-root"
+      :style="{ height: isCompact ? '100dvh' : '100vh', maxHeight: isCompact ? '100dvh' : '100vh' }"
+      style="position: fixed; inset: 0; width: 100vw; overflow: hidden; display: flex; min-height: 0;"
+      content-style="height: 100%; max-height: 100%; min-height: 0; overflow: hidden;"
     >
+      <!-- 移动端紧凑布局：顶部导航 + 全高内容区 -->
+      <div
+        v-if="isCompact"
+        class="compact-viewport-frame gp-mobile-shell"
+        :style="{ height: '100dvh', maxHeight: '100dvh' }"
+      >
+        <NLayoutHeader class="compact-header">
+          <slot name="mobile-nav" />
+        </NLayoutHeader>
+        <NLayoutContent
+          style="flex: 1; min-height: 0; overflow: hidden;"
+          content-style="height: 100%; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;"
+        >
+          <div ref="contentRoot" class="main-content-wrapper">
+            <slot name="main"></slot>
+          </div>
+        </NLayoutContent>
+      </div>
 
-      <NFlex vertical class="compact-viewport-frame" :style="{ height: isCompact ? '100dvh' : '100vh', maxHeight: isCompact ? '100dvh' : '100vh' }" style="position: fixed; inset: 0; width: 100vw; min-height: 0;">
-      <!-- 顶部导航栏 -->
-      <NLayoutHeader v-show="isCompact" class="compact-header"><slot name="mobile-nav" /></NLayoutHeader>
-      <NLayoutHeader v-show="!isCompact" class="theme-header nav-header-enhanced">
-        <NFlex justify="space-between" align="center" class="w-full nav-content" :lang="locale" :wrap="false" :size="[16, 12]">
-          <!-- 左侧：Logo + 标题 + 核心导航 -->
-          <NFlex align="center" :size="16" :wrap="false" class="nav-primary">
-            <!-- Logo + 标题 -->
-            <div class="brand-link" :title="t('common.appName')">
-              <NFlex align="center" :size="8" :wrap="false">
-                <AppPreviewImage
-                  :src="logoSrc"
-                  :alt="t('common.appName')"
-                  :width="logoSize"
-                  :height="logoSize"
-                  object-fit="cover"
-                  class="logo-image"
-                  :show-toolbar="false"
-                  :preview-disabled="true"
-                  :fallback-src="fallbackLogoSrc"
-                />
-                <NText class="text-lg sm:text-xl font-bold theme-title" tag="h2">
+      <!-- 桌面端全新双区工作台壳：左侧可折叠高词侧边栏 + 右侧极简模式顶栏与全幅画布 -->
+      <div
+        v-else
+        class="gp-desktop-shell"
+        :class="{ 'gp-desktop-shell--collapsed': sidebarCollapsed }"
+        :lang="locale"
+      >
+        <aside class="gp-sidebar" :aria-label="t('common.appName')">
+          <div class="gp-sidebar-brand">
+            <a class="gp-brand-link" href="https://goprmpt.com" target="_blank" rel="noopener noreferrer" :title="t('common.appName')">
+              <AppPreviewImage
+                :src="logoSrc"
+                :alt="t('common.appName')"
+                :width="30"
+                :height="30"
+                object-fit="cover"
+                class="logo-image gp-brand-logo"
+                :show-toolbar="false"
+                :preview-disabled="true"
+                :fallback-src="fallbackLogoSrc"
+              />
+              <div v-show="!sidebarCollapsed" class="gp-brand-meta">
+                <NText class="theme-title gp-brand-title" tag="h2">
                   <slot name="title">{{ t('common.appName') }}</slot>
                 </NText>
-              </NFlex>
-            </div>
+                <span class="gp-brand-sub">GoPrmpt</span>
+              </div>
+            </a>
+            <button
+              type="button"
+              class="gp-collapse-btn"
+              :title="sidebarCollapsed ? (isEn ? 'Expand sidebar' : '展开侧边栏') : (isEn ? 'Collapse sidebar' : '收起侧边栏')"
+              :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+              @click="toggleSidebar"
+            >
+              <NIcon :size="16">
+                <PanelLeftOpen v-if="sidebarCollapsed" :stroke-width="1.75" />
+                <PanelLeftClose v-else :stroke-width="1.75" />
+              </NIcon>
+            </button>
+          </div>
 
-            <!-- 核心导航元素 -->
-            <div class="core-navigation">
-              <slot name="core-nav"></slot>
-            </div>
-          </NFlex>
-
-          <!-- 右侧：操作按钮 -->
-          <NFlex align="center" :size="4" :wrap="false" justify="end" class="nav-actions" :lang="locale">
+          <div class="gp-sidebar-nav nav-actions" :lang="locale">
             <slot name="actions"></slot>
-          </NFlex>
-        </NFlex>
-      </NLayoutHeader>
+          </div>
+        </aside>
 
-      <!-- 主要内容区域 - 严格控制在剩余空间内 -->
-      <NLayoutContent has-sider
-        style="flex: 1; min-height: 0; overflow: hidden;"
-        :content-style="isCompact ? 'height: 100%; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;' : 'height: 100%; max-height: 100%; min-height: 0; box-sizing: border-box; padding: 14px clamp(16px, 2vw, 32px) 18px; display: flex; flex-direction: column; align-items: stretch; overflow: hidden;'"
-      >
-        <div ref="contentRoot" class="main-content-wrapper">
-          <slot name="main"></slot>
+        <div class="gp-studio-column">
+          <NLayoutHeader class="theme-header gp-topbar">
+            <div class="gp-topbar-inner">
+              <div class="gp-topbar-left core-navigation">
+                <slot name="core-nav"></slot>
+              </div>
+              <div class="gp-topbar-right">
+                <a class="gp-top-pill" href="https://goprmpt.com/library/" target="_blank" rel="noopener noreferrer">
+                  <NIcon :size="14"><BookOpen :stroke-width="1.75" /></NIcon>
+                  <span>{{ isEn ? '151 Prompts' : '151 条词库' }}</span>
+                </a>
+                <a class="gp-top-pill" href="https://goprmpt.com/learn/" target="_blank" rel="noopener noreferrer">
+                  <NIcon :size="14"><GraduationCap :stroke-width="1.75" /></NIcon>
+                  <span>{{ isEn ? '26 Lessons' : '26 节教程' }}</span>
+                </a>
+              </div>
+            </div>
+          </NLayoutHeader>
+
+          <NLayoutContent
+            has-sider
+            class="gp-canvas-layout"
+            style="flex: 1; min-height: 0; overflow: hidden;"
+            content-style="height: 100%; max-height: 100%; min-height: 0; box-sizing: border-box; padding: 16px clamp(16px, 2vw, 28px) 20px; display: flex; flex-direction: column; align-items: stretch; overflow: hidden;"
+          >
+            <div ref="contentRoot" class="main-content-wrapper">
+              <slot name="main"></slot>
+            </div>
+          </NLayoutContent>
         </div>
-      </NLayoutContent>
-      </NFlex>
+      </div>
 
       <!-- 弹窗插槽 -->
       <slot name="modals"></slot>
-
     </NLayout>
   </ToastUI>
 </template>
 
 <script setup lang="ts">
+import { computed, ref, onMounted } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
+import { NLayout, NLayoutHeader, NLayoutContent, NText, NIcon } from 'naive-ui'
+import { PanelLeftClose, PanelLeftOpen, BookOpen, GraduationCap } from '@lucide/vue'
+import ToastUI from './Toast.vue'
+import logoImage from '../assets/logo.svg'
+import AppPreviewImage from './media/AppPreviewImage.vue'
+import { i18n } from '../plugins/i18n'
 import { useWorkspaceLayout } from '../composables/ui/useWorkspaceLayout'
+
 const { isCompact, containerWidth, contentHeight } = useWorkspaceLayout()
 const layoutRoot = ref()
 const contentRoot = ref<HTMLElement>()
@@ -78,23 +136,32 @@ useResizeObserver(layoutRoot, (entries) => {
   if (width) containerWidth.value = width
 })
 
-import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { useResizeObserver } from '@vueuse/core'
-
-import { useI18n } from 'vue-i18n'
-import { NLayout, NLayoutHeader, NLayoutContent, NFlex, NText } from 'naive-ui'
-import ToastUI from './Toast.vue'
-import logoImage from '../assets/logo.svg'
-import AppPreviewImage from './media/AppPreviewImage.vue'
-import { i18n } from '../plugins/i18n'
-
 const { t } = useI18n()
 const locale = computed(() => i18n.global.locale.value)
+const isEn = computed(() => String(locale.value).startsWith('en'))
 
-// Logo图片配置
+const SIDEBAR_KEY = 'goprmpt-sidebar-collapsed'
+const sidebarCollapsed = ref(false)
+
+onMounted(() => {
+  try {
+    sidebarCollapsed.value = window.localStorage.getItem(SIDEBAR_KEY) === '1'
+  } catch {
+    sidebarCollapsed.value = false
+  }
+})
+
+const toggleSidebar = () => {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  try {
+    window.localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed.value ? '1' : '0')
+  } catch {
+    // ignore storage errors
+  }
+}
+
 const logoSrc = logoImage
 
-// 创建简单的SVG fallback logo（深翠玉 + 暖铜星芒）
 const createFallbackSvg = () => {
   const svg = `data:image/svg+xml,${encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
@@ -106,38 +173,190 @@ const createFallbackSvg = () => {
 }
 
 const fallbackLogoSrc = createFallbackSvg()
-
-// 响应式Logo尺寸 - 使用更智能的检测
-const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1024)
-
-const updateWindowWidth = () => {
-  windowWidth.value = window.innerWidth
-}
-
-onMounted(() => {
-  if (typeof window !== 'undefined') {
-    windowWidth.value = window.innerWidth
-    window.addEventListener('resize', updateWindowWidth)
-  }
-})
-
-onUnmounted(() => {
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('resize', updateWindowWidth)
-  }
-})
-
-const logoSize = computed(() => {
-  if (windowWidth.value < 480) {
-    return 20 // 超小屏幕
-  } else if (windowWidth.value < 640) {
-    return 24 // 小屏幕
-  }
-  return 28 // 默认尺寸
-})
 </script>
 
 <style>
+.gp-mobile-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  min-height: 0;
+}
+
+.gp-desktop-shell {
+  display: flex;
+  flex-direction: row;
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--gp-bg, #FAF9F5);
+}
+
+.gp-sidebar {
+  width: 224px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 12px 12px;
+  gap: 14px;
+  background: var(--gp-chrome, #F3F1EA);
+  border-right: 1px solid var(--gp-border, rgba(24, 24, 27, 0.08));
+  transition: width 180ms ease;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.gp-desktop-shell--collapsed .gp-sidebar {
+  width: 66px;
+  padding-inline: 8px;
+}
+
+.gp-sidebar-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 10px;
+  border-bottom: 1px solid var(--gp-border, rgba(24, 24, 27, 0.08));
+}
+
+.gp-desktop-shell--collapsed .gp-sidebar-brand {
+  flex-direction: column;
+  gap: 8px;
+  padding-inline: 0;
+}
+
+.gp-brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+
+.gp-brand-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.gp-brand-title {
+  margin: 0 !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  line-height: 1.15 !important;
+  letter-spacing: -0.02em;
+  color: var(--gp-ink, #18181B) !important;
+  white-space: nowrap;
+}
+
+.gp-brand-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--gp-muted, #52525B);
+  letter-spacing: 0.02em;
+}
+
+.gp-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gp-muted, #52525B);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.gp-collapse-btn:hover {
+  background: rgba(15, 118, 110, 0.09);
+  color: var(--gp-accent, #0F766E);
+  border-color: var(--gp-border-strong, rgba(15, 118, 110, 0.28));
+}
+
+.gp-sidebar-nav {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gp-studio-column {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.gp-topbar {
+  min-height: 54px !important;
+  padding: 8px clamp(16px, 2vw, 28px) !important;
+  background: var(--gp-header-bg, rgba(250, 249, 245, 0.88)) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--gp-border, rgba(24, 24, 27, 0.08)) !important;
+  flex-shrink: 0;
+}
+
+.gp-topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 36px;
+}
+
+.gp-topbar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.gp-topbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.gp-top-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  color: var(--gp-muted, #52525B);
+  background: var(--gp-surface, #FFFFFF);
+  border: 1px solid var(--gp-border, rgba(24, 24, 27, 0.08));
+  transition: color 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.gp-top-pill:hover {
+  color: var(--gp-accent, #0F766E);
+  border-color: var(--gp-border-strong, rgba(15, 118, 110, 0.36));
+  transform: translateY(-1px);
+}
+
+@media (max-width: 1120px) {
+  .gp-topbar-right {
+    display: none;
+  }
+}
+
 .main-content-wrapper {
   width: 100%;
   margin: 0;
@@ -154,171 +373,10 @@ const logoSize = computed(() => {
   min-height: 0;
 }
 
-/* 增强导航栏样式 */
-.nav-header-enhanced {
-  min-height: 64px !important;
-  padding: 12px 16px !important;
-}
-
-.nav-content {
-  min-height: 40px;
-}
-
-.nav-actions {
-  min-height: 40px;
-  min-width: 0;
-  flex: 1;
-  container: header-actions / inline-size;
-}
-
-.nav-primary {
-  min-width: 0;
-  max-width: calc(100% - 410px);
-}
-
-.nav-primary .core-navigation,
-.nav-primary .core-navigation > * {
-  min-width: 0;
-}
-
-.nav-actions > * {
-  flex-shrink: 0;
-}
-
-/* Measure the space left after the brand and mode selectors, not the viewport. */
-.nav-header-enhanced .nav-actions .action-button {
-  width: var(--nav-action-width, auto);
-}
-
-.nav-header-enhanced .nav-actions .action-button-label {
-  display: var(--nav-label-display, inline);
-}
-
-.nav-header-enhanced .nav-actions .action-button .n-button__icon {
-  margin-right: var(--nav-icon-margin, 6px);
-}
-
-.nav-header-enhanced .nav-actions .action-button {
-  padding-inline: 6px;
-}
-
-.nav-header-enhanced .nav-actions .modal-action-group,
-.nav-header-enhanced .nav-actions .aux-icon-group {
-  gap: 4px;
-}
-
-.nav-header-enhanced .nav-actions .aux-icon-group {
-  margin-left: 0;
-}
-
-.nav-header-enhanced .nav-actions .page-destination-group {
-  padding-right: 4px;
-}
-
-@container header-actions (max-width: 1000px) {
-  .nav-header-enhanced .nav-actions .theme-toggle {
-    width: 30px;
-    padding: 0;
-  }
-  .nav-header-enhanced .nav-actions .theme-toggle-label {
-    display: none;
-  }
-  .nav-header-enhanced .nav-actions .theme-toggle .n-button__icon {
-    margin-right: 0;
-  }
-}
-
-/* Configuration labels yield before the frequent favorites/templates/history. */
-@container header-actions (max-width: 1000px) {
-  .nav-header-enhanced .nav-actions:lang(en) .nav-config-action {
-    --nav-label-display: none;
-    --nav-icon-margin: 0px;
-    --nav-action-width: 36px;
-  }
-}
-
-@container header-actions (max-width: 740px) {
-  .nav-header-enhanced .nav-actions .nav-config-action {
-    --nav-label-display: none;
-    --nav-icon-margin: 0px;
-    --nav-action-width: 36px;
-  }
-}
-
-@container header-actions (max-width: 680px) {
-  .nav-header-enhanced .nav-actions:lang(en) .modal-action-group {
-    --nav-label-display: none;
-    --nav-icon-margin: 0px;
-    --nav-action-width: 36px;
-  }
-}
-
-@container header-actions (max-width: 555px) {
-  .nav-header-enhanced .nav-actions .modal-action-group {
-    --nav-label-display: none;
-    --nav-icon-margin: 0px;
-    --nav-action-width: 36px;
-  }
-}
-
-@container header-actions (max-width: 500px) {
-  .nav-header-enhanced .nav-actions .page-destination-group {
-    --nav-label-display: none;
-    --nav-icon-margin: 0px;
-    --nav-action-width: 36px;
-  }
-}
-
-/* Long English mode names need the brand's text space at the desktop minimum.
-   The logo keeps its name/tooltip; mode selectors can use their existing wrap. */
-@media (max-width: 1280px) {
-  .nav-content:lang(en) .theme-title {
-    display: none;
-  }
-}
-
-.brand-link {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px 6px 6px;
-  color: inherit;
-}
-
-/* Logo样式优化 */
 .logo-image {
-  border-radius: 6px;
+  border-radius: 9px;
   transition: transform 0.2s ease-in-out;
   flex-shrink: 0;
-}
-
-/* 标题文字对齐优化 */
-.theme-title {
-  line-height: 1.2 !important;
-  margin: 0 !important;
-  white-space: nowrap;
-  transition: opacity 0.2s ease-in-out;
-}
-
-/* 核心导航样式 */
-.core-navigation {
-  display: flex;
-  align-items: center;
-  margin-left: 16px;
-  padding-left: 16px;
-  border-left: 1px solid var(--n-border-color);
-  min-height: 32px;
-}
-
-/* 响应式优化 */
-@media (max-width: 639px) {
-  .logo-image {
-    border-radius: 4px;
-  }
-
-  .core-navigation {
-    margin-left: 8px;
-    padding-left: 8px;
-  }
 }
 
 .custom-select {
