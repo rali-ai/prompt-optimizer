@@ -1,0 +1,73 @@
+<view class="gp-page">
+  <view class="gp-card">
+    <view class="gp-section-title">模型平台</view>
+    <view class="gp-chips">
+      <view
+        wx:for="{{providers}}"
+        wx:key="id"
+        class="gp-chip {{item.id === providerId ? 'gp-chip-on' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="onPickProvider"
+      >{{item.name}}</view>
+    </view>
+    <view class="gp-muted">都走 OpenAI 兼容接口。选好预设后只需填 API Key；模型名可改成平台当前提供的型号。</view>
+  </view>
+
+  <view class="gp-card">
+    <view class="field">
+      <view class="gp-section-title">接口地址（Base URL）</view>
+      <input
+        class="gp-input"
+        value="{{baseUrl}}"
+        maxlength="-1"
+        placeholder="https://api.example.com/v1"
+        placeholder-class="gp-placeholder"
+        bindinput="onBaseUrl"
+      />
+      <view class="gp-muted hint">会请求 {接口地址}/chat/completions，必须是 https。</view>
+    </view>
+
+    <view class="field">
+      <view class="gp-row-between">
+        <view class="gp-section-title">API Key</view>
+        <view class="gp-link toggle" hover-class="gp-pressed" bindtap="onToggleKey">{{showKey ? '隐藏' : '显示'}}</view>
+      </view>
+      <input
+        class="gp-input"
+        value="{{apiKey}}"
+        password="{{!showKey}}"
+        maxlength="-1"
+        placeholder="sk-..."
+        placeholder-class="gp-placeholder"
+        bindinput="onApiKey"
+      />
+    </view>
+
+    <view class="field">
+      <view class="gp-section-title">模型名称</view>
+      <input
+        class="gp-input"
+        value="{{model}}"
+        maxlength="-1"
+        placeholder="例如 deepseek-v4-flash"
+        placeholder-class="gp-placeholder"
+        bindinput="onModel"
+      />
+    </view>
+  </view>
+
+  <view wx:if="{{testMessage}}" class="{{testOk ? 'test-ok' : 'gp-error'}}">
+    <text class="gp-text">{{testMessage}}</text>
+  </view>
+
+  <view class="gp-actions">
+    <view class="gp-btn {{testing ? 'gp-btn-disabled' : ''}}" hover-class="gp-pressed" bindtap="onTest">{{testing ? '测试中…' : '测试连接'}}</view>
+    <view class="gp-btn gp-btn-primary" hover-class="gp-pressed" bindtap="onSave">保存</view>
+  </view>
+
+  <view class="gp-card notes">
+    <view class="gp-section-title">使用须知</view>
+    <view class="note">API Key 只保存在这台手机的小程序本地存储里，不会上传到我们的服务器，但也没有加密。请使用单独创建、可随时作废的 Key，并在平台设置用量上限。</view>
+    <view class="note">小程序只能访问后台配置过的「request 合法域名」。如果提示域名不在合法域名里，需要小程序管理员在后台添加对应平台的域名。</view>
+  </view>
+</view>

@@ -22,15 +22,20 @@ function load() {
   return Object.assign(defaults(), storage.get(KEY, {}))
 }
 
-function save(settings) {
-  const clean = {
-    providerId: settings.providerId || 'custom',
-    baseUrl: String(settings.baseUrl || '').trim(),
-    apiKey: String(settings.apiKey || '').trim(),
-    model: String(settings.model || '').trim()
+// 表单值 → 设置：去掉首尾空格，只留四个字段。
+function normalize(form) {
+  return {
+    providerId: form.providerId || 'custom',
+    baseUrl: String(form.baseUrl || '').trim(),
+    apiKey: String(form.apiKey || '').trim(),
+    model: String(form.model || '').trim()
   }
-  storage.set(KEY, clean)
-  return clean
+}
+
+function save(form) {
+  const settings = normalize(form)
+  storage.set(KEY, settings)
+  return settings
 }
 
 function isReady(settings) {
@@ -41,4 +46,4 @@ function getProvider(id) {
   return PROVIDERS.find((p) => p.id === id) || PROVIDERS[PROVIDERS.length - 1]
 }
 
-module.exports = { PROVIDERS, load, save, isReady, getProvider }
+module.exports = { PROVIDERS, load, normalize, save, isReady, getProvider }

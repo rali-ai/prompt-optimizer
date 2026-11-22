@@ -1,0 +1,40 @@
+{
+  "pages": [
+    "pages/index/index"
+  ],
+  "subPackages": [
+    {
+      "root": "goprmpt",
+      "pages": [
+        "pages/optimize/optimize",
+        "pages/history/history",
+        "pages/settings/settings"
+      ]
+    },
+    {
+      "root": "goprmpt-library",
+      "pages": [
+        "pages/library/library",
+        "pages/prompt/prompt",
+        "pages/learn/learn",
+        "pages/lesson/lesson"
+      ]
+    }
+  ],
+  "preloadRule": {
+    "pages/index/index": {
+      "network": "all",
+      "packages": ["goprmpt", "goprmpt-library"]
+    }
+  },
+  "window": {
+    "navigationBarTitleText": "提示词优化器",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f5f6f8",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents",
+  "sitemapLocation": "sitemap.json"
+}

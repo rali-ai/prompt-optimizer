@@ -1,0 +1,22 @@
+{
+  "description": "goprmpt 提示词优化器小程序",
+  "appid": "touristappid",
+  "projectname": "goprmpt-miniprogram",
+  "compileType": "miniprogram",
+  "libVersion": "3.0.0",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true
+  },
+  "packOptions": {
+    "ignore": [
+      { "type": "folder", "value": "tools" },
+      { "type": "suffix", "value": ".md" }
+    ],
+    "include": []
+  },
+  "condition": {}
+}

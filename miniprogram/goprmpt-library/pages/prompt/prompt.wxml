@@ -1,0 +1,61 @@
+<view wx:if="{{missing}}" class="gp-empty">没有找到这条提示词</view>
+
+<view wx:else class="gp-page">
+  <view class="gp-card">
+    <view class="gp-row-between">
+      <view class="gp-muted">{{categoryName}} · {{targetLabel}}</view>
+      <view class="gp-segment">
+        <view
+          wx:for="{{languages}}"
+          wx:key="id"
+          class="gp-segment-item {{item.id === lang ? 'gp-segment-on' : ''}}"
+          data-id="{{item.id}}"
+          bindtap="onPickLang"
+        >{{item.name}}</view>
+      </view>
+    </view>
+    <view class="title">{{title}}</view>
+    <view class="summary">{{summary}}</view>
+    <view wx:if="{{tags.length}}" class="tags">
+      <view wx:for="{{tags}}" wx:key="*this" class="gp-tag">{{item}}</view>
+    </view>
+    <view wx:if="{{credit}}" class="credit">{{credit}}</view>
+  </view>
+
+  <view wx:if="{{lang !== textLang}}" class="gp-notice">这条提示词还没有英文版，下面显示中文。</view>
+
+  <view wx:if="{{fields.length}}" class="gp-card">
+    <view class="gp-section-title">填写变量</view>
+    <view wx:for="{{fields}}" wx:key="name" class="field">
+      <view class="field-name">{{item.name}}</view>
+      <view wx:if="{{item.description}}" class="gp-muted field-desc">{{item.description}}</view>
+      <textarea
+        class="gp-textarea field-input"
+        value="{{item.value}}"
+        maxlength="-1"
+        auto-height="{{true}}"
+        disable-default-padding="{{true}}"
+        placeholder="填写{{item.name}}"
+        placeholder-class="gp-placeholder"
+        data-index="{{index}}"
+        bindinput="onField"
+      />
+    </view>
+  </view>
+
+  <view class="gp-card">
+    <view class="gp-section-title">最终提示词</view>
+    <text class="gp-text final" user-select="{{true}}">{{final}}</text>
+    <view wx:if="{{fields.length}}" class="gp-muted hint">{{keepHint}}</view>
+  </view>
+
+  <view wx:if="{{example}}" class="gp-card">
+    <view class="gp-section-title">示例</view>
+    <text class="gp-text example" user-select="{{true}}">{{example}}</text>
+  </view>
+
+  <view class="gp-actions">
+    <view class="gp-btn" hover-class="gp-pressed" bindtap="onCopy">复制</view>
+    <view class="gp-btn gp-btn-primary" hover-class="gp-pressed" bindtap="onOptimize">去优化</view>
+  </view>
+</view>

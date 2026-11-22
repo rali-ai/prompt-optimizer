@@ -1,0 +1,17 @@
+@import "../../styles/theme.wxss";
+
+.intro {
+  margin-bottom: 32rpx;
+}
+
+.lesson-title {
+  font-size: var(--gp-font-lg);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.lesson-summary {
+  margin-top: 8rpx;
+  font-size: var(--gp-font-sm);
+  color: var(--gp-text-2);
+}
