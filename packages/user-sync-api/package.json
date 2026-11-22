@@ -1,0 +1,14 @@
+{
+  "name": "user-sync-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Zero-dependency optional user account, cloud sync (BYOK-safe), and pre-wired membership backend for goprmpt.net",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

@@ -2,6 +2,8 @@ packages:
   - packages/*
   # 小程序后端单独部署，零依赖，不进 pnpm 工作区（也就不影响 pnpm-lock.yaml 和 pnpm -r test）
   - '!packages/mp-server'
+  # 用户账号与云同步后端，零依赖（Node 24 内置 node:sqlite），不进 pnpm 工作区
+  - '!packages/user-sync-api'
 ignoredBuiltDependencies:
   - electron
   - electron-winstaller
