@@ -9892,6 +9892,66 @@ module.exports = {
         "after": "A woman in her twenties sits at a window seat in a cafe, reading a book. Short hair, a beige knit sweater, a focused expression, her face turned slightly toward the window.\n\nScene: a small cafe on an autumn afternoon. A latte and a croissant sit on the wooden table; outside the window is a street with falling leaves. Other customers in the background are blurred.\nComposition: medium shot at eye level, the woman in the right third of the frame, the street view filling the left.\nLighting: warm, low afternoon sunlight slanting in, leaving soft patches of light on the table and her shoulder.\nStyle: film photography look, slight grain, warm and muted colors.\nText: no text anywhere in the image.\nAspect ratio: portrait 4:5, for an Instagram post.",
         "exercise": "Take an old keyword-stacked image prompt of yours and rewrite it as full sentences covering subject, scene, composition, lighting, style, text and aspect ratio. After generating, make one edit instruction that changes a single thing (such as the season) and check whether everything else stayed the same."
       }
+    },
+    {
+      "id": "pattern-image-set-consistency",
+      "track": "pattern",
+      "title": "写法 12：多图成套，风格统一但版式不雷同",
+      "summary": "画一整套图时，先写分镜、再画封面定调，其余每页带着封面做参考，只沿用配色、字体和图形语言，版式按各页内容重新设计。",
+      "sections": [
+        {
+          "heading": "两种常见的失败",
+          "body": "做小红书多图卡片、PPT、连续漫画这类成套的图，常见两种翻车：\n\n- **每张单独画**：第 3 张换了配色，第 5 张换了字体，标题在好几张上重复出现，放在一起不像一套。\n- **只说“和参考图一样”**：风格是统一了，可每张的构图都照抄参考图，六张看起来像同一张换了几个字。\n\n要的是“像一套”而不是“像一张”：视觉语言统一，版式各页不同。"
+        },
+        {
+          "heading": "第 1 步：先写结构化的分镜",
+          "body": "不要直接开画，先让模型写一份分镜，分成两部分：\n\n- **全套共用的视觉描述**：配色（写出具体颜色）、字体风格、图形语言（比如圆角色块、手绘线条、贴纸元素）、画面比例。\n- **每页各自的内容和版式**：这一页讲什么、标题是什么、主体放在哪里、用什么版式（大图、清单、对比、数字）。\n\n标题在分镜里逐页写定，就不会在几张图上重复。分镜写完先自己看一遍，改好再画。"
+        },
+        {
+          "heading": "第 2 步：先画封面定调",
+          "body": "封面最能代表整套的气质，先画它。多生成几张，挑一张配色和字体最满意的，作为全套的“样板”。封面没定下来之前，不要画其他页。"
+        },
+        {
+          "heading": "第 3 步：其余每页带上封面，写明沿用什么、不沿用什么",
+          "body": "画第 2 到第 6 页时，每次都把封面作为参考图一起发给模型，并在提示词里分开写两句：\n\n- **沿用**：封面的配色、字体风格和图形语言。\n- **不沿用**：封面的构图和版式。这一页按自己的内容重新排版，不照抄封面的布局。\n\n只写前一句会得到六张一样的版式，只写后一句风格又会散，两句都要有。"
+        },
+        {
+          "heading": "画完放在一起检查",
+          "body": "六张图并排看，检查三件事：颜色和字体是否一致；有没有两张版式几乎一样；标题有没有重复。哪张出问题，只重画那一张，并在提示词里点明问题所在。"
+        }
+      ],
+      "before": "帮我做 6 张小红书图片，主题是新手露营装备清单，风格要统一。",
+      "after": "【第 1 步：写分镜，先不要画图】\n我要做一组小红书 6 图卡片，主题“新手第一次露营，装备只买这些”，读者是没露营过的上班族。请先写分镜，分两部分：\n\n一、全套共用的视觉描述\n配色（写出 3 到 4 个具体颜色）、字体风格、图形语言、画面比例（竖版 3:4）。\n\n二、每页的内容和版式\n按第 1 到第 6 页逐页写：这一页的标题（6 张标题互不重复，每个不超过 10 个字）、要讲的要点、主体元素、版式类型（封面大字、清单、对比、数字汇总等，相邻两页的版式不能相同）。\n建议分页：封面、帐篷和睡袋、炊具、照明、容易忘带的小东西、预算汇总。\n\n【第 2 步：画封面】\n按分镜里的“全套共用的视觉描述”和第 1 页内容画封面。画面文字只有标题“新手露营装备清单”，不出现其他文字。\n\n【第 3 步：画第 2 到第 6 页，每页附上封面作为参考图】\n这是一套图的第 {{页码}} 页，内容按分镜第 {{页码}} 页执行。\n沿用：参考图的配色、字体风格和图形语言。\n不沿用：参考图的构图和版式。这一页按自己的内容重新排版，不要照抄封面的布局，也不要重复封面的标题。\n画面文字只有本页标题和不超过 4 个短词的标注。",
+      "exercise": "选一个你想发的多图笔记主题（比如“一周减脂早餐”“入职第一个月学到的事”），按三步法做一遍：先写分镜，把共用视觉描述和每页版式分开写；再画封面；最后带着封面画其余页。画完六张并排看，记下哪张版式和封面太像，改提示词里的“不沿用”那句再重画。",
+      "en": {
+        "title": "Pattern 12: A consistent image set without identical layouts",
+        "summary": "For a set of images, write a storyboard, draw the cover first to set the look, then pass the cover as a reference for every other slide, reusing its palette, type and graphic language while designing each layout around that slide's content.",
+        "sections": [
+          {
+            "heading": "Two common failures",
+            "body": "Sets of images, such as carousel posts, slide decks and comic strips, tend to go wrong in two ways:\n\n- **Each image drawn separately**: slide 3 switches palettes, slide 5 switches fonts, the same headline shows up on several slides, and the set does not look like a set.\n- **Only saying \"match the reference\"**: the style is consistent, but every slide copies the reference composition, so six slides look like one slide with different words.\n\nYou want them to look like a set, not like copies: one visual language, different layouts."
+          },
+          {
+            "heading": "Step 1: Write a structured storyboard",
+            "body": "Do not start drawing. First ask the model for a storyboard in two parts:\n\n- **Shared visual spec for the whole set**: palette (name specific colors), type style, graphic language (rounded color blocks, hand-drawn lines, sticker elements), aspect ratio.\n- **Content and layout for each slide**: what the slide covers, its headline, where the main subject sits, and the layout type (big image, checklist, comparison, numbers).\n\nFixing each headline in the storyboard keeps them from repeating. Review and edit the storyboard before drawing."
+          },
+          {
+            "heading": "Step 2: Draw the cover first",
+            "body": "The cover best captures the feel of the set, so draw it first. Generate several and pick the one whose colors and type you like most. It becomes the template for the set. Do not draw other slides until the cover is settled."
+          },
+          {
+            "heading": "Step 3: Pass the cover with every other slide and say what to keep",
+            "body": "For slides 2 to 6, send the cover as a reference image each time, and write two separate lines in the prompt:\n\n- **Keep**: the cover's palette, type style and graphic language.\n- **Do not keep**: the cover's composition and layout. Lay out this slide around its own content instead of copying the cover.\n\nThe first line alone gives you six identical layouts. The second alone lets the style drift. You need both."
+          },
+          {
+            "heading": "Check them side by side",
+            "body": "Line up all six and check three things: are the colors and type consistent, are any two layouts nearly the same, and is any headline repeated? Redraw only the slide with the problem, and name the problem in its prompt."
+          }
+        ],
+        "before": "Make me 6 Instagram carousel images about a beginner camping gear list. Keep the style consistent.",
+        "after": "[Step 1: Write the storyboard, no images yet]\nI am making a 6-slide Instagram carousel called \"Your first camping trip: the only gear you need\", for office workers who have never camped. Write a storyboard in two parts:\n\nPart 1: Shared visual spec\nPalette (3 to 4 specific colors), type style, graphic language, aspect ratio (portrait 4:5).\n\nPart 2: Content and layout for each slide\nFor slides 1 to 6, give: the headline (all six different, 6 words or fewer each), the key points, the main visual elements, and the layout type (cover headline, checklist, comparison, numbers summary, and so on; no two adjacent slides share a layout).\nSuggested slides: cover, tent and sleeping bag, cooking gear, lighting, small things people forget, budget summary.\n\n[Step 2: Draw the cover]\nDraw the cover using the shared visual spec and the slide 1 content. The only text is the headline \"Beginner Camping Gear List\". No other text.\n\n[Step 3: Draw slides 2 to 6, attaching the cover as a reference image each time]\nThis is slide {{slide_number}} of a set. Follow the storyboard for slide {{slide_number}}.\nKeep: the reference image's palette, type style and graphic language.\nDo not keep: the reference image's composition or layout. Lay out this slide around its own content, do not copy the cover's arrangement, and do not repeat the cover headline.\nThe only text is this slide's headline and labels of no more than 4 short words.",
+        "exercise": "Pick a carousel topic you would post (a week of healthy breakfasts, what I learned in my first month at work). Run the three steps: storyboard with the shared visual spec separated from each slide's layout, then the cover, then the other slides with the cover attached. Line up all six, note any slide whose layout is too close to the cover, sharpen the \"do not keep\" line and redraw it."
+      }
     }
   ]
 }
