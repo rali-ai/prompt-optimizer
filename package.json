@@ -81,6 +81,7 @@
     "typecheck:mcp-server": "pnpm -F @prompt-optimizer/mcp-server type-check",
     "kill:dev": "node scripts/kill-dev.js",
     "miniprogram:data": "node scripts/build-miniprogram-data.mjs && node scripts/build-lite-samples.mjs",
+    "miniprogram:package": "node scripts/package-miniprogram.mjs",
     "mp-server:test": "node --test \"packages/mp-server/test/*.test.js\"",
     "miniprogram:check": "node miniprogram/tools/check.mjs && node --test scripts/build-miniprogram-data.test.mjs \"miniprogram/tools/tests/*.test.mjs\""
   },
