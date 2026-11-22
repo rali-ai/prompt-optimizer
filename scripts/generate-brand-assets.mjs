@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * Generate original brand assets (SVG, PNG, ICO) for 词工坊 · GoPrmpt Studio.
+ * Generate original brand assets (SVG, PNG, ICO) for 高词 · GoPrmpt.
+ * Aesthetic: Deep Jade (#0F766E -> #115E59) squircle with crisp alabaster geometric G
+ * and Warm Copper (#D96B43 -> #F59E0B) 4-point AI spark.
  * Zero external dependencies — uses Node's built-in zlib for PNG compression
- * and 4x supersampled SDF rasterization for crisp anti-aliased icons.
+ * and supersampled SDF rasterization for crisp anti-aliased icons.
  *
  * Safe to rerun idempotently: `node scripts/generate-brand-assets.mjs`
  */
@@ -14,31 +16,33 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
-// Original geometric brand mark: cyan-to-indigo squircle with geometric G-prism + 4-point spark
+// Original geometric brand mark: Deep Jade squircle + geometric G prism + Warm Copper spark
 export const BRAND_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
   <defs>
-    <linearGradient id="gp-bg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#0ea5e9"/>
-      <stop offset="52%" stop-color="#2563eb"/>
-      <stop offset="100%" stop-color="#4f46e5"/>
+    <linearGradient id="gp-jade" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0D9488"/>
+      <stop offset="55%" stop-color="#0F766E"/>
+      <stop offset="100%" stop-color="#115E59"/>
     </linearGradient>
-    <linearGradient id="gp-sheen" x1="12" y1="6" x2="46" y2="42" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.30"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    <linearGradient id="gp-copper" x1="39" y1="12" x2="54" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D96B43"/>
+    </linearGradient>
+    <linearGradient id="gp-sheen" x1="10" y1="4" x2="46" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FAF9F5" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#FAF9F5" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#gp-bg)"/>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#gp-jade)"/>
   <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="15.25" stroke="url(#gp-sheen)" stroke-width="1.5"/>
   <!-- Stylized geometric open G prism -->
-  <path d="M44.5 23.5A15.5 15.5 0 1 0 47.5 34H33.5" stroke="#ffffff" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- Inner prism bar accent -->
-  <path d="M33.5 34H47.5V41.5A15.5 15.5 0 0 1 32 47.5" stroke="#e0f2fe" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
-  <!-- Precision 4-point AI spark at top-right opening -->
-  <path d="M46.5 13L48.2 18.3L53.5 20L48.2 21.7L46.5 27L44.8 21.7L39.5 20L44.8 18.3Z" fill="#ffffff"/>
+  <path d="M44.5 23.5A15.5 15.5 0 1 0 47.5 34H33.5" stroke="#FAF9F5" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M33.5 34H47.5V41.5A15.5 15.5 0 0 1 32 47.5" stroke="#CCFBF1" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
+  <!-- Warm Copper 4-point AI spark -->
+  <path d="M46.5 12.5L48.3 18.2L54 20L48.3 21.8L46.5 27.5L44.7 21.8L39 20L44.7 18.2Z" fill="url(#gp-copper)"/>
 </svg>
 `;
 
-// CRC32 table for PNG chunks
 const CRC_TABLE = new Uint32Array(256);
 for (let n = 0; n < 256; n++) {
   let c = n;
@@ -71,8 +75,8 @@ function encodePNG(width, height, rgba) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // RGBA
+  ihdr[8] = 8;
+  ihdr[9] = 6;
   ihdr[10] = 0;
   ihdr[11] = 0;
   ihdr[12] = 0;
@@ -80,7 +84,7 @@ function encodePNG(width, height, rgba) {
   const stride = width * 4;
   const raw = Buffer.alloc((stride + 1) * height);
   for (let y = 0; y < height; y++) {
-    raw[y * (stride + 1)] = 0; // filter None
+    raw[y * (stride + 1)] = 0;
     rgba.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
   }
   const compressed = zlib.deflateSync(raw, { level: 9 });
@@ -95,19 +99,19 @@ function encodePNG(width, height, rgba) {
 
 function encodeICO(pngBuffer, size) {
   const header = Buffer.alloc(6);
-  header.writeUInt16LE(0, 0); // reserved
-  header.writeUInt16LE(1, 2); // ICO type
-  header.writeUInt16LE(1, 4); // 1 image
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(1, 4);
 
   const entry = Buffer.alloc(16);
   entry[0] = size >= 256 ? 0 : size;
   entry[1] = size >= 256 ? 0 : size;
   entry[2] = 0;
   entry[3] = 0;
-  entry.writeUInt16LE(1, 4); // planes
-  entry.writeUInt16LE(32, 6); // bpp
+  entry.writeUInt16LE(1, 4);
+  entry.writeUInt16LE(32, 6);
   entry.writeUInt32LE(pngBuffer.length, 8);
-  entry.writeUInt32LE(22, 12); // offset
+  entry.writeUInt32LE(22, 12);
 
   return Buffer.concat([header, entry, pngBuffer]);
 }
@@ -137,79 +141,79 @@ function sdSegment(px, py, ax, ay, bx, by) {
   return Math.hypot(pax - bax * h, pay - bay * h);
 }
 
-// 4-point star SDF centered at (cx, cy) with outer radius R and inner sharpness
 function isInsideSpark(x, y, cx, cy, R) {
   const dx = Math.abs(x - cx) / R;
   const dy = Math.abs(y - cy) / R;
   if (dx > 1 || dy > 1) return false;
-  // Superellipse with p = 0.52 creates a sharp 4-point star
   return Math.pow(dx, 0.54) + Math.pow(dy, 0.54) <= 1.0;
 }
 
 function sampleBrandPixel(nx, ny, maskable) {
-  // nx, ny in [0, 64]
   const cx = nx - 32;
   const cy = ny - 32;
 
-  // Background squircle (or full bleed for maskable)
   const bgDist = maskable ? -10 : sdRoundedBox(cx, cy, 30, 30, 16);
   if (bgDist > 0) {
     return [0, 0, 0, 0];
   }
 
-  // Diagonal gradient #0ea5e9 -> #2563eb -> #4f46e5
+  // Deep Jade diagonal gradient #0D9488 -> #0F766E -> #115E59
   const t = clamp(((nx - 6) * 0.65 + (ny - 4) * 0.76) / 76, 0, 1);
   let r, g, b;
-  if (t < 0.52) {
-    const k = t / 0.52;
-    r = mix(14, 37, k);
-    g = mix(165, 99, k);
-    b = mix(233, 235, k);
+  if (t < 0.55) {
+    const k = t / 0.55;
+    r = mix(13, 15, k);
+    g = mix(148, 118, k);
+    b = mix(136, 110, k);
   } else {
-    const k = (t - 0.52) / 0.48;
-    r = mix(37, 79, k);
-    g = mix(99, 70, k);
-    b = mix(235, 229, k);
+    const k = (t - 0.55) / 0.45;
+    r = mix(15, 17, k);
+    g = mix(118, 94, k);
+    b = mix(110, 89, k);
   }
 
-  // Subtle top-left glass sheen border
+  // Subtle top-left warm alabaster sheen border
   if (!maskable && bgDist > -1.6) {
-    const sheen = clamp(1 - (nx + ny) / 90, 0, 1) * 0.28;
-    r = mix(r, 255, sheen);
-    g = mix(g, 255, sheen);
-    b = mix(b, 255, sheen);
+    const sheen = clamp(1 - (nx + ny) / 90, 0, 1) * 0.25;
+    r = mix(r, 250, sheen);
+    g = mix(g, 249, sheen);
+    b = mix(b, 245, sheen);
   }
 
-  // Scale inner glyph slightly for maskable safe zone
   const gx = maskable ? 32 + (nx - 32) / 0.78 : nx;
   const gy = maskable ? 32 + (ny - 32) / 0.78 : ny;
 
-  // Stylized geometric G: ring centered at (32, 32), radius 15.5, stroke width 5.2 (half = 2.6)
+  // Warm Copper 4-point spark (#F59E0B -> #D96B43)
+  if (isInsideSpark(gx, gy, 46.5, 20.0, 7.6)) {
+    const sk = clamp(((gx - 39) + (gy - 12.5)) / 30, 0, 1);
+    return [
+      Math.round(mix(245, 217, sk)),
+      Math.round(mix(158, 107, sk)),
+      Math.round(mix(11, 67, sk)),
+      255,
+    ];
+  }
+
+  // Geometric G in warm alabaster (#FAF9F5)
   const dx = gx - 32;
   const dy = gy - 32;
   const distC = Math.hypot(dx, dy);
-  const angle = Math.atan2(dy, dx); // -PI..PI, 0 is +X (3 o'clock), -PI/4 is top-right
+  const angle = Math.atan2(dy, dx);
   const halfStroke = 2.65;
 
-  // Open arc from angle = +0.12 rad clockwise all the way around to -0.62 rad (leaving top-right opening for spark)
   const inGap = angle > -0.62 && angle < 0.08;
   const onRing = !inGap && Math.abs(distC - 15.5) <= halfStroke;
 
-  // Rounded caps for the open ring ends
   const cap1x = 32 + 15.5 * Math.cos(-0.62);
   const cap1y = 32 + 15.5 * Math.sin(-0.62);
   const onCap1 = Math.hypot(gx - cap1x, gy - cap1y) <= halfStroke;
 
-  // Horizontal bar of G from (33.5, 34) to (47.5, 34) + vertical drop to join lower right arc
   const dBar = sdSegment(gx, gy, 33.5, 34, 47.2, 34);
   const dDrop = sdSegment(gx, gy, 47.2, 34, 47.2, 39.5);
   const onBar = dBar <= halfStroke || dDrop <= halfStroke;
 
-  // 4-point AI spark at (46.5, 20)
-  const onSpark = isInsideSpark(gx, gy, 46.5, 20.0, 7.2);
-
-  if (onRing || onCap1 || onBar || onSpark) {
-    return [255, 255, 255, 255];
+  if (onRing || onCap1 || onBar) {
+    return [250, 249, 245, 255];
   }
 
   return [Math.round(r), Math.round(g), Math.round(b), 255];
@@ -217,7 +221,7 @@ function sampleBrandPixel(nx, ny, maskable) {
 
 function renderBrandPNG(size, { maskable = false } = {}) {
   const rgba = Buffer.alloc(size * size * 4);
-  const ss = size <= 48 ? 4 : 3; // supersampling factor
+  const ss = size <= 48 ? 4 : 3;
   const invTotal = 1 / (ss * ss);
 
   for (let y = 0; y < size; y++) {
@@ -260,15 +264,13 @@ function writeOut(relPath, content) {
 }
 
 function main() {
-  console.log('Generating 词工坊 · GoPrmpt Studio brand assets...');
+  console.log('Generating 高词 · GoPrmpt (Warm Jade + Copper) brand assets...');
 
-  // SVGs
   writeOut('site/public/images/logo.svg', BRAND_SVG);
   writeOut('site/public/favicon.svg', BRAND_SVG);
   writeOut('packages/ui/src/assets/logo.svg', BRAND_SVG);
   writeOut('packages/web/public/favicon.svg', BRAND_SVG);
 
-  // PNGs
   const png16 = renderBrandPNG(16);
   const png32 = renderBrandPNG(32);
   const png48 = renderBrandPNG(48);
@@ -282,28 +284,23 @@ function main() {
 
   const ico32 = encodeICO(png32, 32);
 
-  // Site
   writeOut('site/public/images/logo.png', png256);
   writeOut('site/public/images/favicon.png', png64);
-
-  // UI
   writeOut('packages/ui/src/assets/logo.png', png128);
 
-  // Web
   writeOut('packages/web/public/favicon.ico', ico32);
   writeOut('packages/web/public/pwa/apple-touch-icon.png', png180);
   writeOut('packages/web/public/pwa/icon-192.png', png192);
   writeOut('packages/web/public/pwa/icon-512.png', png512);
   writeOut('packages/web/public/pwa/maskable-512.png', pngMaskable512);
 
-  // Extension
   writeOut('packages/extension/public/icons/icon16.png', png16);
   writeOut('packages/extension/public/icons/icon32.png', png32);
   writeOut('packages/extension/public/icons/icon48.png', png48);
   writeOut('packages/extension/public/icons/icon128.png', png128);
   writeOut('packages/extension/public/favicon.ico', ico32);
 
-  console.log('Done! All brand assets generated.');
+  console.log('Done! All 高词 · GoPrmpt brand assets generated.');
 }
 
 main();

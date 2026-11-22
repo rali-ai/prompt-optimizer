@@ -1,11 +1,11 @@
 {
   "extName": {
-    "message": "GoPrmpt Studio"
+    "message": "GoPrmpt"
   },
   "extDesc": {
-    "message": "GoPrmpt Studio: Turn rough ideas into reliable AI prompts with one-click rewriting, side-by-side testing, and version history. Works with major LLM providers with local-first storage."
+    "message": "GoPrmpt: Turn rough ideas into reliable AI prompts with one-click rewriting, side-by-side testing, and version history. Works with major LLM providers with local-first storage."
   },
   "extShortName": {
-    "message": "GoPrmpt Studio"
+    "message": "GoPrmpt"
   }
 }

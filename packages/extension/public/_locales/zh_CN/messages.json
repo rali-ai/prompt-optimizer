@@ -1,11 +1,11 @@
 {
   "extName": {
-    "message": "词工坊 · GoPrmpt Studio"
+    "message": "高词 · GoPrmpt"
   },
   "extDesc": {
-    "message": "词工坊（GoPrmpt Studio）：把模糊想法变成稳定好用的 AI 指令，支持一键改写、多轮迭代对比与版本回溯，兼容主流大模型，数据保存在本地浏览器。"
+    "message": "高词（GoPrmpt）：把模糊想法变成稳定好用的 AI 指令，支持一键改写、多轮迭代对比与版本回溯，兼容主流大模型，数据保存在本地浏览器。"
   },
   "extShortName": {
-    "message": "词工坊"
+    "message": "高词"
   }
 }

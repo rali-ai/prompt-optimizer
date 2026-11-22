@@ -29,7 +29,7 @@ const PLACEHOLDER = /\{\{\s*([^{}\s]+)\s*\}\}/g
 
 const copyByLocale = {
   'zh-CN': {
-    metaTitle: '提示词库 · 提示词优化器',
+    metaTitle: '提示词库 · 高词 GoPrmpt',
     metaDescription: '现成可用的中英双语提示词，支持按类型、分类和标签筛选，可填变量复制或一键带进优化器。',
     heading: '提示词库',
     lead: '挑一条现成的提示词，填好变量就能复制，也可以一键带进优化器接着改。',
@@ -76,7 +76,7 @@ const copyByLocale = {
     optimizerNote: '优化器会按导入码加载模板原文，这里填写的临时变量值不会带过去。'
   },
   en: {
-    metaTitle: 'Prompt Library · Prompt Optimizer',
+    metaTitle: 'Prompt Library · GoPrmpt',
     metaDescription: 'Bilingual ready-to-use prompts for text and image tasks. Filter by type, category or tag, fill variables, copy, or open directly in the optimizer.',
     heading: 'Prompt Library',
     lead: 'Pick a ready-made prompt, fill in the variables, copy it, or open it directly in the optimizer.',

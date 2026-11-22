@@ -1,24 +1,24 @@
 /* Shared by /library/ and /learn/. Tokens come from styles.css. */
 
 :root {
-  --drawer-bg: #ffffff;
-  --field-bg: #f6f9fe;
-  --mark-bg: rgba(37, 99, 235, 0.12);
-  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.16);
+  --drawer-bg: #FFFFFF;
+  --field-bg: #F3F1EA;
+  --mark-bg: rgba(15, 118, 110, 0.10);
+  --focus-ring: 0 0 0 3px rgba(15, 118, 110, 0.18);
 }
 
 html[data-theme='dark'] {
-  --drawer-bg: #0a1221;
-  --field-bg: rgba(255, 255, 255, 0.04);
-  --mark-bg: rgba(125, 211, 252, 0.16);
-  --focus-ring: 0 0 0 3px rgba(125, 211, 252, 0.2);
+  --drawer-bg: #15171C;
+  --field-bg: rgba(255, 255, 255, 0.05);
+  --mark-bg: rgba(20, 184, 166, 0.15);
+  --focus-ring: 0 0 0 3px rgba(20, 184, 166, 0.24);
 }
 
 .site-nav a[aria-current='page'],
 .site-footer__links a[aria-current='page'] {
-  color: var(--nav-text-strong);
-  background: var(--nav-hover-bg);
-  border-color: var(--nav-hover-border);
+  color: var(--hero-accent-text);
+  background: var(--hero-chip-bg);
+  border-color: var(--hero-chip-border);
 }
 
 .page {

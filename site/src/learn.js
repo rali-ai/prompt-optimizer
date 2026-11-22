@@ -18,7 +18,7 @@ import { TRACK_IDS, buildLearnUrlSearch, parseLearnUrlState } from './learn-stat
 
 const copyByLocale = {
   'zh-CN': {
-    metaTitle: '教程与写法 · 提示词优化器',
+    metaTitle: '教程与写法 · 高词 GoPrmpt',
     metaDescription: '14 节入门课程与 12 节进阶写法，每课都有改写前后对比和一道练习，支持中英双语切换。',
     heading: '教程与写法',
     lead: '先用入门课程打通基本写法，再用进阶写法解决具体难题。每课都有改写前后对比和一道练习。',
@@ -54,7 +54,7 @@ const copyByLocale = {
     next: '下一课'
   },
   en: {
-    metaTitle: 'Learn · Prompt Optimizer',
+    metaTitle: 'Learn · GoPrmpt',
     metaDescription: '14 starter lessons and 12 prompt patterns with before/after comparisons and hands-on exercises.',
     heading: 'Learn Prompting',
     lead: 'Start with the fundamentals, then pick up reusable patterns for harder tasks. Every lesson includes a before/after rewrite and an exercise.',

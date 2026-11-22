@@ -90,7 +90,7 @@ const messages = {
     "context": "Context",
     "copySuccess": "Copied to clipboard",
     "copyFailed": "Copy Failed",
-    "appName": "GoPrmpt Studio",
+    "appName": "GoPrmpt",
     "selectFile": "Select File",
     "exporting": "Exporting...",
     "importing": "Importing...",
