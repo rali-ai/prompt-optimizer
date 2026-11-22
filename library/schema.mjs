@@ -6,7 +6,8 @@ import path from 'node:path'
 /**
  * @typedef {'zh' | 'en'} Language
  * @typedef {'basic-user' | 'basic-system' | 'image-text2image'} Target
- * @typedef {{ id: string, name: string, description: string }} Category
+ * @typedef {'text' | 'image'} Kind
+ * @typedef {{ id: string, name: string, description: string, kind?: Kind, en?: { name: string, description: string } }} Category
  * @typedef {{ name: string, description: string, defaultValue: string }} Variable
  * @typedef {{ title: string, summary: string, prompt: string, variables: Variable[] }} PromptText
  * @typedef {{ name: string, url: string, license?: string }} Source
@@ -25,7 +26,10 @@ import path from 'node:path'
 
 export const LIBRARY_FILES = ['categories.json', 'prompts.json', 'learn.json']
 export const PROMPT_LANGUAGES = ['zh', 'en']
-export const TARGETS = ['basic-user', 'basic-system', 'image-text2image']
+export const KINDS = ['text', 'image']
+// target 决定导入优化器的哪个工作区，也决定提示词是文字类还是图片类。
+export const TARGET_KINDS = { 'basic-user': 'text', 'basic-system': 'text', 'image-text2image': 'image' }
+export const TARGETS = Object.keys(TARGET_KINDS)
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const PLACEHOLDER = /\{\{([^{}]*)\}\}/gu
@@ -142,13 +146,18 @@ function parseSource(field) {
 }
 
 function parseCategories(problems, data) {
-  const categories = records(problems, 'categories.json', data, ['id', 'name', 'description'], [], (field) => ({
-    id: field.id(),
-    name: field.text('name'),
-    description: field.text('description')
-  }))
+  const categories = records(problems, 'categories.json', data, ['id', 'name', 'description'], ['kind', 'en'], (field) => {
+    const category = { id: field.id(), name: field.text('name'), description: field.text('description') }
+    const kind = field.optionalText('kind')
+    if (kind && !KINDS.includes(kind)) field.fail(`kind 只能是 ${KINDS.join(' / ')}：${kind}`)
+    else if (kind) category.kind = kind
+    const en = field.has('en') ? field.child('en', ['name', 'description']) : null
+    if (en) category.en = { name: en.text('name'), description: en.text('description') }
+    return category
+  })
   checkUnique(problems, 'categories.json', 'id ', categories.map((c) => c.id))
   checkUnique(problems, 'categories.json', 'name ', categories.map((c) => c.name))
+  checkUnique(problems, 'categories.json', '英文名', categories.map((c) => c.en?.name))
   return categories
 }
 
@@ -192,13 +201,17 @@ function parsePromptText(field, language) {
   return { title, summary, prompt, variables }
 }
 
-function parsePrompts(problems, data, categoryIds) {
+function parsePrompts(problems, data, categoryById) {
   const prompts = records(problems, 'prompts.json', data, PROMPT_FIELDS, ['example', 'source'], (field) => {
     const id = field.id()
-    const category = field.text('category')
-    if (category && !categoryIds.has(category)) field.fail(`分类 ${category} 不在 categories.json 里`)
     const target = field.text('target')
     if (target && !TARGETS.includes(target)) field.fail(`target 只能是 ${TARGETS.join(' / ')}：${target}`)
+    const category = field.text('category')
+    const owner = categoryById.get(category)
+    if (category && !owner) field.fail(`分类 ${category} 不在 categories.json 里`)
+    else if (owner?.kind && TARGET_KINDS[target] && owner.kind !== TARGET_KINDS[target]) {
+      field.fail(`target ${target} 是 ${TARGET_KINDS[target]} 类，但分类 ${category} 是 ${owner.kind} 类`)
+    }
 
     const tags = field.list('tags')
     if (field.isList('tags')) {
@@ -279,7 +292,7 @@ export function loadLibrary(dir) {
     }
   }
   const categories = parseCategories(problems, read('categories.json'))
-  const prompts = parsePrompts(problems, read('prompts.json'), new Set(categories.map((c) => c.id)))
+  const prompts = parsePrompts(problems, read('prompts.json'), new Map(categories.map((c) => [c.id, c])))
   const lessons = parseLessons(problems, read('learn.json'))
   if (problems.length > 0) throw new LibraryError(dir, problems)
   return { categories, prompts, lessons }

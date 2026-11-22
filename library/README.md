@@ -11,8 +11,17 @@
 ## categories.json
 
 ```json
-[{ "id": "writing", "name": "写作创作", "description": "文章、文案、故事" }]
+[{
+  "id": "writing",
+  "name": "写作创作",
+  "description": "文章、文案、故事",
+  "kind": "text",
+  "en": { "name": "Writing", "description": "Articles, copy and stories." }
+}]
 ```
+
+- `kind` 可选，`text`（文字）或 `image`（图片）。填了以后，分类下提示词的 `target` 必须同类：`text` 分类只放 `basic-user`、`basic-system`，`image` 分类只放 `image-text2image`。
+- `en` 可选，英文版的 `name` 和 `description`，两项都要填；网站和小程序切到英文时显示。英文名不能重复。
 
 ## prompts.json
 

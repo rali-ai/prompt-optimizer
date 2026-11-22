@@ -16,11 +16,11 @@ const HEADER = '// 由 scripts/build-miniprogram-data.mjs 从 library/*.json 生
 
 const creditLine = ({ name, license }) => '来源：' + name + (license ? ' · ' + license : '')
 
-// 小程序运行时读的形状：中文字段平铺在提示词上，英文版放在 en，可选文本缺省为 ''。
+// 小程序运行时读的形状：中文字段平铺，英文版放在 en（分类没有英文版时为 null），可选文本缺省为 ''。
 // 小程序里不能点外链，source 压成一行署名文字放在 credit。
 export function toMiniprogramData({ categories, prompts, lessons }) {
   return {
-    categories: categories.map(({ id, name, description }) => ({ id, name, description })),
+    categories: categories.map(({ id, name, description, en }) => ({ id, name, description, en: en ?? null })),
     prompts: prompts.map((prompt) => ({
       id: prompt.id,
       ...prompt.locales.zh,

@@ -5,77 +5,137 @@ module.exports = {
     {
       "id": "writing",
       "name": "写作创作",
-      "description": "文章、故事、演讲稿和标题，从提纲到成稿。"
+      "description": "文章、故事、演讲稿和标题，从提纲到成稿。",
+      "en": {
+        "name": "Writing",
+        "description": "Articles, stories, speeches and headlines, from outline to final draft."
+      }
     },
     {
       "id": "translate",
       "name": "翻译润色",
-      "description": "中外互译、改错别字、调语气、压篇幅，意思不走样。"
+      "description": "中外互译、改错别字、调语气、压篇幅，意思不走样。",
+      "en": {
+        "name": "Translation & Editing",
+        "description": "Translate, fix typos, adjust tone and trim length without losing the meaning."
+      }
     },
     {
       "id": "office",
       "name": "职场办公",
-      "description": "周报、邮件、会议纪要、汇报材料和表格公式。"
+      "description": "周报、邮件、会议纪要、汇报材料和表格公式。",
+      "en": {
+        "name": "Office Work",
+        "description": "Weekly reports, emails, meeting notes, briefings and spreadsheet formulas."
+      }
     },
     {
       "id": "product-data",
       "name": "产品与数据",
-      "description": "需求文档、用户研究、竞品对比和数据解读。"
+      "description": "需求文档、用户研究、竞品对比和数据解读。",
+      "en": {
+        "name": "Product & Data",
+        "description": "Requirement docs, user research, competitor comparisons and data analysis."
+      }
     },
     {
       "id": "coding",
       "name": "编程开发",
-      "description": "读代码、查报错、写测试、写 SQL 和技术文档。"
+      "description": "读代码、查报错、写测试、写 SQL 和技术文档。",
+      "en": {
+        "name": "Coding",
+        "description": "Read code, debug errors, write tests, SQL and technical docs."
+      }
     },
     {
       "id": "marketing",
       "name": "营销文案",
-      "description": "种草笔记、卖点、短视频脚本、活动文案和评价回复。"
+      "description": "种草笔记、卖点、短视频脚本、活动文案和评价回复。",
+      "en": {
+        "name": "Marketing Copy",
+        "description": "Product reviews, selling points, short-video scripts, campaign copy and review replies."
+      }
     },
     {
       "id": "study",
       "name": "学习教育",
-      "description": "讲懂概念、出练习题、做学习计划、读论文和备课。"
+      "description": "讲懂概念、出练习题、做学习计划、读论文和备课。",
+      "en": {
+        "name": "Learning",
+        "description": "Explain concepts, make practice questions, plan study, read papers and prepare lessons."
+      }
     },
     {
       "id": "life",
       "name": "生活助手",
-      "description": "旅行、做饭、送礼、记账、健身和难开口的对话。"
+      "description": "旅行、做饭、送礼、记账、健身和难开口的对话。",
+      "en": {
+        "name": "Everyday Life",
+        "description": "Travel, cooking, gifts, budgeting, fitness and hard conversations."
+      }
     },
     {
       "id": "thinking",
       "name": "思维决策",
-      "description": "找盲点、比方案、追根因，把模糊的问题想清楚。"
+      "description": "找盲点、比方案、追根因，把模糊的问题想清楚。",
+      "en": {
+        "name": "Thinking & Decisions",
+        "description": "Find blind spots, compare options, trace root causes and clarify fuzzy problems."
+      }
     },
     {
       "id": "system",
       "name": "角色与系统提示词",
-      "description": "客服、家教、编辑、智能体等助手的系统提示词模板。"
+      "description": "客服、家教、编辑、智能体等助手的系统提示词模板。",
+      "en": {
+        "name": "Roles & System Prompts",
+        "description": "System prompt templates for support agents, tutors, editors and AI agents."
+      }
     },
     {
       "id": "poster",
       "name": "海报设计",
-      "description": "活动、展览、节气、讲座等海报，写清版式与文字层级。"
+      "description": "活动、展览、节气、讲座等海报，写清版式与文字层级。",
+      "en": {
+        "name": "Poster Design",
+        "description": "Posters for events, exhibitions, seasonal festivals and talks, with clear layout and text hierarchy."
+      }
     },
     {
       "id": "ecommerce",
       "name": "电商视觉",
-      "description": "商品主图、场景图、促销横幅、包装和详情页卖点图。"
+      "description": "商品主图、场景图、促销横幅、包装和详情页卖点图。",
+      "en": {
+        "name": "E-commerce Visuals",
+        "description": "Product hero shots, lifestyle scenes, promo banners, packaging and feature images."
+      }
     },
     {
       "id": "illustration",
       "name": "插画风格",
-      "description": "水彩、扁平矢量、水墨、绘本、线稿等可换主题的插画风格。"
+      "description": "水彩、扁平矢量、水墨、绘本、线稿等可换主题的插画风格。",
+      "en": {
+        "name": "Illustration Styles",
+        "description": "Watercolor, flat vector, ink wash, picture book and line art styles for any subject."
+      }
     },
     {
       "id": "portrait",
       "name": "人像摄影",
-      "description": "职业照、头像、胶片街拍和角色设定等人物画面。"
+      "description": "职业照、头像、胶片街拍和角色设定等人物画面。",
+      "en": {
+        "name": "Portrait Photography",
+        "description": "Professional headshots, avatars, film street photos and character designs."
+      }
     },
     {
       "id": "infographic",
       "name": "信息图与PPT",
-      "description": "流程图、时间线、知识卡片和演示文稿页面。"
+      "description": "流程图、时间线、知识卡片和演示文稿页面。",
+      "en": {
+        "name": "Infographics & Slides",
+        "description": "Flowcharts, timelines, knowledge cards and presentation slides."
+      }
     }
   ],
   "prompts": [

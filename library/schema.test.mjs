@@ -173,6 +173,23 @@ test('English is required, uses snake_case variable names and has as many variab
   }, /变量数量与中文版不一致：中文 1 个，英文 0 个/)
 })
 
+test('categories may declare a kind that their prompts\' targets must match', () => {
+  const [category] = load((files) => { files.categories[0].kind = 'text' }).categories
+  assert.equal(category.kind, 'text')
+  assertProblem((files) => { files.categories[0].kind = 'video' }, /kind 只能是 text \/ image：video/)
+  assertProblem((files) => { files.categories[0].kind = 'image' }, /target basic-user 是 text 类，但分类 writing 是 image 类/)
+})
+
+test('categories may carry an English name and description', () => {
+  const english = { name: 'Writing', description: 'Articles and stories.' }
+  assert.deepEqual(load((files) => { files.categories[0].en = english }).categories[0].en, english)
+  assertProblem((files) => { files.categories[0].en = { name: 'Writing' } }, /writing\)\.en：缺少字段 description/)
+  assertProblem((files) => {
+    files.categories[0].en = english
+    files.categories.push({ id: 'other', name: '另一个', description: '别的。', en: english })
+  }, /英文名重复：Writing/)
+})
+
 test('a prompt adapted from another library carries its source; free-text credit is gone', () => {
   const garden = { name: 'Prompt Garden', url: 'https://example.com/garden', license: 'CC BY 4.0' }
   const [prompt] = load((files) => { files.prompts[0].source = garden }).prompts

@@ -31,7 +31,10 @@ test('mini program data flattens the Chinese text, keeps English under en and fi
     credit: '',
     en
   }])
-  assert.deepEqual(data.categories, library.categories)
+  assert.deepEqual(data.categories, [{ id: 'writing', name: '写作创作', description: '文章。', en: null }])
+  const english = { name: 'Writing', description: 'Articles.' }
+  const withEnglish = toMiniprogramData({ ...library, categories: [{ ...library.categories[0], kind: 'text', en: english }] })
+  assert.deepEqual(withEnglish.categories[0].en, english)
   assert.deepEqual(data.learn, library.lessons)
 })
 
