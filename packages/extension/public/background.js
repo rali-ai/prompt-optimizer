@@ -6,17 +6,19 @@ const openApp = (prompt) => {
   chrome.tabs.create({ url: chrome.runtime.getURL('index.html') + hash });
 };
 
-// Context menus persist across browser restarts; create them once per install/update.
+// Context menus persist across browser restarts; clear and recreate cleanly on install/update.
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: OPTIMIZE_SELECTION_MENU_ID,
-    title: '用提示词优化器优化“%s”',
-    contexts: ['selection'],
-  });
-  chrome.contextMenus.create({
-    id: OPEN_APP_MENU_ID,
-    title: '打开提示词优化器',
-    contexts: ['page'],
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: OPTIMIZE_SELECTION_MENU_ID,
+      title: '用高词 · GoPrmpt 优化“%s”',
+      contexts: ['selection'],
+    });
+    chrome.contextMenus.create({
+      id: OPEN_APP_MENU_ID,
+      title: '打开高词 · GoPrmpt 工作台',
+      contexts: ['page'],
+    });
   });
 });
 
