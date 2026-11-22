@@ -374,3 +374,124 @@ test('rate limit returns 429 on repeated register/login attempts', async () => {
     await ctx.cleanup();
   }
 });
+
+test('admin membership toggle persists across restarts and updates /config and /admin', async () => {
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'persist', 'users.db');
+  const env = {
+    USER_SYNC_HOST: '127.0.0.1',
+    USER_SYNC_PORT: '0',
+    USER_SYNC_DB_PATH: dbPath,
+    ADMIN_USERNAME: 'root_admin',
+    ADMIN_PASSWORD: 'AdminPassword123!',
+    MEMBERSHIP_ENABLED: 'false',
+    RATE_LIMIT_MAX: '50',
+    RATE_LIMIT_WINDOW_MS: '60000',
+  };
+
+  let app1 = createApp(loadConfig(env));
+  let app2 = null;
+  try {
+    const addr1 = await app1.listen();
+    const base1 = `http://${addr1.host}:${addr1.port}`;
+
+    // HEAD /user-api/admin -> 200
+    const headRes = await fetch(`${base1}/user-api/admin`, { method: 'HEAD' });
+    assert.equal(headRes.status, 200);
+
+    // Register normal user and ensure 403 on PATCH /admin/settings
+    const userReg = await fetch(`${base1}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'normal_member', password: 'Password123!' }),
+    });
+    const userCookie = extractCookieHeader(userReg);
+    const nonAdminSettings = await fetch(`${base1}/user-api/admin/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ membershipEnabled: true }),
+    });
+    assert.equal(nonAdminSettings.status, 403);
+
+    // Login as admin
+    const adminLogin = await fetch(`${base1}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    // Invalid payload -> 400
+    const badPatch = await fetch(`${base1}/user-api/admin/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ membershipEnabled: 'yes' }),
+    });
+    assert.equal(badPatch.status, 400);
+
+    // Enable membership -> 200
+    const enableRes = await fetch(`${base1}/user-api/admin/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ membershipEnabled: true }),
+    });
+    assert.equal(enableRes.status, 200);
+    assert.deepEqual(await enableRes.json(), { membershipEnabled: true });
+
+    // /config and /admin/users reflect enabled state immediately
+    const cfgAfterEnable = await fetch(`${base1}/user-api/config`);
+    assert.deepEqual(await cfgAfterEnable.json(), {
+      membershipEnabled: true,
+      registrationEnabled: true,
+    });
+    const usersAfterEnable = await fetch(`${base1}/user-api/admin/users`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal((await usersAfterEnable.json()).membershipEnabled, true);
+    const adminHtmlAfterEnable = await fetch(`${base1}/user-api/admin`, {
+      headers: { Cookie: adminCookie },
+    });
+    const htmlText = await adminHtmlAfterEnable.text();
+    assert.match(htmlText, /会员功能总开关/);
+    assert.match(htmlText, /会员体系：已启用/);
+
+    // Restart server with same DB (env still says MEMBERSHIP_ENABLED=false) -> DB wins!
+    await app1.close();
+    app1 = null;
+
+    app2 = createApp(loadConfig(env));
+    const addr2 = await app2.listen();
+    const base2 = `http://${addr2.host}:${addr2.port}`;
+
+    const cfgAfterRestart = await fetch(`${base2}/user-api/config`);
+    assert.deepEqual(await cfgAfterRestart.json(), {
+      membershipEnabled: true,
+      registrationEnabled: true,
+    });
+
+    // Toggle back to false
+    const adminLogin2 = await fetch(`${base2}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie2 = extractCookieHeader(adminLogin2);
+    const disableRes = await fetch(`${base2}/user-api/admin/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie2 },
+      body: JSON.stringify({ membershipEnabled: false }),
+    });
+    assert.equal(disableRes.status, 200);
+    assert.deepEqual(await disableRes.json(), { membershipEnabled: false });
+
+    const cfgFinal = await fetch(`${base2}/user-api/config`);
+    assert.deepEqual(await cfgFinal.json(), {
+      membershipEnabled: false,
+      registrationEnabled: true,
+    });
+  } finally {
+    if (app1) await app1.close();
+    if (app2) await app2.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

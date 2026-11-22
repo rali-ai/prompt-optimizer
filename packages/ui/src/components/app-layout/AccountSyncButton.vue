@@ -30,6 +30,19 @@
       </span>
     </NButton>
 
+    <a
+      v-if="currentUser?.role === 'admin'"
+      class="admin-sidebar-entry"
+      :href="`${props.baseUrl}/admin`"
+      target="_blank"
+      rel="noopener noreferrer"
+      data-testid="sidebar-admin-console-link"
+      :title="isZh ? '用户与会员管理后台' : 'Admin Console'"
+    >
+      <NIcon :size="15" class="admin-sidebar-entry-icon"><ShieldCheck :stroke-width="1.75" /></NIcon>
+      <span class="admin-sidebar-entry-label">{{ isZh ? '管理后台' : 'Admin' }}</span>
+    </a>
+
     <div v-show="showModal" class="account-sync-drawer" data-testid="account-sync-inline-panel">
       <div class="byok-notice" data-testid="account-sync-byok-notice">
         {{ text.byokNotice }}
@@ -128,6 +141,17 @@
             </NForm>
           </NTabPane>
         </NTabs>
+        <div class="drawer-admin-footer">
+          <a
+            class="admin-console-link"
+            :href="`${props.baseUrl}/admin`"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="drawer-admin-console-link"
+          >
+            {{ isZh ? '用户与会员管理后台 →' : 'User & Membership Admin →' }}
+          </a>
+        </div>
       </template>
 
       <template v-else>
@@ -137,15 +161,6 @@
             <NTag v-if="membershipEnabled" size="small" :type="currentUser.tier === 'pro' ? 'info' : 'default'">
               {{ currentUser.tier === 'pro' ? 'Pro' : 'Free' }}
             </NTag>
-            <a
-              v-if="currentUser.role === 'admin'"
-              class="admin-console-link"
-              :href="`${props.baseUrl}/admin`"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {{ isZh ? '管理后台' : 'Admin' }}
-            </a>
           </div>
           <div class="account-row account-row--muted">
             <span>{{ syncSummaryText }}</span>
@@ -153,6 +168,16 @@
         </div>
 
         <NSpace vertical :size="6" class="sync-actions">
+          <a
+            v-if="currentUser.role === 'admin'"
+            class="admin-drawer-btn"
+            :href="`${props.baseUrl}/admin`"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <NIcon :size="14"><ShieldCheck :stroke-width="1.75" /></NIcon>
+            <span>{{ isZh ? '打开用户与会员管理后台' : 'Open Admin Console' }}</span>
+          </a>
           <NButton
             type="primary"
             size="small"
@@ -208,7 +233,7 @@ import {
   NTabs,
   NTag,
 } from 'naive-ui'
-import { Cloud, ChevronDown } from '@lucide/vue'
+import { Cloud, ChevronDown, ShieldCheck } from '@lucide/vue'
 import type { AppServices } from '../../types/services'
 import {
   UserSyncError,
@@ -364,6 +389,13 @@ function togglePanel() {
     notice.value = null
     form.password = ''
     form.confirmPassword = ''
+    getConfig(props.baseUrl)
+      .then((cfg) => {
+        membershipEnabled.value = Boolean(cfg.membershipEnabled)
+      })
+      .catch(() => {
+        // ignore transient refresh errors
+      })
   }
   showModal.value = !showModal.value
 }
@@ -644,8 +676,60 @@ async function handleLogout() {
   color: var(--gp-muted, #52525b);
 }
 
+.admin-sidebar-entry {
+  width: 100%;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 11px;
+  border-radius: 10px;
+  border: 1px solid var(--gp-border-strong, rgba(15, 118, 110, 0.34));
+  background: var(--gp-accent-soft, rgba(15, 118, 110, 0.10));
+  color: var(--gp-accent, #0f766e);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  box-sizing: border-box;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.admin-sidebar-entry:hover {
+  background: var(--gp-accent, #0f766e);
+  color: #faf9f5;
+}
+
+.drawer-admin-footer {
+  padding-top: 6px;
+  border-top: 1px solid var(--gp-border, rgba(24, 24, 27, 0.08));
+  display: flex;
+  justify-content: flex-end;
+}
+
+.admin-drawer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--gp-border-strong, rgba(15, 118, 110, 0.34));
+  background: var(--gp-accent-soft, rgba(15, 118, 110, 0.10));
+  color: var(--gp-accent, #0f766e);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.admin-drawer-btn:hover {
+  background: var(--gp-accent, #0f766e);
+  color: #faf9f5;
+}
+
 .admin-console-link {
-  margin-left: auto;
   font-size: 11px;
   font-weight: 600;
   color: var(--gp-accent, #0f766e);

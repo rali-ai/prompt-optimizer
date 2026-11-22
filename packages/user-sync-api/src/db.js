@@ -63,10 +63,24 @@ export function openDatabase(dbPath) {
       used_at INTEGER,
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
 
   const stmtFindByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
   const stmtFindById = db.prepare('SELECT * FROM users WHERE id = ?');
+  const stmtGetSetting = db.prepare('SELECT value, updated_at FROM app_settings WHERE key = ?');
+  const stmtUpsertSetting = db.prepare(`
+    INSERT INTO app_settings (key, value, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = excluded.updated_at
+  `);
   const stmtInsertUser = db.prepare(`
     INSERT INTO users (id, username, password_hash, role, tier, tier_expires_at, disabled, created_at, updated_at)
     VALUES (?, ?, ?, ?, 'free', NULL, 0, ?, ?)
@@ -208,6 +222,18 @@ export function openDatabase(dbPath) {
 
       stmtUpdateUserAdmin.run(nextTier, nextTierExpiresAt, nextDisabled, now, userId);
       return stmtFindById.get(userId);
+    },
+
+    getMembershipEnabled(fallback = false) {
+      const row = stmtGetSetting.get('membership_enabled');
+      if (!row) return Boolean(fallback);
+      return row.value === '1';
+    },
+
+    setMembershipEnabled(enabled) {
+      const normalized = Boolean(enabled);
+      stmtUpsertSetting.run('membership_enabled', normalized ? '1' : '0', Date.now());
+      return normalized;
     },
   };
 }

@@ -28,13 +28,13 @@ function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.end(body);
 }
 
-function sendHtml(res, statusCode, html) {
+function sendHtml(res, statusCode, html, headOnly = false) {
   res.writeHead(statusCode, {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
     'Content-Length': Buffer.byteLength(html, 'utf8'),
   });
-  res.end(html);
+  res.end(headOnly ? undefined : html);
 }
 
 function getClientIp(req) {
@@ -191,6 +191,10 @@ export function createApp(config) {
     });
   }
 
+  function isMembershipEnabled() {
+    return db.getMembershipEnabled(Boolean(config.membershipEnabled));
+  }
+
   async function handleRequest(req, res) {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     const pathname = url.pathname;
@@ -202,7 +206,7 @@ export function createApp(config) {
 
     if (method === 'GET' && pathname === '/user-api/config') {
       return sendJson(res, 200, {
-        membershipEnabled: Boolean(config.membershipEnabled),
+        membershipEnabled: isMembershipEnabled(),
         registrationEnabled: true,
       });
     }
@@ -303,7 +307,7 @@ export function createApp(config) {
       });
     }
 
-    if (method === 'GET' && (pathname === '/user-api/admin' || pathname === '/user-api/admin/')) {
+    if ((method === 'GET' || method === 'HEAD') && (pathname === '/user-api/admin' || pathname === '/user-api/admin/')) {
       const userRow = authenticate(req);
       const authenticated = Boolean(userRow && !userRow.disabled);
       const isAdmin = Boolean(authenticated && userRow.role === 'admin');
@@ -311,16 +315,37 @@ export function createApp(config) {
         authenticated,
         isAdmin,
         username: userRow?.username || '',
-        membershipEnabled: Boolean(config.membershipEnabled),
+        membershipEnabled: isMembershipEnabled(),
       });
-      return sendHtml(res, 200, html);
+      return sendHtml(res, 200, html, method === 'HEAD');
+    }
+
+    if (method === 'GET' && pathname === '/user-api/admin/settings') {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      return sendJson(res, 200, {
+        membershipEnabled: isMembershipEnabled(),
+      });
+    }
+
+    if (method === 'PATCH' && pathname === '/user-api/admin/settings') {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      if (typeof body.membershipEnabled !== 'boolean') {
+        throw new PayloadError('membershipEnabled 必须为布尔值', 400);
+      }
+      const nextValue = db.setMembershipEnabled(body.membershipEnabled);
+      return sendJson(res, 200, {
+        membershipEnabled: nextValue,
+      });
     }
 
     if (method === 'GET' && pathname === '/user-api/admin/users') {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
       return sendJson(res, 200, {
-        membershipEnabled: Boolean(config.membershipEnabled),
+        membershipEnabled: isMembershipEnabled(),
         users: db.listUsersWithSync(),
       });
     }
