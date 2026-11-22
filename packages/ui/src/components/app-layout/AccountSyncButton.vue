@@ -176,7 +176,7 @@
 
 <script setup lang="ts">
 import { computed, inject, onMounted, reactive, ref, type Ref } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { i18n } from '../../plugins/i18n'
 import {
   NAlert,
   NButton,
@@ -198,6 +198,7 @@ import {
   logout,
   pullSync,
   pushSync,
+  register,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
   type SyncPayload,
@@ -218,7 +219,7 @@ const emit = defineEmits<{
   synced: [direction: 'push' | 'pull', version: number]
 }>()
 
-const { locale } = useI18n()
+const locale = computed(() => i18n.global.locale.value)
 const services = inject<Ref<AppServices | null>>('services', ref(null))
 
 const isZh = computed(() => String(locale.value || '').toLowerCase().startsWith('zh'))
