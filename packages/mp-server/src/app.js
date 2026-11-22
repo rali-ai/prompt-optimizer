@@ -26,6 +26,8 @@ const ERRORS = {
   internal: [500, '服务器出错了，请稍后再试']
 }
 
+export const ERROR_CODES = Object.keys(ERRORS)
+
 class HttpError extends Error {
   constructor(code, message) {
     super(message || ERRORS[code][1])

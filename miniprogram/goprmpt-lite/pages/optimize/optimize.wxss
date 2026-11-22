@@ -22,16 +22,24 @@
   font-size: var(--gp-font-xs);
 }
 
+.samples-title {
+  margin-top: 28rpx;
+}
+
+.samples {
+  white-space: nowrap;
+}
+
+.sample-row {
+  display: inline-flex;
+}
+
 .lang-title {
   margin-top: 28rpx;
 }
 
 .error {
   margin-top: var(--gp-gap);
-}
-
-.error-link {
-  margin-top: 12rpx;
 }
 
 .result {
@@ -49,6 +57,15 @@
 .view-switch .gp-segment-item {
   height: 52rpx;
   line-height: 52rpx;
+  font-size: var(--gp-font-xs);
+}
+
+.ai-label {
+  margin-bottom: 16rpx;
+}
+
+.remaining {
+  margin-top: 20rpx;
   font-size: var(--gp-font-xs);
 }
 

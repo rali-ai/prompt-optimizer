@@ -1,7 +1,7 @@
 /*
  * goprmpt 主题。换肤只改下面 page 里的变量。
- * goprmpt-library/styles/theme.wxss 与外壳的 styles/theme.wxss 是本文件的逐字副本，
- * 改了这里要同步过去（miniprogram/tools/check.mjs 会检查三份是否一致）。
+ * 外壳的 styles/theme.wxss 与简版的 goprmpt-lite/styles/theme.wxss 是逐字副本（简版要能单独拷走），
+ * 改了一份要同步另一份（miniprogram/tools/check.mjs 会检查两份是否一致）。
  */
 page {
   --gp-bg: #f5f6f8;

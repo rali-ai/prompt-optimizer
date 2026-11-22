@@ -3,11 +3,8 @@
 const data = require('../data/library.js')
 const schema = require('./schema.js')
 
-const KINDS = [
-  { id: '', name: '全部' },
-  { id: 'text', name: '文字' },
-  { id: 'image', name: '图片' }
-]
+// 文字 / 图片筛选，'' 表示全部；名称在外壳 utils/i18n.js 的 library.kinds 里。
+const KIND_IDS = ['', 'text', 'image']
 
 const LANGUAGES = [
   { id: 'zh', name: '中文' },
@@ -18,9 +15,11 @@ function categories() {
   return data.categories
 }
 
-function categoryName(id) {
+// 分类名：英文界面优先用 en.name，数据里还没有英文名时用中文名。
+function categoryName(id, lang) {
   const category = data.categories.find((c) => c.id === id)
-  return category ? category.name : ''
+  if (!category) return ''
+  return lang === 'en' && category.en && category.en.name ? category.en.name : category.name
 }
 
 function getPrompt(id) {
@@ -44,6 +43,11 @@ function getLesson(id) {
   return data.learn.find((l) => l.id === id) || null
 }
 
+// 课程的某种语言版本：有 en 且要英文时用 en（字段同中文版），否则用中文版。
+function localizeLesson(lesson, lang) {
+  return lang === 'en' && lesson.en ? Object.assign({ id: lesson.id }, lesson.en) : lesson
+}
+
 // filter: { query, categoryId, kind, lang }，空值表示不过滤；搜索按 lang 对应的文案和标签。
 // prompts 默认是整个库。
 function search(filter, prompts) {
@@ -59,4 +63,4 @@ function search(filter, prompts) {
   })
 }
 
-module.exports = { KINDS, LANGUAGES, categories, categoryName, getPrompt, localize, lessons, getLesson, search }
+module.exports = { KIND_IDS, LANGUAGES, categories, categoryName, getPrompt, localize, lessons, getLesson, localizeLesson, search }

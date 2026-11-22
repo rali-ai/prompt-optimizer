@@ -1,10 +1,11 @@
 {
   "pages": [
-    "pages/index/index"
+    "pages/index/index",
+    "pages/about/about"
   ],
   "subPackages": [
     {
-      "root": "goprmpt",
+      "root": "goprmpt-lite",
       "pages": [
         "pages/optimize/optimize",
         "pages/history/history",
@@ -24,11 +25,11 @@
   "preloadRule": {
     "pages/index/index": {
       "network": "all",
-      "packages": ["goprmpt", "goprmpt-library"]
+      "packages": ["goprmpt-lite", "goprmpt-library"]
     }
   },
   "window": {
-    "navigationBarTitleText": "提示词优化器",
+    "navigationBarTitleText": "goprmpt",
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black",
     "backgroundColor": "#f5f6f8",

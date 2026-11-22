@@ -2,9 +2,11 @@
 const library = require('../../utils/library.js')
 const schema = require('../../utils/schema.js')
 const routes = require('../../utils/routes.js')
+const i18n = require('../../../utils/i18n.js')
 
 Page({
   data: {
+    t: null,
     missing: false,
     languages: library.LANGUAGES,
     lang: 'zh',
@@ -17,11 +19,14 @@ Page({
     credit: '',
     example: '',
     fields: [],
-    final: '',
-    keepHint: '没填的变量会原样保留为 {{变量名}}，可以到优化页继续改。'
+    final: ''
   },
 
   onLoad(options) {
+    const t = i18n.t()
+    wx.setNavigationBarTitle({ title: t.prompt.navTitle })
+    this.setData({ t })
+    const lang = options.lang === 'en' || options.lang === 'zh' ? options.lang : i18n.lang()
     const item = library.getPrompt(options.id)
     if (!item) {
       this.setData({ missing: true })
@@ -29,13 +34,13 @@ Page({
     }
     this.item = item
     this.setData({
-      categoryName: library.categoryName(item.category),
-      targetLabel: schema.TARGETS[item.target].label,
+      categoryName: library.categoryName(item.category, i18n.lang()),
+      targetLabel: t.targets[item.target] || schema.TARGETS[item.target].label,
       tags: item.tags,
       credit: item.credit,
       example: item.example
     })
-    this.show(options.lang === 'en' ? 'en' : 'zh')
+    this.show(lang)
   },
 
   // lang 是用户选的语言；没有英文版时 textLang 会是 'zh'。

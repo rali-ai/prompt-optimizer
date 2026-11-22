@@ -1,5 +1,5 @@
-// 本功能包所有页面的路径，页面跳转都走 go()。宿主改了分包目录名时只改 ROOT。
-const ROOT = '/goprmpt/pages/'
+// 本分包所有页面的路径，页面跳转都走 go()。分包目录名固定为 goprmpt-lite，宿主不要改名。
+const ROOT = '/goprmpt-lite/pages/'
 
 const ROUTES = {
   optimize: ROOT + 'optimize/optimize',

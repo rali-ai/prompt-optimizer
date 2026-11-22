@@ -1,0 +1,18 @@
+<view wx:if="{{t}}" class="gp-page">
+  <view class="gp-card">
+    <view class="gp-title title">goprmpt</view>
+    <view class="text">{{t.about.intro}}</view>
+  </view>
+  <view class="gp-card">
+    <view class="gp-section-title">{{t.about.aiTitle}}</view>
+    <view class="text">{{t.about.ai}}</view>
+  </view>
+  <view class="gp-card">
+    <view class="gp-section-title">{{t.about.dataTitle}}</view>
+    <view class="text">{{t.about.data}}</view>
+  </view>
+  <view class="gp-card">
+    <view class="gp-section-title">{{t.about.contactTitle}}</view>
+    <view class="text">{{t.about.contact}}</view>
+  </view>
+</view>

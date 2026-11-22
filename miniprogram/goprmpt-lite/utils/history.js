@@ -40,11 +40,12 @@ function pad(n) {
   return n < 10 ? '0' + n : String(n)
 }
 
-function formatTime(ts, now) {
+// lang: 'zh' | 'en'，只影响「今天 / Today」。
+function formatTime(ts, now, lang) {
   const d = new Date(ts)
   const today = new Date(now === undefined ? Date.now() : now)
   const time = pad(d.getHours()) + ':' + pad(d.getMinutes())
-  if (d.toDateString() === today.toDateString()) return '今天 ' + time
+  if (d.toDateString() === today.toDateString()) return (lang === 'en' ? 'Today ' : '今天 ') + time
   const date = pad(d.getMonth() + 1) + '-' + pad(d.getDate())
   return d.getFullYear() === today.getFullYear() ? date + ' ' + time : d.getFullYear() + '-' + date
 }

@@ -1,0 +1,20 @@
+<view wx:if="{{t}}" class="gp-page">
+  <view class="gp-card">
+    <view class="gp-section-title">{{t.settings.langTitle}}</view>
+    <view class="gp-segment">
+      <view
+        wx:for="{{options}}"
+        wx:key="id"
+        class="gp-segment-item {{item.id === preference ? 'gp-segment-on' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="onPickLang"
+      >{{item.name}}</view>
+    </view>
+  </view>
+
+  <view class="gp-card">
+    <view class="gp-section-title">{{t.settings.aboutTitle}}</view>
+    <view class="note">{{t.settings.aboutAi}}</view>
+    <view class="note">{{t.settings.aboutData}}</view>
+  </view>
+</view>

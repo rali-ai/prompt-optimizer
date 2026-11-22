@@ -1,45 +1,40 @@
-// 优化页：输入提示词 → 选优化方式和输出语言 → 调模型 → 看结果、复制、再优化。
+// 优化页：输入提示词（或选一条示例）→ 选优化方式和输出语言 → 请求 mp-server → 看结果、复制、再优化。
 // 外部打开时可预填：navigateTo 本页后在 eventChannel 上 emit('prefill', { input, mode, lang })；
 // 历史页用 ?historyId= 打开。
-const templates = require('../../utils/templates.js')
-const llm = require('../../utils/llm.js')
-const settings = require('../../utils/settings.js')
+const api = require('../../utils/api.js')
+const i18n = require('../../utils/i18n.js')
 const history = require('../../utils/history.js')
 const storage = require('../../utils/storage.js')
 const routes = require('../../utils/routes.js')
+const samples = require('../../data/samples.js')
 
-const MODES = templates.MODE_OPTIONS
-
-function modeDesc(id) {
-  const mode = MODES.find((m) => m.id === id)
-  return mode ? mode.desc : ''
-}
-
-const isMode = (id) => MODES.some((m) => m.id === id)
-const isLang = (id) => templates.LANGUAGES.some((l) => l.id === id)
+const isMode = (id) => i18n.MODE_IDS.indexOf(id) !== -1
+const isLang = (id) => id === 'zh' || id === 'en'
 
 Page({
   data: {
-    modes: MODES,
-    languages: templates.LANGUAGES,
-    ready: true,
-    modeId: MODES[0].id,
-    modeDesc: MODES[0].desc,
+    t: null,
+    modes: [],
+    samples: [],
+    modeId: i18n.MODE_IDS[0],
+    modeDesc: '',
     lang: 'zh',
     input: '',
     // phase: 'idle' | 'optimizing' | 'iterating'
     phase: 'idle',
     error: '',
-    errorKind: '',
     before: '',
     result: '',
     round: 0,
+    roundLabel: '',
+    remainingLabel: '',
     view: 'after',
     showIterate: false,
     iterateInput: ''
   },
 
   onLoad(options) {
+    this.setData({ lang: i18n.lang() })
     this.applyPrefill(storage.get('prefs', {}))
     const record = options.historyId ? history.get(options.historyId) : null
     if (record) {
@@ -51,21 +46,32 @@ Page({
     }
   },
 
+  // 设置页改了界面语言后返回时要刷新文案。
   onShow() {
-    this.setData({ ready: settings.isReady(settings.load()) })
+    const t = i18n.t()
+    const lang = i18n.lang()
+    wx.setNavigationBarTitle({ title: t.optimize.navTitle })
+    this.setData({
+      t,
+      modes: i18n.modeOptions(t),
+      modeDesc: t.modes[this.data.modeId].desc,
+      samples: samples.map((s) => ({ id: s.id, title: s[lang].title })),
+      roundLabel: t.optimize.round.replace('{n}', this.data.round)
+    })
   },
 
   // 预填来自其他页面或宿主小程序，这里逐项校验，不认识的值忽略。
   applyPrefill(prefill) {
+    const t = i18n.t()
     const patch = {}
     if (typeof prefill.input === 'string') patch.input = prefill.input
     if (isMode(prefill.mode)) {
       patch.modeId = prefill.mode
-      patch.modeDesc = modeDesc(prefill.mode)
+      patch.modeDesc = t.modes[prefill.mode].desc
     }
     if (isLang(prefill.lang)) patch.lang = prefill.lang
     if (typeof prefill.result === 'string' && prefill.result) {
-      Object.assign(patch, { before: patch.input || '', result: prefill.result, round: 1, view: 'after' })
+      Object.assign(patch, { before: patch.input || '', result: prefill.result, round: 1, roundLabel: t.optimize.round.replace('{n}', 1), view: 'after' })
     }
     this.setData(patch)
   },
@@ -82,9 +88,16 @@ Page({
     this.setData({ input: '' })
   },
 
+  onPickSample(e) {
+    const sample = samples.find((s) => s.id === e.currentTarget.dataset.id)
+    if (!sample) return
+    const t = this.data.t
+    this.setData({ input: sample[i18n.lang()].prompt, modeId: 'general', modeDesc: t.modes.general.desc })
+  },
+
   onPickMode(e) {
     const id = e.currentTarget.dataset.id
-    this.setData({ modeId: id, modeDesc: modeDesc(id) })
+    this.setData({ modeId: id, modeDesc: this.data.t.modes[id].desc })
     this.savePrefs()
   },
 
@@ -96,11 +109,11 @@ Page({
   onOptimize() {
     const input = this.data.input.trim()
     if (!input) {
-      wx.showToast({ title: '先输入要优化的提示词', icon: 'none' })
+      wx.showToast({ title: this.data.t.optimize.emptyInput, icon: 'none' })
       return
     }
     const { modeId, lang } = this.data
-    this.run('optimizing', templates.buildMessages(modeId, input, lang), { mode: modeId, lang, input })
+    this.run('optimizing', { mode: modeId, prompt: input, lang })
   },
 
   onToggleIterate() {
@@ -113,25 +126,25 @@ Page({
 
   onIterate() {
     const { result, iterateInput, lang } = this.data
-    this.run('iterating', templates.buildIterateMessages(result, iterateInput, lang), {
-      mode: 'iterate',
-      lang,
-      input: result,
-      iterateInput: iterateInput.trim()
-    })
+    this.run('iterating', { mode: 'iterate', prompt: result, lang, instruction: iterateInput.trim() })
   },
 
-  run(phase, messages, entry) {
+  // request: mp-server 的优化请求 { mode, prompt, lang, instruction? }
+  run(phase, request) {
     if (this.data.phase !== 'idle') return
-    this.setData({ phase, error: '', errorKind: '' })
-    llm.chat(settings.load(), messages)
-      .then((output) => {
-        history.add(Object.assign({ output }, entry))
+    this.setData({ phase, error: '' })
+    api.optimize(request)
+      .then(({ result, remaining }) => {
+        const t = this.data.t
+        const round = phase === 'iterating' ? this.data.round + 1 : 1
+        history.add({ mode: request.mode, lang: request.lang, input: request.prompt, output: result, iterateInput: request.instruction })
         this.setData({
           phase: 'idle',
-          before: entry.input,
-          result: output,
-          round: phase === 'iterating' ? this.data.round + 1 : 1,
+          before: request.prompt,
+          result,
+          round,
+          roundLabel: t.optimize.round.replace('{n}', round),
+          remainingLabel: typeof remaining === 'number' ? t.optimize.remaining.replace('{n}', remaining) : '',
           view: 'after',
           showIterate: false,
           iterateInput: ''
@@ -139,7 +152,7 @@ Page({
         wx.pageScrollTo({ selector: '#result', duration: 200 })
       })
       .catch((error) => {
-        this.setData({ phase: 'idle', error: error.message, errorKind: error.kind || '' })
+        this.setData({ phase: 'idle', error: i18n.errorMessage(error, this.data.t) })
       })
   },
 

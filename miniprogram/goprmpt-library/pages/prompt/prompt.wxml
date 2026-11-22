@@ -1,6 +1,6 @@
-<view wx:if="{{missing}}" class="gp-empty">没有找到这条提示词</view>
+<view wx:if="{{missing}}" class="gp-empty">{{t.prompt.missing}}</view>
 
-<view wx:else class="gp-page">
+<view wx:elif="{{t}}" class="gp-page">
   <view class="gp-card">
     <view class="gp-row-between">
       <view class="gp-muted">{{categoryName}} · {{targetLabel}}</view>
@@ -22,10 +22,10 @@
     <view wx:if="{{credit}}" class="credit">{{credit}}</view>
   </view>
 
-  <view wx:if="{{lang !== textLang}}" class="gp-notice">这条提示词还没有英文版，下面显示中文。</view>
+  <view wx:if="{{lang !== textLang}}" class="gp-notice">{{t.prompt.noEnglish}}</view>
 
   <view wx:if="{{fields.length}}" class="gp-card">
-    <view class="gp-section-title">填写变量</view>
+    <view class="gp-section-title">{{t.prompt.fields}}</view>
     <view wx:for="{{fields}}" wx:key="name" class="field">
       <view class="field-name">{{item.name}}</view>
       <view wx:if="{{item.description}}" class="gp-muted field-desc">{{item.description}}</view>
@@ -35,7 +35,7 @@
         maxlength="-1"
         auto-height="{{true}}"
         disable-default-padding="{{true}}"
-        placeholder="填写{{item.name}}"
+        placeholder="{{t.prompt.fill}}{{item.name}}"
         placeholder-class="gp-placeholder"
         data-index="{{index}}"
         bindinput="onField"
@@ -44,18 +44,18 @@
   </view>
 
   <view class="gp-card">
-    <view class="gp-section-title">最终提示词</view>
+    <view class="gp-section-title">{{t.prompt.final}}</view>
     <text class="gp-text final" user-select="{{true}}">{{final}}</text>
-    <view wx:if="{{fields.length}}" class="gp-muted hint">{{keepHint}}</view>
+    <view wx:if="{{fields.length}}" class="gp-muted hint">{{t.prompt.keepHint}}</view>
   </view>
 
   <view wx:if="{{example}}" class="gp-card">
-    <view class="gp-section-title">示例</view>
+    <view class="gp-section-title">{{t.prompt.example}}</view>
     <text class="gp-text example" user-select="{{true}}">{{example}}</text>
   </view>
 
   <view class="gp-actions">
-    <view class="gp-btn" hover-class="gp-pressed" bindtap="onCopy">复制</view>
-    <view class="gp-btn gp-btn-primary" hover-class="gp-pressed" bindtap="onOptimize">去优化</view>
+    <view class="gp-btn" hover-class="gp-pressed" bindtap="onCopy">{{t.prompt.copy}}</view>
+    <view class="gp-btn gp-btn-primary" hover-class="gp-pressed" bindtap="onOptimize">{{t.prompt.optimize}}</view>
   </view>
 </view>
