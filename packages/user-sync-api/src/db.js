@@ -5,10 +5,18 @@ import { DatabaseSync } from 'node:sqlite';
 import { hashPassword } from './crypto.js';
 
 export const USERNAME_REGEX = /^[a-z0-9_.-]{3,32}$/;
+export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export function normalizeUsername(raw) {
   if (typeof raw !== 'string') return '';
   return raw.trim().toLowerCase();
+}
+
+export function normalizeEmail(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed ? trimmed : null;
 }
 
 export function serializeUser(row) {
@@ -16,6 +24,7 @@ export function serializeUser(row) {
   return {
     id: row.id,
     username: row.username,
+    email: row.email ?? null,
     role: row.role,
     tier: row.tier,
     tierExpiresAt: row.tier_expires_at ?? null,
@@ -38,6 +47,7 @@ export function openDatabase(dbPath) {
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
+      email TEXT,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
       tier TEXT NOT NULL DEFAULT 'free' CHECK (tier IN ('free', 'pro')),
@@ -71,7 +81,18 @@ export function openDatabase(dbPath) {
     );
   `);
 
+  const userColumns = db.prepare('PRAGMA table_info(users)').all();
+  if (!userColumns.some((col) => col.name === 'email')) {
+    db.exec('ALTER TABLE users ADD COLUMN email TEXT');
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
+    ON users(email)
+    WHERE email IS NOT NULL AND email != ''
+  `);
+
   const stmtFindByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
+  const stmtFindByEmail = db.prepare('SELECT * FROM users WHERE email = ?');
   const stmtFindById = db.prepare('SELECT * FROM users WHERE id = ?');
   const stmtGetSetting = db.prepare('SELECT value, updated_at FROM app_settings WHERE key = ?');
   const stmtUpsertSetting = db.prepare(`
@@ -82,8 +103,8 @@ export function openDatabase(dbPath) {
       updated_at = excluded.updated_at
   `);
   const stmtInsertUser = db.prepare(`
-    INSERT INTO users (id, username, password_hash, role, tier, tier_expires_at, disabled, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'free', NULL, 0, ?, ?)
+    INSERT INTO users (id, username, email, password_hash, role, tier, tier_expires_at, disabled, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'free', NULL, 0, ?, ?)
   `);
   const stmtGetSync = db.prepare(
     'SELECT payload_json, version, bytes, updated_at FROM user_sync_blobs WHERE user_id = ?',
@@ -101,6 +122,7 @@ export function openDatabase(dbPath) {
     SELECT
       u.id,
       u.username,
+      u.email,
       u.role,
       u.tier,
       u.tier_expires_at,
@@ -119,6 +141,16 @@ export function openDatabase(dbPath) {
     SET tier = ?, tier_expires_at = ?, disabled = ?, updated_at = ?
     WHERE id = ?
   `);
+  const stmtUpdateUserEmail = db.prepare(`
+    UPDATE users
+    SET email = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  const stmtUpdateUserPassword = db.prepare(`
+    UPDATE users
+    SET password_hash = ?, updated_at = ?
+    WHERE id = ?
+  `);
 
   return {
     raw: db,
@@ -131,15 +163,34 @@ export function openDatabase(dbPath) {
       return stmtFindByUsername.get(username) || null;
     },
 
+    findUserByEmail(email) {
+      if (!email) return null;
+      return stmtFindByEmail.get(email) || null;
+    },
+
     findUserById(id) {
       return stmtFindById.get(id) || null;
     },
 
-    createUser({ username, passwordHash, role = 'user' }) {
+    createUser({ username, email = null, passwordHash, role = 'user' }) {
       const now = Date.now();
       const id = crypto.randomUUID();
-      stmtInsertUser.run(id, username, passwordHash, role, now, now);
+      stmtInsertUser.run(id, username, email, passwordHash, role, now, now);
       return stmtFindById.get(id);
+    },
+
+    updateUserEmail(userId, email) {
+      const existing = stmtFindById.get(userId);
+      if (!existing) return null;
+      stmtUpdateUserEmail.run(email, Date.now(), userId);
+      return stmtFindById.get(userId);
+    },
+
+    updateUserPassword(userId, passwordHash) {
+      const existing = stmtFindById.get(userId);
+      if (!existing) return null;
+      stmtUpdateUserPassword.run(passwordHash, Date.now(), userId);
+      return stmtFindById.get(userId);
     },
 
     bootstrapAdmin({ username, password }) {

@@ -495,3 +495,190 @@ test('admin membership toggle persists across restarts and updates /config and /
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('optional email registration, profile update, self password change, admin password reset, and legacy DB migration', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'legacy', 'users.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+  // Simulate an existing pre-email database to verify live ALTER TABLE migration
+  const legacyDb = new DatabaseSync(dbPath);
+  legacyDb.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      tier TEXT NOT NULL DEFAULT 'free',
+      tier_expires_at INTEGER,
+      disabled INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+  legacyDb.close();
+
+  const ctxApp = createApp(
+    loadConfig({
+      USER_SYNC_HOST: '127.0.0.1',
+      USER_SYNC_PORT: '0',
+      USER_SYNC_DB_PATH: dbPath,
+      ADMIN_USERNAME: 'root_admin',
+      ADMIN_PASSWORD: 'AdminPassword123!',
+      RATE_LIMIT_MAX: '50',
+      RATE_LIMIT_WINDOW_MS: '60000',
+    }),
+  );
+
+  try {
+    const addr = await ctxApp.listen();
+    const baseUrl = `http://${addr.host}:${addr.port}`;
+
+    // Invalid email on register -> 400
+    const badEmailReg = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'carol', password: 'Password123!', email: 'not-an-email' }),
+    });
+    assert.equal(badEmailReg.status, 400);
+
+    // Valid optional email registration -> 201 and email lowercased
+    const regCarol = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'carol', password: 'Password123!', email: 'Carol@Example.COM' }),
+    });
+    assert.equal(regCarol.status, 201);
+    const carolCookie = extractCookieHeader(regCarol);
+    const { user: carol } = await regCarol.json();
+    assert.equal(carol.email, 'carol@example.com');
+
+    // Duplicate email -> 409
+    const dupEmailReg = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'dave', password: 'Password123!', email: 'carol@example.com' }),
+    });
+    assert.equal(dupEmailReg.status, 409);
+
+    // Register without email -> 201 with email: null
+    const regDave = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'dave', password: 'Password123!' }),
+    });
+    assert.equal(regDave.status, 201);
+    const daveCookie = extractCookieHeader(regDave);
+    const { user: dave } = await regDave.json();
+    assert.equal(dave.email, null);
+
+    // User updates own email -> 200; duplicate fails 409
+    const dupProfile = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: daveCookie },
+      body: JSON.stringify({ email: 'carol@example.com' }),
+    });
+    assert.equal(dupProfile.status, 409);
+
+    const bindEmail = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: daveCookie },
+      body: JSON.stringify({ email: 'dave@example.com' }),
+    });
+    assert.equal(bindEmail.status, 200);
+    assert.equal((await bindEmail.json()).user.email, 'dave@example.com');
+
+    // Login using bound email works
+    const emailLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'dave@example.com', password: 'Password123!' }),
+    });
+    assert.equal(emailLogin.status, 200);
+    assert.equal((await emailLogin.json()).user.username, 'dave');
+
+    // Self password change: wrong current password -> 401
+    const badPwd = await fetch(`${baseUrl}/user-api/me/password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: carolCookie },
+      body: JSON.stringify({ currentPassword: 'WrongPassword!', newPassword: 'NewPassword456!' }),
+    });
+    assert.equal(badPwd.status, 401);
+
+    // Self password change: valid -> 200 and new password logs in
+    const okPwd = await fetch(`${baseUrl}/user-api/me/password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: carolCookie },
+      body: JSON.stringify({ currentPassword: 'Password123!', newPassword: 'NewPassword456!' }),
+    });
+    assert.equal(okPwd.status, 200);
+
+    const carolNewLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'carol', password: 'NewPassword456!' }),
+    });
+    assert.equal(carolNewLogin.status, 200);
+
+    // Non-admin reset-password -> 403
+    const nonAdminReset = await fetch(`${baseUrl}/user-api/admin/users/${dave.id}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: carolCookie },
+      body: '{}',
+    });
+    assert.equal(nonAdminReset.status, 403);
+
+    // Admin login & reset Dave's password -> 200 with 12-char temporaryPassword
+    const adminLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+    const { user: adminUser } = await adminLogin.json();
+
+    // Admin cannot self-reset via reset-password route -> 400
+    const selfReset = await fetch(`${baseUrl}/user-api/admin/users/${adminUser.id}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: '{}',
+    });
+    assert.equal(selfReset.status, 400);
+
+    // Admin resets Dave's password
+    const resetRes = await fetch(`${baseUrl}/user-api/admin/users/${dave.id}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: '{}',
+    });
+    assert.equal(resetRes.status, 200);
+    const resetBody = await resetRes.json();
+    assert.equal(resetBody.temporaryPassword.length, 12);
+
+    // Dave can log in with temporaryPassword and old password fails
+    const oldDaveLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'dave', password: 'Password123!' }),
+    });
+    assert.equal(oldDaveLogin.status, 401);
+
+    const tempDaveLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'dave', password: resetBody.temporaryPassword }),
+    });
+    assert.equal(tempDaveLogin.status, 200);
+
+    // Admin list returns emails
+    const listRes = await fetch(`${baseUrl}/user-api/admin/users`, {
+      headers: { Cookie: adminCookie },
+    });
+    const listedDave = (await listRes.json()).users.find((u) => u.id === dave.id);
+    assert.equal(listedDave.email, 'dave@example.com');
+  } finally {
+    await ctxApp.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

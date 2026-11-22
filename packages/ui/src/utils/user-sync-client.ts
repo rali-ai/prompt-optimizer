@@ -6,6 +6,7 @@ export interface UserSyncConfig {
 export interface SyncUser {
   id: string
   username: string
+  email?: string | null
   role: 'user' | 'admin'
   tier: 'free' | 'pro'
   tierExpiresAt: number | null
@@ -216,12 +217,50 @@ export async function register(
   password: string,
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl: typeof fetch = fetch,
+  email?: string,
 ): Promise<SyncUser> {
+  const payload: { username: string; password: string; email?: string } = { username, password }
+  if (typeof email === 'string' && email.trim()) {
+    payload.email = email.trim()
+  }
   const res = await requestJson<{ user: SyncUser }>(
     joinUrl(baseUrl, '/register'),
     {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify(payload),
+    },
+    fetchImpl,
+  )
+  return res.user
+}
+
+export async function updateProfile(
+  email: string | null,
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<SyncUser> {
+  const res = await requestJson<{ user: SyncUser }>(
+    joinUrl(baseUrl, '/me/profile'),
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ email }),
+    },
+    fetchImpl,
+  )
+  return res.user
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<SyncUser> {
+  const res = await requestJson<{ ok: boolean; user: SyncUser }>(
+    joinUrl(baseUrl, '/me/password'),
+    {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
     },
     fetchImpl,
   )

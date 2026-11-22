@@ -62,11 +62,11 @@
         <NTabs v-model:value="activeTab" type="segment" size="small">
           <NTabPane name="login" :tab="text.tabLogin">
             <NForm label-placement="top" size="small" :show-feedback="false" class="auth-form" @submit.prevent="handleLogin">
-              <NFormItem :label="text.usernameLabel" class="auth-field">
+              <NFormItem :label="text.loginIdentifierLabel" class="auth-field">
                 <NInput
                   v-model:value="form.username"
                   size="small"
-                  :placeholder="text.usernamePlaceholder"
+                  :placeholder="text.loginIdentifierPlaceholder"
                   :input-props="{ autocomplete: 'username' }"
                   data-testid="account-sync-login-username"
                 />
@@ -104,6 +104,15 @@
                   :placeholder="text.usernamePlaceholder"
                   :input-props="{ autocomplete: 'username' }"
                   data-testid="account-sync-register-username"
+                />
+              </NFormItem>
+              <NFormItem :label="text.emailOptionalLabel" class="auth-field">
+                <NInput
+                  v-model:value="form.email"
+                  size="small"
+                  :placeholder="text.emailPlaceholder"
+                  :input-props="{ type: 'email', autocomplete: 'email' }"
+                  data-testid="account-sync-register-email"
                 />
               </NFormItem>
               <NFormItem :label="text.passwordLabel" class="auth-field">
@@ -163,6 +172,9 @@
             </NTag>
           </div>
           <div class="account-row account-row--muted">
+            <span class="account-email-text">{{ currentUser.email || text.emailUnbound }}</span>
+          </div>
+          <div class="account-row account-row--muted">
             <span>{{ syncSummaryText }}</span>
           </div>
         </div>
@@ -202,6 +214,86 @@
           </NButton>
           <NButton
             quaternary
+            size="small"
+            block
+            :disabled="busy"
+            data-testid="account-sync-security-toggle"
+            @click="toggleSecurity"
+          >
+            {{ showSecurity ? text.hideSecurityButton : text.securityButton }}
+          </NButton>
+          <div v-if="showSecurity" class="security-subpanel" data-testid="account-sync-security-panel">
+            <NForm label-placement="top" size="small" :show-feedback="false" class="auth-form" @submit.prevent="handleSaveEmail">
+              <NFormItem :label="text.bindEmailLabel" class="auth-field">
+                <NInput
+                  v-model:value="securityForm.email"
+                  size="small"
+                  :placeholder="text.emailPlaceholder"
+                  :input-props="{ type: 'email', autocomplete: 'email' }"
+                  data-testid="account-sync-profile-email"
+                />
+              </NFormItem>
+              <NButton
+                secondary
+                size="small"
+                block
+                :loading="busy && activeAction === 'profile'"
+                :disabled="busy"
+                data-testid="account-sync-save-email"
+                @click="handleSaveEmail"
+              >
+                {{ text.saveEmailButton }}
+              </NButton>
+            </NForm>
+            <div class="security-divider" />
+            <NForm label-placement="top" size="small" :show-feedback="false" class="auth-form" @submit.prevent="handleChangePassword">
+              <NFormItem :label="text.currentPasswordLabel" class="auth-field">
+                <NInput
+                  v-model:value="securityForm.currentPassword"
+                  size="small"
+                  type="password"
+                  show-password-on="click"
+                  :input-props="{ autocomplete: 'current-password' }"
+                  data-testid="account-sync-current-password"
+                />
+              </NFormItem>
+              <NFormItem :label="text.newPasswordLabel" class="auth-field">
+                <NInput
+                  v-model:value="securityForm.newPassword"
+                  size="small"
+                  type="password"
+                  show-password-on="click"
+                  :placeholder="text.passwordPlaceholder"
+                  :input-props="{ autocomplete: 'new-password' }"
+                  data-testid="account-sync-new-password"
+                />
+              </NFormItem>
+              <NFormItem :label="text.confirmPasswordLabel" class="auth-field">
+                <NInput
+                  v-model:value="securityForm.confirmNewPassword"
+                  size="small"
+                  type="password"
+                  show-password-on="click"
+                  :placeholder="text.confirmPasswordPlaceholder"
+                  :input-props="{ autocomplete: 'new-password' }"
+                  data-testid="account-sync-confirm-new-password"
+                />
+              </NFormItem>
+              <NButton
+                secondary
+                size="small"
+                block
+                :loading="busy && activeAction === 'password'"
+                :disabled="busy"
+                data-testid="account-sync-change-password"
+                @click="handleChangePassword"
+              >
+                {{ text.changePasswordButton }}
+              </NButton>
+            </NForm>
+          </div>
+          <NButton
+            quaternary
             type="error"
             size="small"
             block
@@ -237,6 +329,7 @@ import { Cloud, ChevronDown, ShieldCheck } from '@lucide/vue'
 import type { AppServices } from '../../types/services'
 import {
   UserSyncError,
+  changePassword,
   getConfig,
   getMe,
   login,
@@ -246,6 +339,7 @@ import {
   register,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
+  updateProfile,
   type SyncPayload,
   type SyncUser,
 } from '../../utils/user-sync-client'
@@ -279,8 +373,23 @@ const text = computed(() =>
           '免登录也可直接使用；云同步仅保存收藏、历史、模板和变量，模型 API Key 仅留在您的浏览器本地。',
         tabLogin: '登录',
         tabRegister: '注册',
+        loginIdentifierLabel: '用户名或邮箱',
+        loginIdentifierPlaceholder: '输入用户名或已绑定邮箱',
         usernameLabel: '用户名',
         usernamePlaceholder: '3-32 位小写字母、数字、_ . -',
+        emailOptionalLabel: '邮箱（选填，便于后续找回密码）',
+        emailPlaceholder: 'name@example.com',
+        emailUnbound: '邮箱：未绑定',
+        bindEmailLabel: '绑定或修改邮箱',
+        saveEmailButton: '保存邮箱',
+        securityButton: '邮箱与修改密码',
+        hideSecurityButton: '收起邮箱与改密',
+        currentPasswordLabel: '当前密码',
+        newPasswordLabel: '新密码',
+        changePasswordButton: '更新密码',
+        okEmailUpdated: '邮箱已保存',
+        okPasswordChanged: '密码已更新，下次请使用新密码登录',
+        errEmptyPasswordFields: '请输入当前密码和新密码',
         passwordLabel: '密码',
         passwordPlaceholder: '至少 8 位字符',
         confirmPasswordLabel: '确认密码',
@@ -311,8 +420,23 @@ const text = computed(() =>
           'Works without sign-in; cloud sync only saves favorites, history, templates, and variables. Model API keys always stay local in your browser.',
         tabLogin: 'Sign in',
         tabRegister: 'Register',
+        loginIdentifierLabel: 'Username or Email',
+        loginIdentifierPlaceholder: 'Enter username or email',
         usernameLabel: 'Username',
         usernamePlaceholder: '3-32 chars: a-z, 0-9, _ . -',
+        emailOptionalLabel: 'Email (optional, for recovery)',
+        emailPlaceholder: 'name@example.com',
+        emailUnbound: 'Email: Not set',
+        bindEmailLabel: 'Email address',
+        saveEmailButton: 'Save Email',
+        securityButton: 'Email & Password',
+        hideSecurityButton: 'Hide Security Settings',
+        currentPasswordLabel: 'Current password',
+        newPasswordLabel: 'New password',
+        changePasswordButton: 'Update Password',
+        okEmailUpdated: 'Email saved',
+        okPasswordChanged: 'Password updated',
+        errEmptyPasswordFields: 'Please enter current and new passwords',
         passwordLabel: 'Password',
         passwordPlaceholder: 'At least 8 characters',
         confirmPasswordLabel: 'Confirm password',
@@ -344,11 +468,18 @@ const lastSyncVersion = ref(0)
 const lastSyncUpdatedAt = ref<number | null>(null)
 
 const showModal = ref(false)
+const showSecurity = ref(false)
 const activeTab = ref<'login' | 'register'>('login')
 const busy = ref(false)
-const activeAction = ref<'auth' | 'push' | 'pull' | 'logout' | null>(null)
+const activeAction = ref<'auth' | 'push' | 'pull' | 'logout' | 'profile' | 'password' | null>(null)
 const notice = ref<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null)
-const form = reactive({ username: '', password: '', confirmPassword: '' })
+const form = reactive({ username: '', email: '', password: '', confirmPassword: '' })
+const securityForm = reactive({
+  email: '',
+  currentPassword: '',
+  newPassword: '',
+  confirmNewPassword: '',
+})
 
 const syncSummaryText = computed(() => {
   if (!lastSyncVersion.value || !lastSyncUpdatedAt.value) {
@@ -389,6 +520,7 @@ function togglePanel() {
     notice.value = null
     form.password = ''
     form.confirmPassword = ''
+    securityForm.email = currentUser.value?.email || ''
     getConfig(props.baseUrl)
       .then((cfg) => {
         membershipEnabled.value = Boolean(cfg.membershipEnabled)
@@ -398,6 +530,16 @@ function togglePanel() {
       })
   }
   showModal.value = !showModal.value
+}
+
+function toggleSecurity() {
+  showSecurity.value = !showSecurity.value
+  if (showSecurity.value) {
+    securityForm.email = currentUser.value?.email || ''
+    securityForm.currentPassword = ''
+    securityForm.newPassword = ''
+    securityForm.confirmNewPassword = ''
+  }
 }
 
 function errorMessage(err: unknown): string {
@@ -420,6 +562,7 @@ async function handleLogin() {
   try {
     currentUser.value = await login(form.username.trim(), form.password, props.baseUrl)
     form.password = ''
+    securityForm.email = currentUser.value?.email || ''
     await refreshSyncMeta()
   } catch (err) {
     notice.value = { type: 'error', text: errorMessage(err) }
@@ -447,11 +590,72 @@ async function handleRegister() {
   activeAction.value = 'auth'
   notice.value = null
   try {
-    currentUser.value = await register(form.username.trim(), form.password, props.baseUrl)
+    currentUser.value = await register(
+      form.username.trim(),
+      form.password,
+      props.baseUrl,
+      fetch,
+      form.email.trim() || undefined,
+    )
+    form.email = ''
     form.password = ''
     form.confirmPassword = ''
+    securityForm.email = currentUser.value?.email || ''
     lastSyncVersion.value = 0
     lastSyncUpdatedAt.value = null
+  } catch (err) {
+    notice.value = { type: 'error', text: errorMessage(err) }
+  } finally {
+    busy.value = false
+    activeAction.value = null
+  }
+}
+
+async function handleSaveEmail() {
+  if (busy.value || !currentUser.value) return
+  busy.value = true
+  activeAction.value = 'profile'
+  notice.value = null
+  try {
+    const emailVal = securityForm.email.trim()
+    currentUser.value = await updateProfile(emailVal || null, props.baseUrl)
+    securityForm.email = currentUser.value.email || ''
+    notice.value = { type: 'success', text: text.value.okEmailUpdated }
+  } catch (err) {
+    notice.value = { type: 'error', text: errorMessage(err) }
+  } finally {
+    busy.value = false
+    activeAction.value = null
+  }
+}
+
+async function handleChangePassword() {
+  if (busy.value || !currentUser.value) return
+  if (!securityForm.currentPassword || !securityForm.newPassword) {
+    notice.value = { type: 'error', text: text.value.errEmptyPasswordFields }
+    return
+  }
+  if (securityForm.newPassword.length < 8) {
+    notice.value = { type: 'error', text: text.value.errPasswordShort }
+    return
+  }
+  if (securityForm.newPassword !== securityForm.confirmNewPassword) {
+    notice.value = { type: 'error', text: text.value.errPasswordMismatch }
+    return
+  }
+  busy.value = true
+  activeAction.value = 'password'
+  notice.value = null
+  try {
+    currentUser.value = await changePassword(
+      securityForm.currentPassword,
+      securityForm.newPassword,
+      props.baseUrl,
+    )
+    securityForm.currentPassword = ''
+    securityForm.newPassword = ''
+    securityForm.confirmNewPassword = ''
+    notice.value = { type: 'success', text: text.value.okPasswordChanged }
   } catch (err) {
     notice.value = { type: 'error', text: errorMessage(err) }
   } finally {
@@ -555,6 +759,11 @@ async function handleLogout() {
   try {
     await logout(props.baseUrl)
     currentUser.value = null
+    showSecurity.value = false
+    securityForm.email = ''
+    securityForm.currentPassword = ''
+    securityForm.newPassword = ''
+    securityForm.confirmNewPassword = ''
     lastSyncVersion.value = 0
     lastSyncUpdatedAt.value = null
     notice.value = { type: 'success', text: text.value.okLoggedOut }
@@ -742,5 +951,27 @@ async function handleLogout() {
 
 .sync-actions {
   margin-top: 2px;
+}
+
+.account-email-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.security-subpanel {
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--gp-surface-muted, rgba(128, 128, 128, 0.06));
+  border: 1px solid var(--gp-border, rgba(24, 24, 27, 0.08));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.security-divider {
+  height: 1px;
+  background: var(--gp-border, rgba(24, 24, 27, 0.08));
 }
 </style>

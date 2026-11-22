@@ -34,12 +34,48 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
         </div>
         <div class="actions">
           <a class="btn" href="/">返回工作台</a>
+          <button id="toggleAdminPwdBtn" class="btn" type="button">修改管理员密码</button>
           <button id="refreshBtn" class="btn" type="button">刷新数据</button>
           <button id="logoutBtn" class="btn btn-danger" type="button">退出登录</button>
         </div>
       </header>
 
+      <section id="adminPwdPanel" class="card admin-pwd-panel" style="display:none">
+        <div class="card-head" style="margin-bottom:12px;">
+          <div>
+            <h2>修改管理员密码</h2>
+            <p class="muted">修改后立即生效并持久保存到数据库，容器重启不会被覆盖。</p>
+          </div>
+          <button id="closeAdminPwdBtn" class="btn btn-sm" type="button">收起</button>
+        </div>
+        <form id="adminPwdForm" class="inline-pwd-form">
+          <label>当前密码
+            <input id="adminCurPwd" type="password" autocomplete="current-password" required />
+          </label>
+          <label>新密码（至少 8 位）
+            <input id="adminNewPwd" type="password" autocomplete="new-password" minlength="8" required />
+          </label>
+          <label>确认新密码
+            <input id="adminConfirmPwd" type="password" autocomplete="new-password" minlength="8" required />
+          </label>
+          <div class="inline-pwd-submit">
+            <button id="adminPwdSubmitBtn" class="btn btn-primary" type="submit">保存新密码</button>
+          </div>
+        </form>
+      </section>
+
       <div id="notice" class="notice" style="display:none"></div>
+      <div id="tempPwdBanner" class="temp-pwd-banner" style="display:none">
+        <div>
+          <strong id="tempPwdTitle">已生成一次性临时密码</strong>
+          <span class="muted">请复制并发送给用户，提醒其登录后及时修改：</span>
+          <code id="tempPwdCode" class="temp-pwd-code"></code>
+        </div>
+        <div class="actions">
+          <button id="copyTempPwdBtn" class="btn btn-primary btn-sm" type="button">一键复制</button>
+          <button id="closeTempPwdBtn" class="btn btn-sm" type="button">关闭</button>
+        </div>
+      </div>
 
       <section class="card switch-card" id="membershipCard" data-enabled="${enabledFlag ? '1' : '0'}">
         <div class="switch-info">
@@ -103,7 +139,7 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
             <p class="muted">支持按用户名检索与按会员状态筛选，可随时调整 Pro 有效期或停用账号。</p>
           </div>
           <div class="filter-bar">
-            <input id="searchInput" type="search" class="search-input" placeholder="搜索用户名..." aria-label="搜索用户名" />
+            <input id="searchInput" type="search" class="search-input" placeholder="搜索用户名或邮箱..." aria-label="搜索用户名或邮箱" />
             <div class="filter-pills" id="filterPills">
               <button type="button" class="pill is-active" data-filter="all">全部</button>
               <button type="button" class="pill" data-filter="pro">Pro 会员</button>
@@ -118,6 +154,7 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
             <thead>
               <tr>
                 <th>用户名</th>
+                <th>邮箱</th>
                 <th>角色</th>
                 <th>会员等级</th>
                 <th>到期时间</th>
@@ -128,7 +165,7 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
               </tr>
             </thead>
             <tbody id="userRows">
-              <tr><td colspan="8" class="muted">正在加载用户列表...</td></tr>
+              <tr><td colspan="9" class="muted">正在加载用户列表...</td></tr>
             </tbody>
           </table>
         </div>
@@ -150,6 +187,12 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
       const membershipActionBtnEl = document.getElementById('membershipActionBtn');
       const searchInputEl = document.getElementById('searchInput');
       const filterPillsEl = document.getElementById('filterPills');
+      const adminPwdPanelEl = document.getElementById('adminPwdPanel');
+      const adminPwdFormEl = document.getElementById('adminPwdForm');
+      const tempPwdBannerEl = document.getElementById('tempPwdBanner');
+      const tempPwdTitleEl = document.getElementById('tempPwdTitle');
+      const tempPwdCodeEl = document.getElementById('tempPwdCode');
+      let latestTempPassword = '';
 
       let currentMembershipEnabled = ${enabledFlag ? 'true' : 'false'};
       let allUsers = [];
@@ -219,7 +262,11 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
       function renderRows() {
         const q = searchInputEl.value.trim().toLowerCase();
         const filtered = allUsers.filter((u) => {
-          if (q && !String(u.username || '').toLowerCase().includes(q)) return false;
+          if (q) {
+            const matchName = String(u.username || '').toLowerCase().includes(q);
+            const matchEmail = String(u.email || '').toLowerCase().includes(q);
+            if (!matchName && !matchEmail) return false;
+          }
           if (currentFilter === 'pro') return u.tier === 'pro';
           if (currentFilter === 'free') return u.tier !== 'pro';
           if (currentFilter === 'disabled') return Boolean(u.disabled);
@@ -227,12 +274,15 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
         });
 
         if (!filtered.length) {
-          rowsEl.innerHTML = '<tr><td colspan="8" class="muted">没有符合条件的用户</td></tr>';
+          rowsEl.innerHTML = '<tr><td colspan="9" class="muted">没有符合条件的用户</td></tr>';
           return;
         }
 
         rowsEl.innerHTML = filtered.map((u) => {
           const isSelfAdmin = u.username === CURRENT_ADMIN_USERNAME && u.role === 'admin';
+          const emailCell = u.email
+            ? '<span>' + esc(u.email) + '</span>'
+            : '<span class="muted">未绑定</span>';
           const roleBadge = u.role === 'admin'
             ? '<span class="badge badge-admin">管理员</span>'
             : '<span class="badge badge-neutral">普通用户</span>';
@@ -242,12 +292,16 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
           const stateBadge = u.disabled
             ? '<span class="badge badge-danger">已停用</span>'
             : '<span class="badge badge-ok">正常</span>';
+          const resetPwdBtn = isSelfAdmin
+            ? ''
+            : '<button class="btn btn-sm" data-act="reset-pwd" data-username="' + esc(u.username) + '" data-id="' + esc(u.id) + '">重置密码</button>';
           const disableBtn = isSelfAdmin
             ? '<button class="btn btn-sm" disabled title="不能停用当前登录的管理员账号">当前管理员</button>'
             : '<button class="btn btn-sm ' + (u.disabled ? '' : 'btn-danger') + '" data-act="toggle" data-disabled="' + (u.disabled ? '1' : '0') + '" data-id="' + esc(u.id) + '">' + (u.disabled ? '启用' : '停用') + '</button>';
 
           return '<tr>' +
             '<td><strong>' + esc(u.username) + '</strong><div class="sub">' + esc(u.id) + '</div></td>' +
+            '<td>' + emailCell + '</td>' +
             '<td>' + roleBadge + '</td>' +
             '<td>' + tierBadge + '</td>' +
             '<td>' + fmtDate(u.tierExpiresAt) + '</td>' +
@@ -258,6 +312,7 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
               '<button class="btn btn-sm btn-accent-outline" data-act="pro30" data-id="' + esc(u.id) + '">设为 Pro +30天</button>' +
               '<button class="btn btn-sm" data-act="pro365" data-id="' + esc(u.id) + '">设为 Pro +1年</button>' +
               '<button class="btn btn-sm" data-act="free" data-id="' + esc(u.id) + '">恢复免费</button>' +
+              resetPwdBtn +
               disableBtn +
             '</td>' +
           '</tr>';
@@ -265,7 +320,7 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
       }
 
       async function loadUsers() {
-        rowsEl.innerHTML = '<tr><td colspan="8" class="muted">正在加载...</td></tr>';
+        rowsEl.innerHTML = '<tr><td colspan="9" class="muted">正在加载...</td></tr>';
         try {
           const res = await fetch('/user-api/admin/users', { credentials: 'same-origin' });
           const body = await res.json();
@@ -330,6 +385,36 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
         if (!btn) return;
         const id = btn.dataset.id;
         const act = btn.dataset.act;
+        if (act === 'reset-pwd') {
+          const uname = btn.dataset.username || id;
+          if (!window.confirm('确定要重置用户「' + uname + '」的密码吗？系统将生成新的 12 位随机临时密码。')) {
+            return;
+          }
+          btn.disabled = true;
+          try {
+            const res = await fetch('/user-api/admin/users/' + encodeURIComponent(id) + '/reset-password', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: '{}',
+            });
+            const body = await res.json();
+            if (!res.ok) {
+              showNotice(body.error || '重置密码失败', true);
+            } else {
+              latestTempPassword = body.temporaryPassword || '';
+              tempPwdTitleEl.textContent = '已重置用户「' + body.user.username + '」的密码';
+              tempPwdCodeEl.textContent = latestTempPassword;
+              tempPwdBannerEl.style.display = 'flex';
+              showNotice('已为用户 ' + body.user.username + ' 生成新临时密码。');
+            }
+          } catch (err) {
+            showNotice('请求失败：' + err.message, true);
+          } finally {
+            btn.disabled = false;
+          }
+          return;
+        }
         let payload = {};
         if (act === 'pro30') {
           payload = { tier: 'pro', tierExpiresAt: Date.now() + THIRTY_DAYS_MS };
@@ -360,6 +445,63 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
         } finally {
           btn.disabled = false;
         }
+      });
+
+      document.getElementById('toggleAdminPwdBtn').addEventListener('click', () => {
+        const visible = adminPwdPanelEl.style.display !== 'none';
+        adminPwdPanelEl.style.display = visible ? 'none' : 'block';
+      });
+      document.getElementById('closeAdminPwdBtn').addEventListener('click', () => {
+        adminPwdPanelEl.style.display = 'none';
+      });
+      adminPwdFormEl.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const cur = document.getElementById('adminCurPwd').value;
+        const next = document.getElementById('adminNewPwd').value;
+        const confirmVal = document.getElementById('adminConfirmPwd').value;
+        if (next.length < 8) {
+          showNotice('新密码长度至少为 8 位', true);
+          return;
+        }
+        if (next !== confirmVal) {
+          showNotice('两次输入的新密码不一致', true);
+          return;
+        }
+        const submitBtn = document.getElementById('adminPwdSubmitBtn');
+        submitBtn.disabled = true;
+        try {
+          const res = await fetch('/user-api/me/password', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentPassword: cur, newPassword: next }),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '修改密码失败', true);
+            return;
+          }
+          adminPwdFormEl.reset();
+          adminPwdPanelEl.style.display = 'none';
+          showNotice('管理员密码已更新，下次请使用新密码登录。');
+        } catch (err) {
+          showNotice('网络异常：' + err.message, true);
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+
+      document.getElementById('copyTempPwdBtn').addEventListener('click', async () => {
+        if (!latestTempPassword) return;
+        try {
+          await navigator.clipboard.writeText(latestTempPassword);
+          showNotice('临时密码已复制到剪贴板。');
+        } catch {
+          showNotice('浏览器未授予剪贴板权限，请手动复制页面上的临时密码。', true);
+        }
+      });
+      document.getElementById('closeTempPwdBtn').addEventListener('click', () => {
+        tempPwdBannerEl.style.display = 'none';
       });
 
       document.getElementById('refreshBtn').addEventListener('click', loadUsers);
@@ -649,6 +791,45 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
     .notice { padding: 11px 14px; border-radius: 12px; font-size: 13px; font-weight: 500; }
     .notice-ok { background: var(--ok-soft); color: #115E59; border: 1px solid rgba(15, 118, 110, 0.25); }
     .notice-error { background: var(--danger-soft); color: #991B1B; border: 1px solid rgba(185, 28, 28, 0.25); }
+
+    .admin-pwd-panel { background: #F7F5EE; border-color: var(--border-strong); }
+    .inline-pwd-form {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+      gap: 12px;
+      align-items: end;
+    }
+    .inline-pwd-form label { margin: 0; }
+    .inline-pwd-submit { display: flex; align-items: flex-end; }
+    @media (max-width: 820px) {
+      .inline-pwd-form { grid-template-columns: 1fr; }
+    }
+
+    .temp-pwd-banner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      padding: 14px 18px;
+      border-radius: 14px;
+      background: #FFF7ED;
+      border: 1px solid rgba(217, 107, 67, 0.38);
+      font-size: 13px;
+    }
+    .temp-pwd-code {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 3px 10px;
+      border-radius: 8px;
+      background: #FFFFFF;
+      border: 1px solid rgba(217, 107, 67, 0.35);
+      color: #9A3412;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
 
     .login-wrap { min-height: calc(100vh - 72px); display: flex; align-items: center; justify-content: center; }
     .login-card { width: 100%; max-width: 400px; padding: 28px; }

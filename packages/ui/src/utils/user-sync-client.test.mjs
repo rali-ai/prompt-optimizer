@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   UserSyncError,
+  changePassword,
   getConfig,
   getMe,
   login,
@@ -11,6 +12,7 @@ import {
   register,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
+  updateProfile,
 } from './user-sync-client.ts'
 
 function jsonResponse(body, status = 200) {
@@ -159,4 +161,50 @@ test('pullSync wraps network failure into UserSyncError with status 0', async ()
       return true
     },
   )
+})
+
+test('register with optional email, updateProfile, and changePassword send expected payloads', async () => {
+  const calls = []
+  const mockUser = {
+    id: 'u2',
+    username: 'bob',
+    email: 'bob@example.com',
+    role: 'user',
+    tier: 'free',
+    tierExpiresAt: null,
+    disabled: false,
+    createdAt: 1,
+    updatedAt: 2,
+  }
+  const fetchMock = async (url, init) => {
+    calls.push({ url, method: init?.method, body: JSON.parse(String(init?.body || '{}')) })
+    return jsonResponse({ ok: true, user: mockUser }, 200)
+  }
+
+  const u1 = await register('bob', 'Password123!', '/user-api', fetchMock, 'bob@example.com')
+  assert.equal(u1.email, 'bob@example.com')
+
+  const u2 = await updateProfile('new@example.com', '/user-api', fetchMock)
+  assert.equal(u2.id, 'u2')
+
+  const u3 = await changePassword('Password123!', 'NewPass456!', '/user-api', fetchMock)
+  assert.equal(u3.id, 'u2')
+
+  assert.deepEqual(calls, [
+    {
+      url: '/user-api/register',
+      method: 'POST',
+      body: { username: 'bob', password: 'Password123!', email: 'bob@example.com' },
+    },
+    {
+      url: '/user-api/me/profile',
+      method: 'PATCH',
+      body: { email: 'new@example.com' },
+    },
+    {
+      url: '/user-api/me/password',
+      method: 'POST',
+      body: { currentPassword: 'Password123!', newPassword: 'NewPass456!' },
+    },
+  ])
 })

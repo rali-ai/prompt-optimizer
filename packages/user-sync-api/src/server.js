@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import http from 'node:http';
 import {
   SESSION_COOKIE_NAME,
@@ -9,7 +10,14 @@ import {
   verifyPassword,
   verifySessionToken,
 } from './crypto.js';
-import { USERNAME_REGEX, normalizeUsername, openDatabase, serializeUser } from './db.js';
+import {
+  EMAIL_REGEX,
+  USERNAME_REGEX,
+  normalizeEmail,
+  normalizeUsername,
+  openDatabase,
+  serializeUser,
+} from './db.js';
 import { createRateLimiter } from './rate-limit.js';
 import { MAX_SYNC_BYTES, PayloadError, sanitizeSyncPayload } from './sanitize.js';
 import { renderAdminHtml } from './admin-page.js';
@@ -104,16 +112,40 @@ function readJsonBody(req, maxBytes) {
   });
 }
 
+const TEMP_PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+
+function generateTemporaryPassword(length = 12) {
+  let out = '';
+  for (let i = 0; i < length; i += 1) {
+    out += TEMP_PASSWORD_ALPHABET[crypto.randomInt(0, TEMP_PASSWORD_ALPHABET.length)];
+  }
+  return out;
+}
+
+function validateOptionalEmail(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string') {
+    throw new PayloadError('邮箱格式不正确', 400);
+  }
+  const email = normalizeEmail(raw);
+  if (!email) return null;
+  if (email.length > 254 || !EMAIL_REGEX.test(email)) {
+    throw new PayloadError('邮箱格式不正确，请输入有效的邮箱地址', 400);
+  }
+  return email;
+}
+
 function validateCredentials(body) {
   const username = normalizeUsername(body.username);
   const password = typeof body.password === 'string' ? body.password : '';
+  const email = validateOptionalEmail(body.email);
   if (!USERNAME_REGEX.test(username)) {
     throw new PayloadError('用户名需为 3 到 32 位小写字母、数字、下划线、点或短横线', 400);
   }
   if (password.length < 8 || password.length > 128) {
     throw new PayloadError('密码长度需为 8 到 128 个字符', 400);
   }
-  return { username, password };
+  return { username, password, email };
 }
 
 export function createApp(config) {
@@ -214,21 +246,29 @@ export function createApp(config) {
     if (method === 'POST' && pathname === '/user-api/register') {
       if (!checkRateLimit(req, res)) return;
       const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
-      const { username, password } = validateCredentials(body);
+      const { username, password, email } = validateCredentials(body);
 
       if (db.findUserByUsername(username)) {
         return sendJson(res, 409, { error: '用户名已被注册' });
+      }
+      if (email && db.findUserByEmail(email)) {
+        return sendJson(res, 409, { error: '该邮箱已被其他账号使用' });
       }
 
       let userRow;
       try {
         userRow = db.createUser({
           username,
+          email,
           passwordHash: hashPassword(password),
           role: 'user',
         });
       } catch (err) {
-        if (String(err?.message || '').includes('UNIQUE')) {
+        const msg = String(err?.message || '');
+        if (msg.includes('UNIQUE')) {
+          if (msg.includes('email')) {
+            return sendJson(res, 409, { error: '该邮箱已被其他账号使用' });
+          }
           return sendJson(res, 409, { error: '用户名已被注册' });
         }
         throw err;
@@ -241,13 +281,15 @@ export function createApp(config) {
     if (method === 'POST' && pathname === '/user-api/login') {
       if (!checkRateLimit(req, res)) return;
       const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
-      const username = normalizeUsername(body.username);
+      const identifier = normalizeUsername(body.username);
       const password = typeof body.password === 'string' ? body.password : '';
-      if (!username || !password) {
+      if (!identifier || !password) {
         return sendJson(res, 400, { error: '请输入用户名和密码' });
       }
 
-      const userRow = db.findUserByUsername(username);
+      const userRow = identifier.includes('@')
+        ? db.findUserByEmail(identifier)
+        : db.findUserByUsername(identifier);
       if (!userRow || !verifyPassword(password, userRow.password_hash)) {
         return sendJson(res, 401, { error: '用户名或密码错误' });
       }
@@ -270,6 +312,53 @@ export function createApp(config) {
       const userRow = requireActiveUser(req, res);
       if (!userRow) return;
       return sendJson(res, 200, { user: serializeUser(userRow) });
+    }
+
+    if (method === 'PATCH' && pathname === '/user-api/me/profile') {
+      const userRow = requireActiveUser(req, res);
+      if (!userRow) return;
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      if (!('email' in body)) {
+        throw new PayloadError('请提供要更新的邮箱字段', 400);
+      }
+      const email = validateOptionalEmail(body.email);
+      if (email) {
+        const owner = db.findUserByEmail(email);
+        if (owner && owner.id !== userRow.id) {
+          return sendJson(res, 409, { error: '该邮箱已被其他账号使用' });
+        }
+      }
+      let updated;
+      try {
+        updated = db.updateUserEmail(userRow.id, email);
+      } catch (err) {
+        if (String(err?.message || '').includes('UNIQUE')) {
+          return sendJson(res, 409, { error: '该邮箱已被其他账号使用' });
+        }
+        throw err;
+      }
+      return sendJson(res, 200, { user: serializeUser(updated) });
+    }
+
+    if (method === 'POST' && pathname === '/user-api/me/password') {
+      if (!checkRateLimit(req, res)) return;
+      const userRow = requireActiveUser(req, res);
+      if (!userRow) return;
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+      const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+      if (!currentPassword || !newPassword) {
+        throw new PayloadError('请输入当前密码和新密码', 400);
+      }
+      if (!verifyPassword(currentPassword, userRow.password_hash)) {
+        return sendJson(res, 401, { error: '当前密码不正确' });
+      }
+      if (newPassword.length < 8 || newPassword.length > 128) {
+        throw new PayloadError('新密码长度需为 8 到 128 个字符', 400);
+      }
+      const updated = db.updateUserPassword(userRow.id, hashPassword(newPassword));
+      const cookie = setSessionCookieHeader(req, updated);
+      return sendJson(res, 200, { ok: true, user: serializeUser(updated) }, { 'Set-Cookie': cookie });
     }
 
     if (method === 'GET' && pathname === '/user-api/sync') {
@@ -347,6 +436,35 @@ export function createApp(config) {
       return sendJson(res, 200, {
         membershipEnabled: isMembershipEnabled(),
         users: db.listUsersWithSync(),
+      });
+    }
+
+    const adminResetPwdMatch = pathname.match(/^\/user-api\/admin\/users\/([^/]+)\/reset-password$/);
+    if (method === 'POST' && adminResetPwdMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const targetId = decodeURIComponent(adminResetPwdMatch[1]);
+      if (targetId === adminRow.id) {
+        return sendJson(res, 400, { error: '请使用「修改管理员密码」更改当前管理员密码' });
+      }
+      const targetRow = db.findUserById(targetId);
+      if (!targetRow) {
+        return sendJson(res, 404, { error: '用户不存在' });
+      }
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      let tempPassword;
+      if (body.password !== undefined) {
+        if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 128) {
+          throw new PayloadError('密码长度需为 8 到 128 个字符', 400);
+        }
+        tempPassword = body.password;
+      } else {
+        tempPassword = generateTemporaryPassword(12);
+      }
+      const updated = db.updateUserPassword(targetId, hashPassword(tempPassword));
+      return sendJson(res, 200, {
+        user: serializeUser(updated),
+        temporaryPassword: tempPassword,
       });
     }
 
