@@ -1,74 +1,81 @@
-const THEME_STORAGE_KEY = 'prompt-optimizer-site-theme'
-const THEME_MODES = ['system', 'dark', 'light']
+const THEME_STORAGE_KEY = 'goprmpt-site-theme'
+const THEME_MODES = ['light', 'dark', 'system']
 
 export const OPTIMIZER_URL = 'https://goprmpt.net'
 
 export const chromeCopy = {
   'zh-CN': {
-    brandAriaLabel: '提示词优化器首页',
+    brandName: '高词',
+    brandSub: 'GoPrmpt',
+    brandAriaLabel: '高词 · GoPrmpt 首页',
     nav: {
-      product: '优化器',
+      product: '工作台',
       library: '提示词库',
       learn: '教程与写法',
+      cta: '打开工作台',
       themeAria: '切换主题模式',
       themeLabels: {
-        system: '自动',
-        dark: '深',
-        light: '浅'
+        light: '浅色',
+        dark: '深色',
+        system: '自动'
       },
       locale: 'EN',
       localeAria: '切换到英文',
       menuAria: '切换导航菜单'
     },
     footer: {
-      title: '提示词优化器',
-      body: '让提示词优化回到真实结果。AI 生成内容仅供参考，请结合实际场景人工核验。',
-      product: '优化器'
+      title: '高词 · GoPrmpt',
+      body: '把模糊的想法，变成稳定好用的 AI 指令。AI 生成内容仅供参考，请结合实际场景人工核验。',
+      product: '工作台'
     }
   },
   en: {
-    brandAriaLabel: 'Prompt Optimizer home',
+    brandName: 'GoPrmpt',
+    brandSub: '高词',
+    brandAriaLabel: 'GoPrmpt Home',
     nav: {
-      product: 'Optimizer',
+      product: 'Workbench',
       library: 'Prompt Library',
       learn: 'Learn',
+      cta: 'Open Workbench',
       themeAria: 'Switch theme mode',
       themeLabels: {
-        system: 'Auto',
+        light: 'Light',
         dark: 'Dark',
-        light: 'Light'
+        system: 'Auto'
       },
       locale: '中文',
       localeAria: 'Switch to Chinese',
       menuAria: 'Toggle navigation menu'
     },
     footer: {
-      title: '提示词优化器',
-      body: 'Bring prompt optimization back to real outputs. AI-generated outputs are for reference only; please review before use.',
-      product: 'Optimizer'
+      title: 'GoPrmpt · 高词',
+      body: 'Turn rough ideas into reliable AI prompts. AI-generated outputs are for reference only; please review before use.',
+      product: 'Workbench'
     }
   }
 }
 
+function normalizeThemeMode(value) {
+  return THEME_MODES.includes(value) ? value : 'light'
+}
+
 function readStoredTheme() {
-  if (typeof window === 'undefined') return 'system'
+  if (typeof window === 'undefined') return 'light'
   try {
-    return normalizeThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY))
+    const raw = window.localStorage.getItem(THEME_STORAGE_KEY)
+    return raw ? normalizeThemeMode(raw) : 'light'
   } catch {
-    return 'system'
+    return 'light'
   }
 }
 
 let themeMode = readStoredTheme()
 
-function normalizeThemeMode(value) {
-  return THEME_MODES.includes(value) ? value : 'system'
-}
-
 function getNextThemeMode(mode) {
-  if (mode === 'system') return 'dark'
-  if (mode === 'dark') return 'light'
-  return 'system'
+  if (mode === 'light') return 'dark'
+  if (mode === 'dark') return 'system'
+  return 'light'
 }
 
 function resolveTheme(mode) {
@@ -147,8 +154,11 @@ export function renderSiteHeader({ locale = 'zh-CN', current = '', showLocale = 
   return `
     <header class="site-header">
       <a class="site-brand" href="/" aria-label="${copy.brandAriaLabel}">
-        <img src="/images/logo.png" alt="" class="site-brand__logo" />
-        <span class="site-brand__text">提示词优化器</span>
+        <img src="/images/logo.svg" alt="" class="site-brand__logo" width="34" height="34" />
+        <span class="site-brand__titles">
+          <span class="site-brand__text">${copy.brandName}</span>
+          <span class="site-brand__sub">${copy.brandSub}</span>
+        </span>
       </a>
       <button class="site-menu-button" type="button" aria-expanded="${menuExpanded}" aria-controls="site-nav" aria-label="${copy.nav.menuAria}">
         <span></span>
@@ -159,8 +169,10 @@ export function renderSiteHeader({ locale = 'zh-CN', current = '', showLocale = 
         <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.nav.product}</a>
         ${renderPageLink('/library/', copy.nav.library, current)}
         ${renderPageLink('/learn/', copy.nav.learn, current)}
+        <span class="site-nav__divider" aria-hidden="true"></span>
         ${renderThemeButton(copy)}
         ${showLocale ? renderLocaleButton(copy) : ''}
+        <a class="site-nav__cta" href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.nav.cta}</a>
       </nav>
     </header>
   `
@@ -170,9 +182,12 @@ export function renderSiteFooter({ locale = 'zh-CN', current = '', showLocale = 
   const copy = chromeCopy[locale] ?? chromeCopy['zh-CN']
   return `
     <footer class="site-footer">
-      <div class="site-footer__copy">
-        <strong>${copy.footer.title}</strong>
-        <p>${copy.footer.body}</p>
+      <div class="site-footer__brand">
+        <img src="/images/logo.svg" alt="" class="site-footer__logo" width="28" height="28" />
+        <div class="site-footer__copy">
+          <strong>${copy.footer.title}</strong>
+          <p>${copy.footer.body}</p>
+        </div>
       </div>
       <div class="site-footer__links">
         <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.footer.product}</a>
@@ -190,7 +205,7 @@ export function applyTheme() {
   const root = document.documentElement
   root.dataset.theme = resolvedTheme
   root.dataset.themeMode = themeMode
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolvedTheme === 'dark' ? '#081120' : '#f8fbfe')
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolvedTheme === 'dark' ? '#0D0E11' : '#FAF9F5')
 
   const copy = currentCopy()
   document.querySelectorAll('[data-theme-toggle]').forEach((button) => {

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="gp-jade" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0D9488"/>
+      <stop offset="55%" stop-color="#0F766E"/>
+      <stop offset="100%" stop-color="#115E59"/>
+    </linearGradient>
+    <linearGradient id="gp-copper" x1="39" y1="12" x2="54" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D96B43"/>
+    </linearGradient>
+    <linearGradient id="gp-sheen" x1="10" y1="4" x2="46" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FAF9F5" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#FAF9F5" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#gp-jade)"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="15.25" stroke="url(#gp-sheen)" stroke-width="1.5"/>
+  <!-- Stylized geometric open G prism -->
+  <path d="M44.5 23.5A15.5 15.5 0 1 0 47.5 34H33.5" stroke="#FAF9F5" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M33.5 34H47.5V41.5A15.5 15.5 0 0 1 32 47.5" stroke="#CCFBF1" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
+  <!-- Warm Copper 4-point AI spark -->
+  <path d="M46.5 12.5L48.3 18.2L54 20L48.3 21.8L46.5 27.5L44.7 21.8L39 20L44.7 18.2Z" fill="url(#gp-copper)"/>
+</svg>

@@ -73,7 +73,7 @@
 
 .compact-navigation button:focus-visible,
 .compact-menu-row:focus-visible {
-  outline: 2px solid #7295c3;
+  outline: 2px solid var(--compact-accent, #0F766E);
   outline-offset: 2px;
 }
 
@@ -83,7 +83,7 @@
 }
 
 .compact-menu-row[aria-current="page"] {
-  color: #526f9b;
+  color: var(--compact-accent, #0F766E);
 }
 
 .compact-menu-row > .n-icon {
@@ -136,7 +136,7 @@
 }
 
 .compact-region-switch button:focus-visible {
-  outline: 2px solid #7295c3;
+  outline: 2px solid var(--compact-accent, #0F766E);
   outline-offset: 2px;
 }
 
@@ -165,7 +165,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #7295c3;
+  background: var(--compact-accent, #0F766E);
 }
 
 .workspace-compact .compact-main-menu {
@@ -330,8 +330,9 @@
 }
 
 .workspace-compact .compact-mode-choice[aria-current="page"] {
-  border-color: var(--compact-accent, #4b5563);
+  border-color: var(--compact-accent, #0F766E);
   background: var(--compact-soft);
+  color: var(--compact-accent, #0F766E);
   font-weight: 600;
 }
 
@@ -342,7 +343,7 @@
 .workspace-compact .compact-function-tile:focus-visible,
 .workspace-compact .compact-mode-choice:focus-visible,
 .workspace-compact .compact-menu-help > summary:focus-visible {
-  outline: 2px solid #7295c3;
+  outline: 2px solid var(--compact-accent, #0F766E);
   outline-offset: 2px;
 }
 

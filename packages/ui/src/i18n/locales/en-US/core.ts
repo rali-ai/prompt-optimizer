@@ -90,7 +90,7 @@ const messages = {
     "context": "Context",
     "copySuccess": "Copied to clipboard",
     "copyFailed": "Copy Failed",
-    "appName": "提示词优化器",
+    "appName": "GoPrmpt",
     "selectFile": "Select File",
     "exporting": "Exporting...",
     "importing": "Importing...",

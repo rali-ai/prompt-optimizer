@@ -1,0 +1,131 @@
+/*
+ * 高词 · GoPrmpt — Warm Alabaster + Deep Jade + Warm Copper Design Tokens
+ * Light default: #FAF9F5 canvas, #F3F1EA chrome, #FFFFFF cards, #0F766E jade, #D96B43 copper
+ * Dark mode:     #0D0E11 canvas, #15171C panels, #14B8A6 bright jade, #F59E0B warm amber
+ */
+
+:root {
+  --gp-bg: #FAF9F5;
+  --gp-chrome: #F3F1EA;
+  --gp-surface: #FFFFFF;
+  --gp-surface-muted: #F7F5EE;
+  --gp-border: rgba(24, 24, 27, 0.08);
+  --gp-border-strong: rgba(15, 118, 110, 0.34);
+  --gp-ink: #18181B;
+  --gp-muted: #52525B;
+  --gp-accent: #0F766E;
+  --gp-accent-hover: #0D9488;
+  --gp-copper: #D96B43;
+  --gp-header-bg: rgba(250, 249, 245, 0.88);
+  --gp-shadow-card: 0 2px 12px -2px rgba(24, 24, 27, 0.05);
+}
+
+html.dark,
+:root[data-workspace-theme="dark"] {
+  --gp-bg: #0D0E11;
+  --gp-chrome: #111318;
+  --gp-surface: #15171C;
+  --gp-surface-muted: #1B1E25;
+  --gp-border: rgba(255, 255, 255, 0.09);
+  --gp-border-strong: rgba(20, 184, 166, 0.42);
+  --gp-ink: #F4F4F5;
+  --gp-muted: #A1A1AA;
+  --gp-accent: #14B8A6;
+  --gp-accent-hover: #2DD4BF;
+  --gp-copper: #F59E0B;
+  --gp-header-bg: rgba(13, 14, 17, 0.88);
+  --gp-shadow-card: 0 6px 24px -6px rgba(0, 0, 0, 0.45);
+}
+
+/* Base Canvas */
+html,
+body {
+  background-color: var(--gp-bg);
+  color: var(--gp-ink);
+  font-family: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Desktop Header — Editorial Linear/Claude.ai Style */
+.nav-header-enhanced {
+  min-height: 58px !important;
+  padding: 8px clamp(16px, 2vw, 28px) !important;
+  background: var(--gp-header-bg) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--gp-border) !important;
+  box-shadow: 0 1px 0 0 var(--gp-border);
+}
+
+.nav-header-enhanced .brand-link {
+  padding: 4px 6px;
+  border-radius: 10px;
+}
+
+.nav-header-enhanced .logo-image {
+  border-radius: 9px !important;
+  box-shadow: 0 4px 12px -3px rgba(15, 118, 110, 0.28);
+}
+
+.nav-header-enhanced .theme-title {
+  font-weight: 700 !important;
+  letter-spacing: -0.02em;
+  color: var(--gp-ink) !important;
+}
+
+.nav-header-enhanced .core-navigation {
+  margin-left: 12px !important;
+  padding-left: 14px !important;
+  border-left: 1px solid var(--gp-border) !important;
+}
+
+/* Refined Action Buttons */
+.nav-header-enhanced .nav-actions .action-button {
+  border-radius: 10px !important;
+  padding-inline: 10px !important;
+  font-weight: 500;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.nav-header-enhanced .nav-actions .action-button:hover {
+  transform: translateY(-1px);
+}
+
+/* Editorial Cards & Panels */
+.main-content-wrapper .n-card {
+  border-radius: 14px !important;
+  border-color: var(--gp-border) !important;
+  box-shadow: var(--gp-shadow-card);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.main-content-wrapper .n-card:focus-within {
+  border-color: var(--gp-border-strong) !important;
+}
+
+/* Subtle Warm Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(24, 24, 27, 0.16);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 118, 110, 0.36);
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(20, 184, 166, 0.42);
+}
