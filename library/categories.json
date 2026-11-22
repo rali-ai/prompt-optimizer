@@ -1,3 +1,77 @@
 [
-  { "id": "writing", "name": "写作创作", "description": "文章、文案、故事" }
+  {
+    "id": "writing",
+    "name": "写作创作",
+    "description": "文章、故事、演讲稿和标题，从提纲到成稿。"
+  },
+  {
+    "id": "translate",
+    "name": "翻译润色",
+    "description": "中外互译、改错别字、调语气、压篇幅，意思不走样。"
+  },
+  {
+    "id": "office",
+    "name": "职场办公",
+    "description": "周报、邮件、会议纪要、汇报材料和表格公式。"
+  },
+  {
+    "id": "product-data",
+    "name": "产品与数据",
+    "description": "需求文档、用户研究、竞品对比和数据解读。"
+  },
+  {
+    "id": "coding",
+    "name": "编程开发",
+    "description": "读代码、查报错、写测试、写 SQL 和技术文档。"
+  },
+  {
+    "id": "marketing",
+    "name": "营销文案",
+    "description": "种草笔记、卖点、短视频脚本、活动文案和评价回复。"
+  },
+  {
+    "id": "study",
+    "name": "学习教育",
+    "description": "讲懂概念、出练习题、做学习计划、读论文和备课。"
+  },
+  {
+    "id": "life",
+    "name": "生活助手",
+    "description": "旅行、做饭、送礼、记账、健身和难开口的对话。"
+  },
+  {
+    "id": "thinking",
+    "name": "思维决策",
+    "description": "找盲点、比方案、追根因，把模糊的问题想清楚。"
+  },
+  {
+    "id": "system",
+    "name": "角色与系统提示词",
+    "description": "客服、家教、编辑、智能体等助手的系统提示词模板。"
+  },
+  {
+    "id": "poster",
+    "name": "海报设计",
+    "description": "活动、展览、节气、讲座等海报，写清版式与文字层级。"
+  },
+  {
+    "id": "ecommerce",
+    "name": "电商视觉",
+    "description": "商品主图、场景图、促销横幅、包装和详情页卖点图。"
+  },
+  {
+    "id": "illustration",
+    "name": "插画风格",
+    "description": "水彩、扁平矢量、水墨、绘本、线稿等可换主题的插画风格。"
+  },
+  {
+    "id": "portrait",
+    "name": "人像摄影",
+    "description": "职业照、头像、胶片街拍和角色设定等人物画面。"
+  },
+  {
+    "id": "infographic",
+    "name": "信息图与PPT",
+    "description": "流程图、时间线、知识卡片和演示文稿页面。"
+  }
 ]
