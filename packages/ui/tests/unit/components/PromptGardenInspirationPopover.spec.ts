@@ -43,7 +43,8 @@ vi.mock('../../../src/utils/open-external-url', () => ({
   openExternalUrl: openExternalUrlMock,
 }))
 
-vi.mock('../../../src/utils/prompt-garden-suggestions', () => ({
+vi.mock('../../../src/utils/prompt-garden-suggestions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/utils/prompt-garden-suggestions')>()),
   fetchPromptGardenSuggestions: fetchSuggestionsMock,
   fetchPromptGardenCatalog: fetchCatalogMock,
   fetchPromptGardenPreview: fetchPreviewMock,
@@ -318,6 +319,27 @@ describe('PromptGardenInspirationPopover', () => {
 
     expect(openExternalUrlMock).toHaveBeenCalledWith(
       'https://garden.always200.com/prompts?mode=image-text2image',
+      { logPrefix: 'PromptGarden' },
+    )
+  })
+
+  it('opens the prompt library page when suggestions fail to load', async () => {
+    fetchSuggestionsMock.mockRejectedValue(new Error('Garden request failed: 404'))
+
+    const wrapper = mount(PromptGardenInspirationPopover, {
+      props: {
+        mode: 'image-text2image',
+        testId: 'garden-test',
+      },
+    })
+
+    await wrapper.find('[data-testid="garden-test-trigger"]').trigger('click')
+    await Promise.resolve()
+    await Promise.resolve()
+    await wrapper.find('[data-testid="garden-test-browse"]').trigger('click')
+
+    expect(openExternalUrlMock).toHaveBeenCalledWith(
+      'https://garden.always200.com/library/',
       { logPrefix: 'PromptGarden' },
     )
   })

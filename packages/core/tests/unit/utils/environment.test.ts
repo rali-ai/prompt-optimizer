@@ -237,9 +237,9 @@ describe('getEnvVar default values', () => {
     vi.unstubAllGlobals()
   })
 
-  it('should keep Prompt Garden off by default when no env is configured', () => {
-    expect(getEnvVar('VITE_ENABLE_PROMPT_GARDEN_IMPORT')).toBe('0')
-    expect(getEnvVar('VITE_PROMPT_GARDEN_BASE_URL')).toBe('')
+  it('should import from the goprmpt.com prompt library by default when no env is configured', () => {
+    expect(getEnvVar('VITE_ENABLE_PROMPT_GARDEN_IMPORT')).toBe('1')
+    expect(getEnvVar('VITE_PROMPT_GARDEN_BASE_URL')).toBe('https://goprmpt.com')
   })
 
   it('should allow process.env to override built-in Prompt Garden defaults', () => {

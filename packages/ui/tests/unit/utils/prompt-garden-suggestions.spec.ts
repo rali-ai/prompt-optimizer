@@ -97,7 +97,7 @@ describe('prompt-garden-suggestions', () => {
     expect(result.ttlSeconds).toBe(120)
   })
 
-  it('falls back to a mode-scoped browse URL when Garden omits browseUrl', async () => {
+  it('falls back to the prompt library page when Garden omits browseUrl', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -112,9 +112,7 @@ describe('prompt-garden-suggestions', () => {
     })
 
     expect(result.items).toEqual([])
-    expect(result.browseUrl).toBe(
-      'https://garden.always200.com/prompts?mode=image-text2image',
-    )
+    expect(result.browseUrl).toBe('https://garden.always200.com/library/')
   })
   it('requests a stable catalog page with an encoded search, and normalizes image and text metadata', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
