@@ -352,7 +352,8 @@ function renderAcademyPreviewList(list, locale) {
     .map((i) => {
       const lesson = list[i]
       const content = lesson.locales[lang] ?? lesson.locales.zh
-      const prefix = locale === 'en' ? `${i + 1}. ` : `· 第 ${i + 1} 课：`
+      const hasPrefix = /^(第\s*\d+\s*课|写法\s*\d+|Lesson\s*\d+|Pattern\s*\d+)/i.test(content.title)
+      const prefix = hasPrefix ? '· ' : (locale === 'en' ? `${i + 1}. ` : `· 第 ${i + 1} 课：`)
       return `
         <li>
           <a href="/learn/?id=${encodeURIComponent(lesson.id)}" lang="${docLang}">${escapeHtml(prefix + content.title)}</a>
