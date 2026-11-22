@@ -15,6 +15,7 @@
     "build:parallel": "node scripts/run-many.js --parallel build:web build:ext",
     "build:web": "pnpm -F @prompt-optimizer/web build",
     "build:ext": "pnpm -F @prompt-optimizer/extension build",
+    "package:ext": "node scripts/package-extension.mjs",
     "build:desktop-only": "pnpm -F @prompt-optimizer/desktop build",
     "build:desktop-only:ci": "pnpm -F @prompt-optimizer/desktop build:ci",
     "build:desktop": "node scripts/run-many.js build:core build:ui build:web build:desktop-only",
