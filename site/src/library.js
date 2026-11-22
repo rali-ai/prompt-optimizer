@@ -293,7 +293,9 @@ function renderDrawer(entry) {
         </section>
       ` : ''}
 
-      ${entry.credit ? `<p class="drawer__credit">${escapeHtml(entry.credit)}</p>` : ''}
+      ${entry.source ? `
+        <p class="drawer__credit">来源：<a href="${escapeHtml(entry.source.url)}" target="_blank" rel="noopener">${escapeHtml(entry.source.name)}</a>${entry.source.license ? ` · ${escapeHtml(entry.source.license)}` : ''}</p>
+      ` : ''}
     </div>
 
     <footer class="drawer__actions">

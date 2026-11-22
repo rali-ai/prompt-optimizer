@@ -14,7 +14,10 @@ const OUTPUT = path.join(ROOT, 'miniprogram', 'goprmpt-library', 'data', 'librar
 const HEADER = '// 由 scripts/build-miniprogram-data.mjs 从 library/*.json 生成，请勿手改。\n' +
   '// 改数据后运行：pnpm miniprogram:data\n'
 
+const creditLine = ({ name, license }) => '来源：' + name + (license ? ' · ' + license : '')
+
 // 小程序运行时读的形状：中文字段平铺在提示词上，英文版放在 en，可选文本缺省为 ''。
+// 小程序里不能点外链，source 压成一行署名文字放在 credit。
 export function toMiniprogramData({ categories, prompts, lessons }) {
   return {
     categories: categories.map(({ id, name, description }) => ({ id, name, description })),
@@ -25,7 +28,7 @@ export function toMiniprogramData({ categories, prompts, lessons }) {
       tags: prompt.tags,
       target: prompt.target,
       example: prompt.example ?? '',
-      credit: prompt.credit ?? '',
+      credit: prompt.source ? creditLine(prompt.source) : '',
       en: prompt.locales.en
     })),
     learn: lessons.map(({ id, title, summary, sections, before, after, exercise }) =>

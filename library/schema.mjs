@@ -9,10 +9,11 @@ import path from 'node:path'
  * @typedef {{ id: string, name: string, description: string }} Category
  * @typedef {{ name: string, description: string, defaultValue: string }} Variable
  * @typedef {{ title: string, summary: string, prompt: string, variables: Variable[] }} PromptText
+ * @typedef {{ name: string, url: string, license?: string }} Source
  * @typedef {{
  *   id: string, category: string, tags: string[], target: Target,
  *   locales: Record<Language, PromptText>, importCodes: Record<Language, string>,
- *   example?: string, credit?: string
+ *   example?: string, source?: Source
  * }} Prompt
  * @typedef {{ heading: string, body: string }} Section
  * @typedef {{
@@ -128,6 +129,18 @@ function checkUnique(problems, file, label, values) {
   }
 }
 
+// 可选的 source：改编自外部提示词库时注明出处。
+function parseSource(field) {
+  if (!field.has('source')) return undefined
+  const source = field.child('source', ['name', 'url'], ['license'])
+  if (!source) return undefined
+  const parsed = { name: source.text('name'), url: source.text('url') }
+  if (parsed.url && !/^https?:\/\/\S+$/u.test(parsed.url)) source.fail(`url 必须是 http(s) 链接：${parsed.url}`)
+  const license = source.optionalText('license')
+  if (license) parsed.license = license
+  return parsed
+}
+
 function parseCategories(problems, data) {
   const categories = records(problems, 'categories.json', data, ['id', 'name', 'description'], [], (field) => ({
     id: field.id(),
@@ -180,7 +193,7 @@ function parsePromptText(field, language) {
 }
 
 function parsePrompts(problems, data, categoryIds) {
-  const prompts = records(problems, 'prompts.json', data, PROMPT_FIELDS, ['example', 'credit'], (field) => {
+  const prompts = records(problems, 'prompts.json', data, PROMPT_FIELDS, ['example', 'source'], (field) => {
     const id = field.id()
     const category = field.text('category')
     if (category && !categoryIds.has(category)) field.fail(`分类 ${category} 不在 categories.json 里`)
@@ -211,9 +224,9 @@ function parsePrompts(problems, data, categoryIds) {
       importCodes: Object.fromEntries(PROMPT_LANGUAGES.map((language) => [language, importCodeFor(id, language)]))
     }
     const example = field.optionalText('example')
-    const credit = field.optionalText('credit')
+    const source = parseSource(field)
     if (example) prompt.example = example
-    if (credit) prompt.credit = credit
+    if (source) prompt.source = source
     return prompt
   })
 
@@ -289,7 +302,7 @@ export function toPromptSource(prompt, category, language) {
       description: content.summary,
       tags: prompt.tags,
       categoryPath: [category.name],
-      ...(prompt.credit ? { credit: prompt.credit } : {})
+      ...(prompt.source ? { source: prompt.source } : {})
     }
   }
 }

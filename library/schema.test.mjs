@@ -173,6 +173,19 @@ test('English is required, uses snake_case variable names and has as many variab
   }, /变量数量与中文版不一致：中文 1 个，英文 0 个/)
 })
 
+test('a prompt adapted from another library carries its source; free-text credit is gone', () => {
+  const garden = { name: 'Prompt Garden', url: 'https://example.com/garden', license: 'CC BY 4.0' }
+  const [prompt] = load((files) => { files.prompts[0].source = garden }).prompts
+  assert.deepEqual(prompt.source, garden)
+  assert.deepEqual(promptSources({ categories: load().categories, prompts: [prompt] })[0].data.meta.source, garden)
+
+  assertProblem((files) => { files.prompts[0].source = { name: 'Garden', url: 'garden.example' } }, /source：url 必须是 http\(s\) 链接/)
+  assertProblem((files) => { files.prompts[0].source = { url: 'https://example.com' } }, /source：缺少字段 name/)
+  assertProblem((files) => { files.prompts[0].source = { ...garden, author: 'x' } }, /source：未知字段 author/)
+  assertProblem((files) => { files.prompts[0].source = 'Prompt Garden' }, /source 必须是对象/)
+  assertProblem((files) => { files.prompts[0].credit = '改编自 XXX' }, /未知字段 credit/)
+})
+
 test('lessons need at least one complete section and a real rewrite', () => {
   assertProblem((files) => { files.learn[0].sections = [] }, /sections 至少一节/)
   assertProblem((files) => { files.learn[0].sections = [{ heading: '缺正文' }] }, /sections\[0\]：缺少字段 body/)

@@ -35,6 +35,13 @@ test('mini program data flattens the Chinese text, keeps English under en and fi
   assert.deepEqual(data.learn, library.lessons)
 })
 
+test('a prompt source becomes a one-line credit, since the mini program cannot open links', () => {
+  const source = { name: 'Prompt Garden', url: 'https://example.com', license: 'CC BY 4.0' }
+  const withSource = (s) => toMiniprogramData({ ...library, prompts: [{ ...library.prompts[0], source: s }] }).prompts[0].credit
+  assert.equal(withSource(source), '来源：Prompt Garden · CC BY 4.0')
+  assert.equal(withSource({ name: 'Prompt Garden', url: 'https://example.com' }), '来源：Prompt Garden')
+})
+
 test('rendered output is a CommonJS module the mini program can require', () => {
   const data = toMiniprogramData(library)
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mp-library-')), 'library.js')
