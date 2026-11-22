@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { requireMp } from './wx-mock.mjs'
 
-const templates = requireMp('./utils/templates.js')
+const templates = requireMp('./goprmpt/utils/templates.js')
 
 const prompt = '帮我写一段"产品介绍"，\n主题是 {{产品名}}，语气：{{语气}}'
 const LANGS = ['zh', 'en']
@@ -14,8 +14,8 @@ function evidenceOf(content) {
   return JSON.parse(match[0])
 }
 
-test('offers the four optimization modes and two output languages', () => {
-  assert.deepEqual(templates.MODE_OPTIONS.map((m) => m.name), ['通用优化', '结构化', '精简', '系统提示词'])
+test('offers the five optimization modes and two output languages', () => {
+  assert.deepEqual(templates.MODE_OPTIONS.map((m) => m.name), ['通用优化', '结构化', '精简', '系统提示词', '图片提示词'])
   for (const option of templates.MODE_OPTIONS) assert.ok(option.desc, option.id + ' has a description')
   assert.deepEqual(templates.LANGUAGES.map((l) => l.id), LANGS)
 })

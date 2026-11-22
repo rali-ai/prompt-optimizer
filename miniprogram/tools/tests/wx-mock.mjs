@@ -1,7 +1,7 @@
 // 极简 wx 模拟：同步存储 + 可编排的 wx.request。每个测试调用 installWx() 拿一份新的。
 import { createRequire } from 'node:module'
 
-export const requireMp = createRequire(new URL('../../goprmpt/', import.meta.url))
+export const requireMp = createRequire(new URL('../../', import.meta.url))
 
 export function installWx() {
   const store = new Map()

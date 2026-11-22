@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { installWx, requireMp, completion } from './wx-mock.mjs'
 
-const llm = requireMp('./utils/llm.js')
+const llm = requireMp('./goprmpt/utils/llm.js')
 
 const settings = {
   baseUrl: 'https://api.example.com/v1/',

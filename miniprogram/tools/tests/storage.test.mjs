@@ -2,8 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { installWx, requireMp } from './wx-mock.mjs'
 
-const settings = requireMp('./utils/settings.js')
-const history = requireMp('./utils/history.js')
+const settings = requireMp('./goprmpt/utils/settings.js')
+const history = requireMp('./goprmpt/utils/history.js')
 
 test('every storage key written by the package carries the goprmpt: prefix', () => {
   const wx = installWx()
