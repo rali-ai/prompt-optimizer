@@ -258,6 +258,7 @@ import {
 import { createExternalDataLoadingGate } from '../../utils/external-data-loading'
 import { openExternalUrl } from '../../utils/open-external-url'
 import { registerOptionalIntegrations } from '../../integrations/registerOptionalIntegrations';
+import { useAppPromptPrefill } from '../../composables/app/useAppPromptPrefill';
 import { useI18n } from "vue-i18n";
 import {
     NConfigProvider,
@@ -1835,6 +1836,15 @@ const handleUseFavoriteFromPage = async (
 provide(favoritesPageActionsKey, {
     useFavorite: handleUseFavoriteFromPage,
     returnToWorkspace,
+});
+
+// ?prompt= 预填到基础-用户工作区（浏览器扩展右键菜单、外部链接）
+useAppPromptPrefill({
+    router: routerInstance,
+    hasRestoredInitialState,
+    isLoadingExternalData,
+    basicUserSession,
+    optimizerCurrentVersions,
 });
 
 // Optional integrations (feature-flagged + lazy-loaded).
