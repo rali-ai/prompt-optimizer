@@ -9,7 +9,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "verify": "node scripts/verify-prompt-source.mjs",
+    "verify": "node scripts/verify-optimizer-api.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "test": "node --test scripts/*.test.mjs",
     "preview": "vite preview"
   },
   "devDependencies": {

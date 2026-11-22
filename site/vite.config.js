@@ -1,7 +1,8 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
-import { LIBRARY_FILES, loadLibrary, promptSources } from '../library/schema.mjs'
+import { LIBRARY_FILES, loadLibrary } from '../library/schema.mjs'
+import { optimizerApiFiles } from './scripts/optimizer-api.mjs'
 
 const siteDir = path.dirname(fileURLToPath(import.meta.url))
 const libraryDir = path.resolve(siteDir, process.env.LIBRARY_DIR ?? '../library')
@@ -13,8 +14,7 @@ const virtualModules = {
 }
 
 // Validates ../library at build start, serves it to the pages as virtual modules,
-// and writes one optimizer import file per prompt and language to
-// api/public/prompt-source/<importCode> (no extension: the optimizer fetches that exact path).
+// and writes the static files the optimizer reads (see scripts/optimizer-api.mjs).
 function promptLibrary() {
   let library
 
@@ -34,8 +34,8 @@ function promptLibrary() {
       return render(library)
     },
     generateBundle() {
-      for (const { importCode, data } of promptSources(library)) {
-        this.emitFile({ type: 'asset', fileName: `api/public/prompt-source/${importCode}`, source: JSON.stringify(data) })
+      for (const { fileName, data } of optimizerApiFiles(library)) {
+        this.emitFile({ type: 'asset', fileName, source: JSON.stringify(data) })
       }
     }
   }

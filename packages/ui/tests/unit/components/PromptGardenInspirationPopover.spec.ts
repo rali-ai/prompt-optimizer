@@ -277,7 +277,6 @@ describe('PromptGardenInspirationPopover', () => {
         gardenBaseUrl: 'https://garden.always200.com',
         mode: 'image-image2image',
         limit: 4,
-        strategy: 'mixed',
         locale: 'en-US',
       }),
     )

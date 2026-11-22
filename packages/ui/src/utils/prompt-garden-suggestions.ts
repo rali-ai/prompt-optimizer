@@ -1,8 +1,3 @@
-export type PromptGardenSuggestionStrategy =
-  | 'mixed'
-  | 'latest'
-  | 'random'
-  | 'featured'
 export type PromptGardenSuggestionSource =
   | 'latest'
   | 'random'
@@ -35,7 +30,6 @@ export interface FetchPromptGardenSuggestionsOptions {
   gardenBaseUrl: string
   mode: string
   limit?: number
-  strategy?: PromptGardenSuggestionStrategy
   exclude?: string[]
   locale?: string
   timeoutMs?: number
@@ -82,13 +76,6 @@ const normalizeTags = (value: unknown): string[] => {
         .filter(Boolean)
         .slice(0, 3),
     ),
-  )
-}
-
-const normalizeNextExclude = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return []
-  return Array.from(
-    new Set(value.map((item) => normalizeString(item)).filter(Boolean)),
   )
 }
 
@@ -139,88 +126,21 @@ export const buildPromptLibraryUrl = (gardenBaseUrl: string): string => {
   return baseUrl ? `${baseUrl}/library/` : ''
 }
 
-export const buildPromptGardenSuggestionsUrl = (
-  options: FetchPromptGardenSuggestionsOptions,
+// The prompt library is a static site, so it publishes one catalog file per
+// content language and workspace; search, paging and picking suggestions happen here.
+export const toPromptCatalogLanguage = (locale?: string): 'zh' | 'en' =>
+  /^zh/i.test(normalizeString(locale)) ? 'zh' : 'en'
+
+export const buildPromptGardenCatalogUrl = (
+  gardenBaseUrl: string,
+  mode: string,
+  locale?: string,
 ): string => {
-  const gardenBaseUrl = normalizeBaseUrl(options.gardenBaseUrl)
-  if (!gardenBaseUrl) {
+  const baseUrl = normalizeBaseUrl(gardenBaseUrl)
+  if (!baseUrl) {
     throw new Error('Missing Prompt Garden base URL')
   }
-
-  const url = new URL(`${gardenBaseUrl}/api/public/prompts/suggestions`)
-  url.searchParams.set('mode', options.mode)
-  url.searchParams.set('limit', String(options.limit ?? DEFAULT_LIMIT))
-  url.searchParams.set('strategy', options.strategy ?? 'mixed')
-
-  const exclude = Array.from(
-    new Set((options.exclude ?? []).map((item) => item.trim()).filter(Boolean)),
-  )
-  if (exclude.length > 0) {
-    url.searchParams.set('exclude', exclude.join(','))
-  }
-
-  const locale = normalizeString(options.locale)
-  if (locale) {
-    url.searchParams.set('locale', locale)
-  }
-
-  return url.toString()
-}
-
-export const fetchPromptGardenSuggestions = async (
-  options: FetchPromptGardenSuggestionsOptions,
-): Promise<PromptGardenSuggestionResponse> => {
-  const gardenBaseUrl = normalizeBaseUrl(options.gardenBaseUrl)
-  const url = buildPromptGardenSuggestionsUrl({
-    ...options,
-    gardenBaseUrl,
-  })
-
-  const data = await fetchGardenJson(
-    url,
-    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-  )
-
-  const items = Array.isArray(data.items)
-    ? data.items
-        .map((item) => normalizeSuggestionItem(item, gardenBaseUrl))
-        .filter((item): item is PromptGardenSuggestionItem => Boolean(item))
-    : []
-
-  const browseUrl =
-    resolveGardenUrl(gardenBaseUrl, data.browseUrl) ||
-    buildPromptLibraryUrl(gardenBaseUrl)
-
-  const ttlSeconds =
-    typeof data.ttlSeconds === 'number' &&
-    Number.isFinite(data.ttlSeconds) &&
-    data.ttlSeconds > 0
-      ? Math.floor(data.ttlSeconds)
-      : null
-
-  return {
-    items,
-    browseUrl,
-    nextExclude: normalizeNextExclude(data.nextExclude),
-    ttlSeconds,
-  }
-}
-
-export interface FetchPromptGardenCatalogOptions {
-  gardenBaseUrl: string
-  mode: string
-  locale?: string
-  query?: string
-  offset?: number
-  limit?: number
-  timeoutMs?: number
-}
-
-export interface PromptGardenCatalogResponse {
-  items: PromptGardenSuggestionItem[]
-  total: number
-  nextOffset: number | null
-  browseUrl: string
+  return `${baseUrl}/api/public/prompts/catalog/${toPromptCatalogLanguage(locale)}/${encodeURIComponent(mode)}.json`
 }
 
 const fetchGardenJson = async (
@@ -245,44 +165,107 @@ const fetchGardenJson = async (
   }
 }
 
-export const fetchPromptGardenCatalog = async (
-  options: FetchPromptGardenCatalogOptions,
-): Promise<PromptGardenCatalogResponse> => {
+const fetchCatalog = async (
+  options: { gardenBaseUrl: string; mode: string; locale?: string },
+  timeoutMs: number,
+): Promise<{ items: PromptGardenSuggestionItem[]; browseUrl: string }> => {
   const baseUrl = normalizeBaseUrl(options.gardenBaseUrl)
-  const url = new URL(`${baseUrl}/api/public/prompts/catalog`)
-  url.searchParams.set('mode', options.mode)
-  url.searchParams.set('limit', String(options.limit ?? 20))
-  url.searchParams.set('offset', String(options.offset ?? 0))
-  if (options.query?.trim()) url.searchParams.set('q', options.query.trim())
-  if (options.locale) url.searchParams.set('locale', options.locale)
-  const data = await fetchGardenJson(url.toString(), options.timeoutMs ?? 8000)
-  if (
-    !Array.isArray(data.items) ||
-    typeof data.total !== 'number' ||
-    !Number.isInteger(data.total) ||
-    data.total < 0
-  ) {
+  const data = await fetchGardenJson(
+    buildPromptGardenCatalogUrl(baseUrl, options.mode, options.locale),
+    timeoutMs,
+  )
+  if (!Array.isArray(data.items)) {
     throw new Error('Invalid Garden catalog response')
-  }
-  const nextOffset = data.nextOffset
-  if (
-    nextOffset !== null &&
-    (typeof nextOffset !== 'number' ||
-      !Number.isInteger(nextOffset) ||
-      nextOffset <= (options.offset ?? 0) ||
-      nextOffset > data.total)
-  ) {
-    throw new Error('Invalid Garden catalog pagination')
   }
   return {
     items: data.items
       .map((item) => normalizeSuggestionItem(item, baseUrl))
       .filter((item): item is PromptGardenSuggestionItem => Boolean(item)),
-    total: data.total,
-    nextOffset,
     browseUrl:
       resolveGardenUrl(baseUrl, data.browseUrl) ||
       buildPromptLibraryUrl(baseUrl),
+  }
+}
+
+const shuffle = <T>(items: T[]): T[] => {
+  const result = [...items]
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(Math.random() * (index + 1))
+    ;[result[index], result[other]] = [result[other], result[index]]
+  }
+  return result
+}
+
+// Random picks from the workspace catalog; already shown prompts come last,
+// so refreshing cycles through the catalog before repeating.
+export const fetchPromptGardenSuggestions = async (
+  options: FetchPromptGardenSuggestionsOptions,
+): Promise<PromptGardenSuggestionResponse> => {
+  const { items, browseUrl } = await fetchCatalog(
+    options,
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  )
+  const exclude = new Set(
+    (options.exclude ?? []).map((item) => item.trim()).filter(Boolean),
+  )
+  const shuffled = shuffle(items)
+  return {
+    items: [
+      ...shuffled.filter((item) => !exclude.has(item.importCode)),
+      ...shuffled.filter((item) => exclude.has(item.importCode)),
+    ].slice(0, options.limit ?? DEFAULT_LIMIT),
+    browseUrl,
+    nextExclude: [],
+    ttlSeconds: null,
+  }
+}
+
+export interface FetchPromptGardenCatalogOptions {
+  gardenBaseUrl: string
+  mode: string
+  locale?: string
+  query?: string
+  offset?: number
+  limit?: number
+  timeoutMs?: number
+}
+
+export interface PromptGardenCatalogResponse {
+  items: PromptGardenSuggestionItem[]
+  total: number
+  nextOffset: number | null
+  browseUrl: string
+}
+
+const matchesQuery = (item: PromptGardenSuggestionItem, terms: string[]) => {
+  const haystack = [
+    item.title,
+    item.summary,
+    item.excerpt ?? '',
+    ...item.tags,
+    ...(item.categoryPath ?? []),
+  ]
+    .join('\n')
+    .toLowerCase()
+  return terms.every((term) => haystack.includes(term))
+}
+
+export const fetchPromptGardenCatalog = async (
+  options: FetchPromptGardenCatalogOptions,
+): Promise<PromptGardenCatalogResponse> => {
+  const { items, browseUrl } = await fetchCatalog(
+    options,
+    options.timeoutMs ?? 8000,
+  )
+  const terms = (options.query ?? '').toLowerCase().split(/\s+/).filter(Boolean)
+  const matches = items.filter((item) => matchesQuery(item, terms))
+  const offset = Math.max(0, options.offset ?? 0)
+  const end = offset + (options.limit ?? 20)
+  return {
+    items: matches.slice(offset, end),
+    total: matches.length,
+    nextOffset: end < matches.length ? end : null,
+    browseUrl,
   }
 }
 

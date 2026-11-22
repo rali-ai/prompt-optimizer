@@ -581,11 +581,11 @@ Prompt Optimizer 侧核心实现：
 
 灵感与竞技场测评题共用 `PromptGardenInspirationPopover`。灵感默认推荐，竞技场默认全部；两者都能切换视图。关闭弹层保留搜索、已加载列表和滚动位置，切换工作区或语言会清空缓存。推荐与全部共用最多 680px 的浮层；图像模式复用 NCard 与图片预览组件，桌面为双列图卡、窄屏单列，缺图和加载失败使用 NEmpty。文本模式保持紧凑列表；浮层高度根据内容和视口可用空间调整（最多 640px）。
 
-- 推荐继续使用 `GET /api/public/prompts/suggestions`，图像模式返回四条推荐并优先选择有配图的条目；文本模式保留三条混合推荐与换一批行为。
-- 全部使用 `GET /api/public/prompts/catalog?mode=arena&locale=zh-CN&limit=20&offset=0&q=关键词`。
-- 目录响应包含 `items`、`total`、`nextOffset`（结束为 `null`）、`browseUrl` 和 `ttlSeconds`；按更新时间和导入码稳定排序，同一提示词只返回一种语言。
-- `items` 复用推荐元数据，增加 `excerpt`、清晰预览地址 `previewUrl` 与已有 `categoryPath`。目录不返回完整正文；展开条目时读取现有公开 prompt-source 接口，仅以纯文本显示。
-- Garden 两个列表接口共用候选构建、分类、语言与图片地址解析，搜索复用 Garden 搜索规则。
-- 使用条目继续发出原有导入请求，不自动测试模型。返回错误时提供重试，滚动到距离底部 120px 时自动请求下一页，翻页失败保留已加载条目并暂停自动重试。
+- 提示词库是 goprmpt.com 上的静态站点，每种内容语言、每个工作区各有一份目录文件：`GET /api/public/prompts/catalog/<zh|en>/<mode>.json`。界面语言以 `zh` 开头时读 `zh`，否则读 `en`。
+- 目录文件只有两个字段：`items` 是该工作区的全部条目，`browseUrl` 是网站提示词库页。`image-text2image` 等工作区只列 `target` 相同的提示词，`arena` 列出全部提示词；库里没有的工作区得到空列表。
+- 推荐、搜索和分页都在优化器里做：推荐从目录里随机挑（图像模式四条、文本模式三条），换一批时已展示过的排在最后；全部视图按标题、简介、摘录、标签和分类做关键词过滤，每页 20 条，`total` 和 `nextOffset` 由优化器算出。
+- `items` 复用推荐元数据：`id`、`title`、`summary`、`excerpt`、`categoryPath`、`importCode`、`tags`、`mode`。目录不含完整正文；展开条目时读取现有公开 prompt-source 接口，仅以纯文本显示。
+- 目录文件由网站构建时从 `library/*.json` 生成，见 `site/scripts/optimizer-api.mjs`。
+- 使用条目继续发出原有导入请求，不自动测试模型。返回错误时提供重试，滚动到距离底部 120px 时自动加载下一页，翻页失败保留已加载条目并暂停自动重试。
 
-本地联调需要运行包含目录接口的 Garden；旧版 Garden 不具备 `/api/public/prompts/catalog`。
+本地联调先在 `site/` 里运行 `pnpm build && pnpm preview`，再把 `VITE_PROMPT_GARDEN_BASE_URL` 指向预览地址。

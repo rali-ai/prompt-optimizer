@@ -1,27 +1,22 @@
-// Checks the built import files against what the optimizer accepts.
-// The checks follow parseV1 in fetchPromptFromGarden
-// (packages/ui/src/composables/app/useAppPromptGardenImport.ts).
+// Checks the built optimizer API files against what the optimizer accepts.
+// - prompt-source files: the checks follow parseV1 in fetchPromptFromGarden
+//   (packages/ui/src/composables/app/useAppPromptGardenImport.ts), which imports Vue and cannot run here.
+// - catalog files: read through the optimizer's own fetchPromptGardenCatalog
+//   (packages/ui/src/utils/prompt-garden-suggestions.ts) with fetch served from distDir.
 //
-// Usage: node scripts/verify-prompt-source.mjs [distDir]   (LIBRARY_DIR overrides ../library)
+// Usage: node scripts/verify-optimizer-api.mjs [distDir]   (LIBRARY_DIR overrides ../library)
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PROMPT_LANGUAGES, loadLibrary, variableNameError } from '../../library/schema.mjs'
+import { OPTIMIZER_MODES, catalogFileName } from './optimizer-api.mjs'
+import { fetchPromptGardenCatalog } from '../../packages/ui/src/utils/prompt-garden-suggestions.ts'
 
 const siteDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const distDir = path.resolve(siteDir, process.argv[2] ?? 'dist')
 const libraryDir = path.resolve(siteDir, process.env.LIBRARY_DIR ?? '../library')
 const sourceDir = path.join(distDir, 'api/public/prompt-source')
-const OPTIMIZER_KEYS = new Set([
-  'basic-system',
-  'basic-user',
-  'pro-multi',
-  'pro-variable',
-  'image-text2image',
-  'image-image2image',
-  'image-multiimage',
-  'arena'
-])
+const BASE_URL = 'https://goprmpt.com'
 
 const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
@@ -35,7 +30,7 @@ function parseV1Problems(data, expectedCode) {
     ? data.optimizerTarget.subModeKey.trim()
     : ''
   if (!subModeKey) problems.push('missing optimizerTarget.subModeKey')
-  else if (!OPTIMIZER_KEYS.has(subModeKey)) problems.push(`optimizer has no workspace "${subModeKey}"`)
+  else if (!OPTIMIZER_MODES.includes(subModeKey)) problems.push(`optimizer has no workspace "${subModeKey}"`)
 
   const prompt = isRecord(data.prompt) ? data.prompt : {}
   if (prompt.format !== 'text') problems.push(`prompt.format is ${JSON.stringify(prompt.format)}, expected "text"`)
@@ -57,14 +52,19 @@ function parseV1Problems(data, expectedCode) {
   return problems
 }
 
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'))
+}
+
 const { prompts } = loadLibrary(libraryDir)
-const expectedFiles = new Set()
 const failures = []
 
+// prompt-source
+const expectedSources = new Map()
 for (const prompt of prompts) {
   for (const language of PROMPT_LANGUAGES) {
     const code = prompt.importCodes[language]
-    expectedFiles.add(code)
+    expectedSources.set(code, prompt.target)
     const file = path.join(sourceDir, code)
     if (!fs.existsSync(file)) {
       failures.push(`${code}: missing ${path.relative(siteDir, file)}`)
@@ -73,7 +73,7 @@ for (const prompt of prompts) {
 
     let data
     try {
-      data = JSON.parse(fs.readFileSync(file, 'utf8'))
+      data = readJson(file)
     } catch (error) {
       failures.push(`${code}: invalid JSON (${error.message})`)
       continue
@@ -90,11 +90,40 @@ for (const prompt of prompts) {
 
 const emitted = fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir) : []
 for (const name of emitted) {
-  if (!expectedFiles.has(name)) failures.push(`${name}: emitted but matches no prompt`)
+  if (!expectedSources.has(name)) failures.push(`${name}: emitted but matches no prompt`)
+}
+
+// catalogs, through the optimizer's parser
+const fetchFromDist = async (url) => {
+  const file = path.join(distDir, new URL(url).pathname)
+  if (!fs.existsSync(file)) return { ok: false, status: 404, json: async () => ({}) }
+  return { ok: true, status: 200, json: async () => readJson(file) }
+}
+globalThis.fetch = fetchFromDist
+
+let catalogCount = 0
+for (const language of PROMPT_LANGUAGES) {
+  for (const mode of OPTIMIZER_MODES) {
+    const where = catalogFileName(language, mode)
+    const expected = prompts.filter((prompt) => mode === 'arena' || prompt.target === mode)
+    let result
+    try {
+      result = await fetchPromptGardenCatalog({ gardenBaseUrl: BASE_URL, mode, locale: language === 'zh' ? 'zh-CN' : 'en-US', limit: 10_000 })
+    } catch (error) {
+      failures.push(`${where}: optimizer rejected it (${error.message})`)
+      continue
+    }
+    catalogCount += 1
+    if (result.total !== expected.length) failures.push(`${where}: optimizer kept ${result.total} items, library has ${expected.length}`)
+    if (!result.browseUrl.startsWith(`${BASE_URL}/library/`)) failures.push(`${where}: browseUrl ${result.browseUrl} is not the library page`)
+    for (const item of result.items) {
+      if (expectedSources.get(item.importCode) !== item.mode) failures.push(`${where}: ${item.importCode} has no prompt-source with workspace ${item.mode}`)
+    }
+  }
 }
 
 if (failures.length > 0) {
-  console.error(`prompt-source check failed (${failures.length}):\n  - ${failures.join('\n  - ')}`)
+  console.error(`optimizer API check failed (${failures.length}):\n  - ${failures.join('\n  - ')}`)
   process.exit(1)
 }
-console.log(`prompt-source check passed: ${prompts.length} prompts, ${expectedFiles.size} import files in ${path.relative(siteDir, sourceDir)}`)
+console.log(`optimizer API check passed: ${prompts.length} prompts, ${expectedSources.size} import files, ${catalogCount} catalogs in ${path.relative(siteDir, path.join(distDir, 'api/public'))}`)

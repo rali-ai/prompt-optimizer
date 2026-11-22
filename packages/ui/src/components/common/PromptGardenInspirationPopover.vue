@@ -570,7 +570,6 @@ const loadSuggestions = async (options: { force?: boolean } = {}) => {
       gardenBaseUrl: promptGardenBaseUrl.value,
       mode: props.mode,
       limit: isImageMode.value ? 4 : 3,
-      strategy: 'mixed',
       exclude: options.force ? shownExclude.value : [],
       locale: promptGardenLocale.value,
     })
