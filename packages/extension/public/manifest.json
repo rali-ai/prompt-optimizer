@@ -21,8 +21,12 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "side_panel": {
+    "default_path": "index.html"
+  },
   "permissions": [
-    "contextMenus"
+    "contextMenus",
+    "sidePanel"
   ],
   "homepage_url": "https://goprmpt.com",
   "content_security_policy": {
@@ -37,5 +41,5 @@
   "offline_enabled": true,
   "incognito": "split",
   "short_name": "__MSG_extShortName__",
-  "minimum_chrome_version": "88"
+  "minimum_chrome_version": "114"
 }
