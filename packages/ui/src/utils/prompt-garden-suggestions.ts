@@ -134,15 +134,9 @@ const normalizeSuggestionItem = (
   }
 }
 
-const buildFallbackBrowseUrl = (
-  gardenBaseUrl: string,
-  mode: string,
-): string => {
-  const url = new URL(`${gardenBaseUrl}/prompts`)
-  if (mode) {
-    url.searchParams.set('mode', mode)
-  }
-  return url.toString()
+export const buildPromptLibraryUrl = (gardenBaseUrl: string): string => {
+  const baseUrl = normalizeBaseUrl(gardenBaseUrl)
+  return baseUrl ? `${baseUrl}/library/` : ''
 }
 
 export const buildPromptGardenSuggestionsUrl = (
@@ -195,7 +189,7 @@ export const fetchPromptGardenSuggestions = async (
 
   const browseUrl =
     resolveGardenUrl(gardenBaseUrl, data.browseUrl) ||
-    buildFallbackBrowseUrl(gardenBaseUrl, options.mode)
+    buildPromptLibraryUrl(gardenBaseUrl)
 
   const ttlSeconds =
     typeof data.ttlSeconds === 'number' &&
@@ -288,7 +282,7 @@ export const fetchPromptGardenCatalog = async (
     nextOffset,
     browseUrl:
       resolveGardenUrl(baseUrl, data.browseUrl) ||
-      buildFallbackBrowseUrl(baseUrl, options.mode),
+      buildPromptLibraryUrl(baseUrl),
   }
 }
 

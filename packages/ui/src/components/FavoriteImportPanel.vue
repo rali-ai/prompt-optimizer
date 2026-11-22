@@ -177,6 +177,7 @@ import type { AppServices } from '../types/services'
 import { getI18nErrorMessage } from '../utils/error'
 import { openExternalUrl } from '../utils/open-external-url'
 import { parsePromptGardenImportInput } from '../utils/prompt-garden-import'
+import { buildPromptLibraryUrl } from '../utils/prompt-garden-suggestions'
 import {
   importFavoriteResourcePackage,
   looksLikeFavoriteZipPackage,
@@ -240,7 +241,7 @@ const handleFileChange = (options: UploadChangeParam) => {
 }
 
 const handlePromptGardenDiscover = () => {
-  void openExternalUrl(promptGardenBaseUrl.value, { logPrefix: 'PromptGarden' })
+  void openExternalUrl(buildPromptLibraryUrl(promptGardenBaseUrl.value), { logPrefix: 'PromptGarden' })
 }
 
 const readFileAsArrayBuffer = (file: File) =>

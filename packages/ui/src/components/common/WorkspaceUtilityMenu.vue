@@ -117,6 +117,7 @@ import PromptGardenImportDialog from './PromptGardenImportDialog.vue'
 import ThemedTooltip from './ThemedTooltip.vue'
 import { openExternalUrl } from '../../utils/open-external-url'
 import type { PromptGardenImportRequest } from '../../utils/prompt-garden-import'
+import { buildPromptLibraryUrl } from '../../utils/prompt-garden-suggestions'
 import type { SourceAssetRef } from '../../utils/source-asset'
 
 const props = withDefaults(defineProps<{
@@ -246,7 +247,7 @@ const handleSelect = (key: string) => {
 
 const handleGardenSelect = (key: string) => {
   if (key === 'discover') {
-    void openExternalUrl(promptGardenBaseUrl.value, { logPrefix: 'PromptGarden' })
+    void openExternalUrl(buildPromptLibraryUrl(promptGardenBaseUrl.value), { logPrefix: 'PromptGarden' })
     return
   }
 

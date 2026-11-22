@@ -340,6 +340,7 @@ import { getEnvVar } from '@prompt-optimizer/core'
 import { openExternalUrl } from '../../utils/open-external-url'
 import type { PromptGardenImportRequest } from '../../utils/prompt-garden-import'
 import {
+  buildPromptLibraryUrl,
   fetchPromptGardenSuggestions,
   fetchPromptGardenCatalog,
   fetchPromptGardenPreview,
@@ -480,12 +481,9 @@ const promptGardenBaseUrl = computed(() =>
   getEnvVar('VITE_PROMPT_GARDEN_BASE_URL').trim().replace(/\/$/, ''),
 )
 
-const fallbackBrowseUrl = computed(() => {
-  if (!promptGardenBaseUrl.value) return ''
-  const url = new URL(`${promptGardenBaseUrl.value}/prompts`)
-  url.searchParams.set('mode', props.mode)
-  return url.toString()
-})
+const fallbackBrowseUrl = computed(() =>
+  buildPromptLibraryUrl(promptGardenBaseUrl.value),
+)
 
 const promptGardenLocale = computed(() => String(locale.value || '').trim())
 
