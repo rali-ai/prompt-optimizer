@@ -42,6 +42,7 @@ describe('AppHeaderActions', () => {
           UpdaterIcon: true,
           ActionButtonUI: true,
           ChangePasswordButton: true,
+          AccountSyncButton: true,
         },
       },
     })
@@ -75,6 +76,7 @@ describe('AppHeaderActions', () => {
           LanguageSwitchDropdown: true,
           UpdaterIcon: true,
           ChangePasswordButton: true,
+          AccountSyncButton: true,
           ActionButtonUI: defineComponent({
             name: 'ActionButtonUI',
             props: ['text', 'type'],
@@ -139,6 +141,7 @@ describe('AppHeaderActions', () => {
           LanguageSwitchDropdown: true,
           UpdaterIcon: true,
           ChangePasswordButton: true,
+          AccountSyncButton: true,
           ActionButtonUI: defineComponent({
             name: 'ActionButtonUI',
             props: ['text', 'type'],

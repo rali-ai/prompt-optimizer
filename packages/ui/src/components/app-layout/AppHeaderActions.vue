@@ -99,7 +99,7 @@
     <!-- 辅助功能区 -->
     <ThemeToggleUI />
     <div class="aux-icon-group">
-        <!-- account-sync-slot -->
+        <AccountSyncButton />
         <ChangePasswordButton />
         <LanguageSwitchDropdown />
         <UpdaterIcon />
@@ -111,6 +111,7 @@ import ActionButtonUI from '../ActionButton.vue'
 import ThemeToggleUI from '../ThemeToggleUI.vue'
 import LanguageSwitchDropdown from '../LanguageSwitchDropdown.vue'
 import UpdaterIcon from '../UpdaterIcon.vue'
+import AccountSyncButton from './AccountSyncButton.vue'
 import ChangePasswordButton from './ChangePasswordButton.vue'
 import { NBadge, NIcon } from 'naive-ui'
 import { Star, FileText, History, SlidersHorizontal, Database, Braces } from '@lucide/vue'

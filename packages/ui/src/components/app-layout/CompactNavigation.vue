@@ -23,7 +23,7 @@
       </button>
     </div>
     <div class="compact-menu-preferences">
-      <!-- account-sync-slot -->
+      <div class="compact-menu-preference"><AccountSyncButton /></div>
       <div class="compact-menu-preference"><span class="compact-menu-preference-label">{{ t('workspace.theme') }}</span><ThemeToggleUI /></div>
       <div class="compact-menu-preference"><span class="compact-menu-preference-label">{{ t('workspace.language') }}</span><LanguageSwitchDropdown /></div>
     </div>
@@ -52,6 +52,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton, NIcon, NBadge } from 'naive-ui'
+import AccountSyncButton from './AccountSyncButton.vue'
 import {
   Menu as Menu2,
   ChevronDown,
