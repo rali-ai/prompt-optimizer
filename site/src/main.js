@@ -1,18 +1,48 @@
 import './styles.css'
+import { categories, prompts } from 'virtual:library/prompts'
+import { lessons } from 'virtual:library/lessons'
 import { OPTIMIZER_URL, initSiteChrome, renderSiteFooter, renderSiteHeader, siteBackground } from './shell.js'
+import { escapeHtml } from './html.js'
+import {
+  applyDocumentMeta,
+  categoryCopy,
+  contentLanguage,
+  getInitialLocale,
+  htmlLang,
+  localeFocusRegion,
+  restoreLocaleFocus,
+  toggleLocale
+} from './locale.js'
 
-const STORAGE_KEY = 'prompt-optimizer-site-locale'
-const SUPPORTED_LOCALES = ['zh-CN', 'en']
+const FEATURED_PROMPT_IDS = [
+  'plain-language-explainer',
+  'chinese-typography-poster',
+  'automation-task-writer'
+]
+
+const categoryById = new Map(categories.map((category) => [category.id, category]))
+const promptById = new Map(prompts.map((prompt) => [prompt.id, prompt]))
+const featuredPrompts = FEATURED_PROMPT_IDS.map((id) => promptById.get(id)).filter(Boolean)
+if (featuredPrompts.length < 3) {
+  for (const prompt of prompts) {
+    if (featuredPrompts.length >= 3) break
+    if (!featuredPrompts.some((item) => item.id === prompt.id)) featuredPrompts.push(prompt)
+  }
+}
+
+const courseLessons = lessons.filter((lesson) => lesson.track === 'course')
+const patternLessons = lessons.filter((lesson) => lesson.track === 'pattern')
 
 const translations = {
   'zh-CN': {
-    htmlLang: 'zh-CN',
     title: '提示词优化器',
-    description: '开源提示词工具。用自己的模型改写给 AI 的指令，并排比较改写前后的回答，保存满意的版本。',
+    description: '开源提示词工具。用自己的模型改写给 AI 的指令，并排比较改写前后的回答，配套中英双语提示词库与写作教程。',
     hero: {
       title: '提示词优化器',
       lead: '贴入你准备发给 AI 的指令，改写后用同一个模型测试两版，看看哪份回答更符合你的要求。',
       primary: '打开优化器',
+      secondaryLibrary: '浏览提示词库',
+      secondaryLearn: '教程与写法',
       setupNote: '首次使用需配置 API Key 或连接已运行的本地模型。',
       visualTitle: '左侧改写提示词，右侧对比两版回答',
       screenshotLabel: '点击放大工作区截图',
@@ -26,12 +56,28 @@ const translations = {
       fit: '适应窗口',
       close: '关闭预览'
     },
+    resources: {
+      title: '现成的提示词库与系统教程',
+      lead: `收录 ${prompts.length} 条中英双语提示词与 ${lessons.length} 节写法课程，填好变量就能复制，也能一键带进优化器接着改。`,
+      libraryTitle: '提示词库',
+      libraryMeta: `${prompts.length} 条提示词 · ${categories.length} 个分类 · 文本与图像`,
+      libraryBody: '按类型、分类和标签快速筛选，支持在线填写变量、复制导入码，或直接发送到优化器对应工作区。',
+      libraryCta: '进入提示词库',
+      learnTitle: '教程与写法',
+      learnMeta: `${lessons.length} 节双语课程 · ${courseLessons.length} 节入门 + ${patternLessons.length} 节进阶`,
+      learnBody: '一课讲透一个写法，每课都有改写前后对比和一道可直接动手的练习。',
+      learnCourseTitle: '入门课程',
+      learnCourseMeta: `${courseLessons.length} 课 · 从四要素到迭代改写`,
+      learnPatternTitle: '进阶写法',
+      learnPatternMeta: `${patternLessons.length} 课 · 正反界定、变量槽位与多图一致`,
+      learnCta: '开始阅读课程'
+    },
     workflow: {
       title: '怎样优化一条提示词',
       steps: [
         {
           title: '填入提示词',
-          body: '粘贴你准备发给 AI 的指令，也可以从模板或文件导入。'
+          body: '粘贴你准备发给 AI 的指令，也可以从提示词库直接导入。'
         },
         {
           title: '改写任务要求',
@@ -96,13 +142,14 @@ const translations = {
     }
   },
   en: {
-    htmlLang: 'en',
     title: '提示词优化器 | Rewrite and test AI prompts',
-    description: 'An open-source tool to rewrite prompts with your own models, compare actual responses, and save prompts for reuse.',
+    description: 'An open-source tool to rewrite prompts with your own models, compare actual responses, and explore a bilingual prompt library and course.',
     hero: {
       title: '提示词优化器',
       lead: 'Paste a prompt, rewrite it, and test both versions with the same model. See which answer fits your task better.',
       primary: 'Open Optimizer',
+      secondaryLibrary: 'Prompt Library',
+      secondaryLearn: 'Learn',
       setupNote: 'To get started, add an API key or connect to a running local model.',
       visualTitle: 'Edit on the left, compare answers on the right',
       screenshotLabel: 'Click to enlarge the workspace screenshot',
@@ -116,12 +163,28 @@ const translations = {
       fit: 'Fit to window',
       close: 'Close preview'
     },
+    resources: {
+      title: 'Bilingual prompt library & prompting course',
+      lead: `${prompts.length} bilingual prompts and ${lessons.length} structured lessons. Fill variables and copy, or open any prompt straight in the optimizer.`,
+      libraryTitle: 'Prompt Library',
+      libraryMeta: `${prompts.length} prompts · ${categories.length} categories · Text & Image`,
+      libraryBody: 'Filter by type, category, and tags. Fill variables inline, copy import codes, or launch the matching optimizer workspace.',
+      libraryCta: 'Browse Prompt Library',
+      learnTitle: 'Learn Prompting',
+      learnMeta: `${lessons.length} bilingual lessons · ${courseLessons.length} starter + ${patternLessons.length} patterns`,
+      learnBody: 'One focused technique per lesson, with side-by-side before/after rewrites and a practical exercise.',
+      learnCourseTitle: 'Starter Course',
+      learnCourseMeta: `${courseLessons.length} lessons · Four elements to iteration`,
+      learnPatternTitle: 'Prompt Patterns',
+      learnPatternMeta: `${patternLessons.length} lessons · Framing, slots & consistency`,
+      learnCta: 'Start Learning'
+    },
     workflow: {
       title: 'How to improve a prompt',
       steps: [
         {
           title: 'Start with a prompt',
-          body: 'Paste your own prompt or import one from a template or file.'
+          body: 'Paste your own prompt or import one directly from the prompt library.'
         },
         {
           title: 'Clarify the instructions',
@@ -187,38 +250,30 @@ const translations = {
   }
 }
 
-function normalizeLocale(locale) {
-  if (!locale) return 'zh-CN'
-  if (locale.startsWith('zh')) return 'zh-CN'
-  return 'en'
+function renderFeaturedPromptCards(locale) {
+  const lang = contentLanguage(locale)
+  const docLang = htmlLang(locale)
+  return featuredPrompts
+    .map((prompt) => {
+      const content = prompt.locales[lang]
+      const cat = categoryCopy(categoryById.get(prompt.category), lang)
+      return `
+        <a class="home-mini-card" href="/library/?id=${encodeURIComponent(prompt.id)}">
+          <span class="home-mini-card__tag">${escapeHtml(cat.name)}</span>
+          <strong lang="${docLang}">${escapeHtml(content.title)}</strong>
+          <span class="home-mini-card__summary" lang="${docLang}">${escapeHtml(content.summary)}</span>
+        </a>
+      `
+    })
+    .join('')
 }
 
-function getInitialLocale() {
-  const storedLocale = window.localStorage.getItem(STORAGE_KEY)
-  if (storedLocale && SUPPORTED_LOCALES.includes(storedLocale)) {
-    return storedLocale
-  }
-
-  const browserLocale = normalizeLocale(navigator.language || navigator.languages?.[0] || 'zh-CN')
-  return SUPPORTED_LOCALES.includes(browserLocale) ? browserLocale : 'zh-CN'
-}
-
-function renderApp(locale) {
-  const copy = translations[locale]
+function renderApp(locale, { preserveFocus = false } = {}) {
+  const copy = translations[locale] ?? translations['zh-CN']
   const menuExpanded = document.querySelector('.site-menu-button')?.getAttribute('aria-expanded') ?? 'false'
-  const focusedRegion = document.activeElement?.closest('.locale-switch')?.closest('header, footer')?.localName
+  const focusedRegion = preserveFocus ? localeFocusRegion() : null
 
-  document.documentElement.lang = copy.htmlLang
-  document.documentElement.dataset.locale = locale
-  document.title = copy.title
-
-  const descriptionMeta = document.querySelector('meta[name="description"]')
-  const ogDescriptionMeta = document.querySelector('meta[property="og:description"]')
-  const ogTitleMeta = document.querySelector('meta[property="og:title"]')
-
-  if (descriptionMeta) descriptionMeta.setAttribute('content', copy.description)
-  if (ogDescriptionMeta) ogDescriptionMeta.setAttribute('content', copy.description)
-  if (ogTitleMeta) ogTitleMeta.setAttribute('content', copy.title)
+  applyDocumentMeta({ locale, title: copy.title, description: copy.description })
 
   document.querySelector('#app').innerHTML = `
     <div class="site-shell">
@@ -231,7 +286,9 @@ function renderApp(locale) {
             <h1 class="hero-title">${copy.hero.title}</h1>
             <p class="hero-lead">${copy.hero.lead}</p>
             <div class="hero-actions">
-              <a class="button button--primary" href="${OPTIMIZER_URL}" target="_blank" rel="noopener">${copy.hero.primary}</a>
+              <a class="button button--primary" href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.hero.primary}</a>
+              <a class="button" href="/library/">${copy.hero.secondaryLibrary}</a>
+              <a class="button" href="/learn/">${copy.hero.secondaryLearn}</a>
             </div>
             <p class="hero-setup" id="hero-setup">${copy.hero.setupNote}</p>
           </div>
@@ -244,6 +301,49 @@ function renderApp(locale) {
               <img src="/images/product/2026-11/${copy.hero.screenshot}" alt="${copy.hero.screenshotAlt}" width="2047" height="1018" fetchpriority="high" />
             </div>
           </a>
+        </section>
+
+        <section class="section" id="resources">
+          <div class="section-head">
+            <h2>${copy.resources.title}</h2>
+            <p class="section-lead">${copy.resources.lead}</p>
+          </div>
+          <div class="home-resources">
+            <article class="home-resource-panel">
+              <div class="home-resource-panel__head">
+                <div>
+                  <h3>${copy.resources.libraryTitle}</h3>
+                  <p class="home-resource-panel__meta">${copy.resources.libraryMeta}</p>
+                </div>
+                <a class="button" href="/library/">${copy.resources.libraryCta}</a>
+              </div>
+              <p class="home-resource-panel__body">${copy.resources.libraryBody}</p>
+              <div class="home-mini-grid">
+                ${renderFeaturedPromptCards(locale)}
+              </div>
+            </article>
+
+            <article class="home-resource-panel">
+              <div class="home-resource-panel__head">
+                <div>
+                  <h3>${copy.resources.learnTitle}</h3>
+                  <p class="home-resource-panel__meta">${copy.resources.learnMeta}</p>
+                </div>
+                <a class="button" href="/learn/">${copy.resources.learnCta}</a>
+              </div>
+              <p class="home-resource-panel__body">${copy.resources.learnBody}</p>
+              <div class="home-track-grid">
+                <a class="home-mini-card" href="/learn/">
+                  <strong>${copy.resources.learnCourseTitle}</strong>
+                  <span class="home-mini-card__summary">${copy.resources.learnCourseMeta}</span>
+                </a>
+                <a class="home-mini-card" href="/learn/?track=pattern">
+                  <strong>${copy.resources.learnPatternTitle}</strong>
+                  <span class="home-mini-card__summary">${copy.resources.learnPatternMeta}</span>
+                </a>
+              </div>
+            </article>
+          </div>
         </section>
 
         <section class="section">
@@ -306,7 +406,7 @@ function renderApp(locale) {
           </div>
           <div class="entry-list">
             ${copy.access.entries.map((entry) => `
-              <a class="entry-link" href="${entry.href}" target="_blank" rel="noopener">
+              <a class="entry-link" href="${entry.href}" target="_blank" rel="noopener noreferrer">
                 <strong>${entry.title}</strong>
                 <span>${entry.body}</span>
               </a>
@@ -314,7 +414,7 @@ function renderApp(locale) {
           </div>
           <div class="project-details">
             <div class="project-details__links">
-              <a class="section-link" href="https://github.com/rali-ai/prompt-optimizer" target="_blank" rel="noopener">${copy.access.repository}</a>
+              <a class="section-link" href="https://github.com/rali-ai/prompt-optimizer" target="_blank" rel="noopener noreferrer">${copy.access.repository}</a>
               <span>AGPL-3.0</span>
             </div>
             <p>${copy.access.dataNote}</p>
@@ -344,10 +444,7 @@ function renderApp(locale) {
 
   bindImagePreview(copy.imagePreview)
   bindMotionEffects()
-
-  if (focusedRegion) {
-    document.querySelector(`${focusedRegion} .locale-switch`)?.focus({ preventScroll: true })
-  }
+  restoreLocaleFocus(focusedRegion)
 }
 
 function bindImagePreview(copy) {
@@ -444,13 +541,11 @@ function bindMotionEffects() {
 
 let currentLocale = getInitialLocale()
 
-initSiteChrome()
-
-document.addEventListener('click', (event) => {
-  if (!event.target.closest('[data-locale-toggle]')) return
-  currentLocale = currentLocale === 'zh-CN' ? 'en' : 'zh-CN'
-  window.localStorage.setItem(STORAGE_KEY, currentLocale)
-  renderApp(currentLocale)
+initSiteChrome({
+  onLocaleToggle: () => {
+    currentLocale = toggleLocale(currentLocale)
+    renderApp(currentLocale, { preserveFocus: true })
+  }
 })
 
 renderApp(currentLocale)
