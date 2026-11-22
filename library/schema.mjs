@@ -268,7 +268,7 @@ function parsePrompts(problems, data, categoryById) {
 }
 
 // 一种语言的课程正文。
-function parseLessonText(field) {
+function parseLessonText(field, language) {
   const sectionList = field.list('sections')
   if (field.isList('sections') && sectionList.length === 0) field.fail('sections 至少一节')
   const sections = sectionList.flatMap((value, index) => {
@@ -283,6 +283,7 @@ function parseLessonText(field) {
     after: field.text('after'),
     exercise: field.text('exercise')
   }
+  if (text.summary && !SENTENCE[language].test(text.summary.trim())) field.fail('summary 应是一句话，以句末标点结尾')
   if (text.before && text.before === text.after) field.fail('before 和 after 相同')
   return text
 }
@@ -294,9 +295,9 @@ function parseLessons(problems, data) {
     if (track && !TRACKS.includes(track)) field.fail(`track 只能是 ${TRACKS.join(' / ')}：${track}`)
     const order = field.optionalNumber('order')
     const source = parseSource(field)
-    const zh = parseLessonText(field)
+    const zh = parseLessonText(field, 'zh')
     const enField = field.has('en') ? field.child('en', LESSON_TEXT_FIELDS) : null
-    const en = enField ? parseLessonText(enField) : zh
+    const en = enField ? parseLessonText(enField, 'en') : zh
     return {
       id,
       track,
@@ -308,8 +309,10 @@ function parseLessons(problems, data) {
   checkUnique(problems, 'learn.json', 'id ', lessons.map((l) => l.id))
   checkUnique(problems, 'learn.json', '中文标题', lessons.map((l) => l.locales.zh.title))
   checkUnique(problems, 'learn.json', '英文标题', lessons.map((l) => l.locales.en.title))
-  // 有 order 的按 order 从小到大排在前面，没有的保持文件里的顺序排在后面。
-  return lessons.sort((a, b) => (a.order ?? Number.MAX_VALUE) - (b.order ?? Number.MAX_VALUE))
+  // 先按 track 分组（course 在前），组内有 order 的按 order 从小到大排在前面，没有的保持文件里的顺序。
+  const trackRank = (lesson) => TRACKS.indexOf(lesson.track)
+  return lessons.sort((a, b) =>
+    trackRank(a) - trackRank(b) || (a.order ?? Number.MAX_VALUE) - (b.order ?? Number.MAX_VALUE))
 }
 
 /** @returns {Library} */

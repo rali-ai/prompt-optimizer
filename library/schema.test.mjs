@@ -233,14 +233,21 @@ test('lessons belong to the course or pattern track', () => {
   assertProblem((files) => { files.learn[0].track = 'blog' }, /track 只能是 course \/ pattern：blog/)
 })
 
-test('lessons with an order come first, sorted by it; the rest keep file order', () => {
-  const lesson = (id, order) => {
+test('lessons are grouped by track, course first; within a track ordered lessons come first, sorted by order', () => {
+  const lesson = (id, track, order) => {
     const base = valid().learn[0]
-    return { ...base, id, title: id, ...(order === undefined ? {} : { order }), en: { ...base.en, title: id } }
+    return { ...base, id, track, title: id, ...(order === undefined ? {} : { order }), en: { ...base.en, title: id } }
   }
-  const ids = load((files) => { files.learn = [lesson('a'), lesson('b', 2), lesson('c'), lesson('d', 1)] }).lessons.map((l) => l.id)
-  assert.deepEqual(ids, ['d', 'b', 'a', 'c'])
+  const ids = load((files) => {
+    files.learn = [lesson('p1', 'pattern', 1), lesson('a', 'course'), lesson('b', 'course', 2), lesson('c', 'course'), lesson('d', 'course', 1)]
+  }).lessons.map((l) => l.id)
+  assert.deepEqual(ids, ['d', 'b', 'a', 'c', 'p1'])
   assertProblem((files) => { files.learn[0].order = '1' }, /order 必须是数字/)
+})
+
+test('lesson summary is one sentence, in each language', () => {
+  assertProblem((files) => { files.learn[0].summary = '先说目标。再说背景。' }, /clear-goal\)：summary 应是一句话/)
+  assertProblem((files) => { files.learn[0].en.summary = 'Say it. Then say why.' }, /clear-goal\)\.en：summary 应是一句话/)
 })
 
 test('a lesson distilled from another library carries its source', () => {
