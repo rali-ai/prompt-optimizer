@@ -7,10 +7,27 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
-const BRAND_LOGO_SVG = `<svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <rect width="32" height="32" rx="9" fill="#0F766E"/>
-  <path d="M16 7.5L23.5 11.8V20.2L16 24.5L8.5 20.2V11.8L16 7.5Z" stroke="#FAF9F5" stroke-width="1.8" stroke-linejoin="round"/>
-  <path d="M16 12.2L19.6 14.3V18.5L16 20.6L12.4 18.5V14.3L16 12.2Z" fill="#D96B43"/>
+const BRAND_LOGO_SVG = `<svg width="30" height="30" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs>
+    <linearGradient id="gp-admin-jade" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0D9488"/>
+      <stop offset="55%" stop-color="#0F766E"/>
+      <stop offset="100%" stop-color="#115E59"/>
+    </linearGradient>
+    <linearGradient id="gp-admin-copper" x1="39" y1="12" x2="54" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D96B43"/>
+    </linearGradient>
+    <linearGradient id="gp-admin-sheen" x1="10" y1="4" x2="46" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FAF9F5" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#FAF9F5" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#gp-admin-jade)"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="15.25" stroke="url(#gp-admin-sheen)" stroke-width="1.5"/>
+  <path d="M44.5 23.5A15.5 15.5 0 1 0 47.5 34H33.5" stroke="#FAF9F5" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M33.5 34H47.5V41.5A15.5 15.5 0 0 1 32 47.5" stroke="#CCFBF1" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
+  <path d="M46.5 12.5L48.3 18.2L54 20L48.3 21.8L46.5 27.5L44.7 21.8L39 20L44.7 18.2Z" fill="url(#gp-admin-copper)"/>
 </svg>`;
 
 export function renderAdminHtml({ authenticated, isAdmin, username, membershipEnabled }) {
@@ -584,6 +601,9 @@ export function renderAdminHtml({ authenticated, isAdmin, username, membershipEn
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/pwa/icon-192.png?v=goprmpt2" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=goprmpt2" />
+  <meta name="theme-color" content="#0F766E" />
   <title>${title}</title>
   <style>
     :root {
