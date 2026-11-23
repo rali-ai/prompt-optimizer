@@ -873,6 +873,152 @@ figure {
   margin-top: auto;
 }
 
+/* Browser Extension Showcase & Download */
+
+.extension-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.9fr);
+  gap: 20px;
+  align-items: stretch;
+}
+
+.extension-main,
+.extension-install {
+  padding: 26px;
+  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.extension-main__lead {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.7;
+  color: var(--muted-strong);
+}
+
+.extension-features {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.extension-feature {
+  padding: 15px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-subtle, rgba(243, 241, 234, 0.45));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+[data-theme='dark'] .extension-feature {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.extension-feature h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.extension-feature p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.extension-download-row {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.extension-download-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.extension-install__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.extension-install__head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.extension-install__head span {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.extension-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.extension-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.extension-step__num {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--hero-chip-bg);
+  color: var(--hero-accent-text);
+  font-size: 0.74rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.extension-step strong {
+  display: block;
+  font-size: 0.88rem;
+  color: var(--text-strong);
+  margin-bottom: 3px;
+}
+
+.extension-step p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.extension-install__tip {
+  margin: auto 0 0;
+  padding: 11px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--hero-chip-bg);
+  color: var(--hero-accent-text);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
 /* Multi-Platform & Compliance Banner */
 
 .platform-banner {
@@ -1043,9 +1189,16 @@ figure {
   .academy-grid {
     grid-template-columns: 1fr;
   }
+
+  .extension-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 600px) {
+  .extension-features {
+    grid-template-columns: 1fr;
+  }
   .site-shell {
     width: calc(100vw - 24px);
     padding: 12px 0 44px;

@@ -3,6 +3,10 @@ import { categories, prompts } from 'virtual:library/prompts'
 import { lessons } from 'virtual:library/lessons'
 import { OPTIMIZER_URL, initSiteChrome, renderSiteFooter, renderSiteHeader, siteBackground } from './shell.js'
 import { escapeHtml } from './html.js'
+
+const EXTENSION_VERSION = '2.16.0'
+const EXTENSION_DOWNLOAD_FILENAME = `goprmpt-extension-${EXTENSION_VERSION}.zip`
+const EXTENSION_DOWNLOAD_URL = `/downloads/${EXTENSION_DOWNLOAD_FILENAME}`
 import {
   applyDocumentMeta,
   categoryCopy,
@@ -201,10 +205,56 @@ const translations = {
     patternSub: '真实高频避坑技巧',
     patternTitle: '压住模型惯性的工程化写法',
     patternCta: `查看全部 ${patternLessons.length} 节进阶写法 →`,
-    platformTitle: '网页工作台 · 浏览器划词插件 · 微信小程序',
+    extensionEyebrow: '浏览器插件 · Chrome / Edge',
+    extensionTitle: '高词侧边栏插件：在任意 AI 对话页右侧随手改写提示词',
+    extensionNote: `v${EXTENSION_VERSION} · MV3 原生侧边栏 · 支持云同步`,
+    extensionLead:
+      '打开 DeepSeek、ChatGPT、Claude、豆包或任意网页时，点一下工具栏图标就能在浏览器右侧滑出紧凑版高词工作台，不用来回切标签页，并支持与 goprmpt.net 网站双向云同步。',
+    extensionDownloadCta: '下载浏览器插件 (.zip)',
+    extensionMeta: `版本 v${EXTENSION_VERSION} · 约 1.7 MB · 适用 Chrome / Edge 114+`,
+    extensionFeatures: [
+      {
+        title: '右侧边栏紧凑模式',
+        body: '原生 Side Panel 贴合在当前网页右侧，左边对话右边调提示词；右键图标也可随时全屏打开。'
+      },
+      {
+        title: '网页划词右键优化',
+        body: '在任意网页选中一段文字，点右键即可直接带入右侧栏改写与结构化整理。'
+      },
+      {
+        title: '与网站双向云同步',
+        body: '登录同一个高词账号，收藏夹、历史记录、自定义模板与变量在插件和 goprmpt.net 间一键互通。'
+      },
+      {
+        title: '本地优先 BYOK 安全',
+        body: '免登录支持离线使用；模型 API Key 仅留在各自本机浏览器，绝不上传服务器。'
+      }
+    ],
+    extensionInstallTitle: '30 秒本地安装指南',
+    extensionInstallSub: '离线安装包，无需访问海外应用商店',
+    extensionSteps: [
+      {
+        num: '01',
+        title: '下载插件压缩包',
+        body: `点击左侧按钮下载 ${EXTENSION_DOWNLOAD_FILENAME} 到本地电脑。`
+      },
+      {
+        num: '02',
+        title: '打开扩展管理并开启开发者模式',
+        body: '在 Chrome 地址栏输入 chrome://extensions（Edge 输入 edge://extensions），打开右上角「开发者模式」。'
+      },
+      {
+        num: '03',
+        title: '直接拖入即可使用',
+        body: '将下载好的 .zip 压缩包直接拖进扩展管理页面（或解压后点「加载已解压的扩展程序」），固定工具栏翡翠绿 G 图标即可。'
+      }
+    ],
+    extensionSyncTip: '提示：打开右侧栏后点左上角「功能 → 登录 / 云同步」，即可与 goprmpt.net 网站同步你的收藏和模板。',
+    platformTitle: '网页工作台 · 浏览器侧栏插件 · 全场景顺手可用',
     platformBody:
       '配置、历史和收藏默认保存在浏览器本地；相关输入直接发给你自行配置的模型服务，请勿在提示词中提交个人隐私或敏感机密信息。AI 生成内容仅供参考，请结合实际场景人工核验。',
     platformPrimary: '打开网页工作台',
+    platformDownload: '下载浏览器插件',
     platformSecondary: '浏览提示词库',
     targets: {
       'basic-user': '用户',
@@ -299,10 +349,56 @@ const translations = {
     patternSub: 'Battle-tested structures',
     patternTitle: 'Engineering patterns that tame model drift',
     patternCta: `View all ${patternLessons.length} patterns →`,
-    platformTitle: 'Web Workbench · Browser Extension · WeChat Mini-Program',
+    extensionEyebrow: 'Browser Extension · Chrome / Edge',
+    extensionTitle: 'GoPrmpt Side Panel: refine prompts right beside any AI chat',
+    extensionNote: `v${EXTENSION_VERSION} · MV3 Side Panel · Cloud Sync`,
+    extensionLead:
+      'Click the toolbar icon on ChatGPT, Claude, DeepSeek, or any webpage to slide open a compact GoPrmpt studio on the right edge of your browser, with optional two-way sync to goprmpt.net.',
+    extensionDownloadCta: 'Download Extension (.zip)',
+    extensionMeta: `v${EXTENSION_VERSION} · ~1.7 MB · Chrome / Edge 114+`,
+    extensionFeatures: [
+      {
+        title: 'Right-hand Side Panel',
+        body: 'Native MV3 Side Panel keeps your chat on the left and prompt workbench on the right. Right-click the icon for full-tab view.'
+      },
+      {
+        title: 'Right-click selection rewrite',
+        body: 'Highlight any text on a webpage and send it straight into the right-hand studio for structured rewriting.'
+      },
+      {
+        title: 'Two-way sync with goprmpt.net',
+        body: 'Sign in with the same GoPrmpt account to sync favorites, history, templates, and variables across extension and web.'
+      },
+      {
+        title: 'Local-first BYOK privacy',
+        body: 'Works offline without sign-in. Model API keys stay strictly inside your local browser storage and are never uploaded.'
+      }
+    ],
+    extensionInstallTitle: '30-Second Local Install',
+    extensionInstallSub: 'Direct package download, no web store required',
+    extensionSteps: [
+      {
+        num: '01',
+        title: 'Download the ZIP package',
+        body: `Click the download button to save ${EXTENSION_DOWNLOAD_FILENAME} to your computer.`
+      },
+      {
+        num: '02',
+        title: 'Open Extensions & Developer Mode',
+        body: 'Visit chrome://extensions (or edge://extensions in Edge) and enable Developer mode in the top-right corner.'
+      },
+      {
+        num: '03',
+        title: 'Drag & drop to install',
+        body: 'Drag the downloaded .zip straight onto the Extensions page (or unzip and click Load unpacked), then pin the jade G icon.'
+      }
+    ],
+    extensionSyncTip: 'Tip: Open the Side Panel and click Functions → Sign in / Sync to sync your favorites and templates with goprmpt.net.',
+    platformTitle: 'Web Workbench · Side Panel Extension · Built for Daily Flow',
     platformBody:
       'Settings, history, and favorites stay in your browser by default. Requests go directly to the model provider you configure; do not submit private or confidential data. AI-generated outputs are for reference only; please review before use.',
     platformPrimary: 'Open Web Workbench',
+    platformDownload: 'Download Extension',
     platformSecondary: 'Explore Prompt Library',
     targets: {
       'basic-user': 'User',
@@ -535,7 +631,68 @@ function renderApp(locale, { preserveFocus = false } = {}) {
           </div>
         </section>
 
-        <!-- 6. Multi-Platform & Privacy/Compliance Banner -->
+        <!-- 6. Browser Extension Showcase & Direct Download -->
+        <section class="section--plain" id="extension">
+          <div class="section-head">
+            <div>
+              <div class="section-eyebrow">${escapeHtml(copy.extensionEyebrow)}</div>
+              <h2>${escapeHtml(copy.extensionTitle)}</h2>
+            </div>
+            <span class="section-note">${escapeHtml(copy.extensionNote)}</span>
+          </div>
+
+          <div class="extension-grid">
+            <article class="glass-card extension-main">
+              <p class="extension-main__lead">${escapeHtml(copy.extensionLead)}</p>
+              <div class="extension-features">
+                ${copy.extensionFeatures
+                  .map(
+                    (feat) => `
+                      <div class="extension-feature">
+                        <h3>${escapeHtml(feat.title)}</h3>
+                        <p>${escapeHtml(feat.body)}</p>
+                      </div>
+                    `
+                  )
+                  .join('')}
+              </div>
+              <div class="extension-download-row">
+                <a
+                  class="button button--primary"
+                  href="${EXTENSION_DOWNLOAD_URL}"
+                  download="${EXTENSION_DOWNLOAD_FILENAME}"
+                  data-testid="extension-download-link"
+                >${escapeHtml(copy.extensionDownloadCta)}</a>
+                <span class="extension-download-meta">${escapeHtml(copy.extensionMeta)}</span>
+              </div>
+            </article>
+
+            <aside class="glass-card extension-install">
+              <div class="extension-install__head">
+                <h3>${escapeHtml(copy.extensionInstallTitle)}</h3>
+                <span>${escapeHtml(copy.extensionInstallSub)}</span>
+              </div>
+              <ol class="extension-steps">
+                ${copy.extensionSteps
+                  .map(
+                    (step) => `
+                      <li class="extension-step">
+                        <span class="extension-step__num">${escapeHtml(step.num)}</span>
+                        <div>
+                          <strong>${escapeHtml(step.title)}</strong>
+                          <p>${escapeHtml(step.body)}</p>
+                        </div>
+                      </li>
+                    `
+                  )
+                  .join('')}
+              </ol>
+              <p class="extension-install__tip">${escapeHtml(copy.extensionSyncTip)}</p>
+            </aside>
+          </div>
+        </section>
+
+        <!-- 7. Multi-Platform & Privacy/Compliance Banner -->
         <section class="section--plain" id="platforms">
           <div class="glass-card platform-banner">
             <div class="platform-banner__copy">
@@ -544,6 +701,7 @@ function renderApp(locale, { preserveFocus = false } = {}) {
             </div>
             <div class="platform-banner__actions">
               <a class="button button--primary" href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${escapeHtml(copy.platformPrimary)}</a>
+              <a class="button" href="${EXTENSION_DOWNLOAD_URL}" download="${EXTENSION_DOWNLOAD_FILENAME}">${escapeHtml(copy.platformDownload)}</a>
               <a class="button" href="/library/">${escapeHtml(copy.platformSecondary)}</a>
             </div>
           </div>

@@ -12,6 +12,7 @@ export const chromeCopy = {
       product: '工作台',
       library: '提示词库',
       learn: '教程与写法',
+      extension: '浏览器插件',
       cta: '打开工作台',
       themeAria: '切换主题模式',
       themeLabels: {
@@ -37,6 +38,7 @@ export const chromeCopy = {
       product: 'Workbench',
       library: 'Prompt Library',
       learn: 'Learn',
+      extension: 'Extension',
       cta: 'Open Workbench',
       themeAria: 'Switch theme mode',
       themeLabels: {
@@ -169,6 +171,7 @@ export function renderSiteHeader({ locale = 'zh-CN', current = '', showLocale = 
         <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.nav.product}</a>
         ${renderPageLink('/library/', copy.nav.library, current)}
         ${renderPageLink('/learn/', copy.nav.learn, current)}
+        <a href="/#extension">${copy.nav.extension}</a>
         <span class="site-nav__divider" aria-hidden="true"></span>
         ${renderThemeButton(copy)}
         ${showLocale ? renderLocaleButton(copy) : ''}
@@ -193,6 +196,7 @@ export function renderSiteFooter({ locale = 'zh-CN', current = '', showLocale = 
         <a href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${copy.footer.product}</a>
         ${renderPageLink('/library/', copy.nav.library, current)}
         ${renderPageLink('/learn/', copy.nav.learn, current)}
+        <a href="/#extension">${copy.nav.extension}</a>
         ${renderThemeButton(copy)}
         ${showLocale ? renderLocaleButton(copy) : ''}
       </div>
