@@ -1325,6 +1325,7 @@ html:has(.drawer[open]) {
 
 .guide-article__head {
   display: grid;
+  justify-items: start;
   gap: 10px;
   margin-bottom: 24px;
   padding-bottom: 18px;
