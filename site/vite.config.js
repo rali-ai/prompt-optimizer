@@ -48,7 +48,8 @@ export default defineConfig({
       input: {
         main: path.resolve(siteDir, 'index.html'),
         library: path.resolve(siteDir, 'library/index.html'),
-        learn: path.resolve(siteDir, 'learn/index.html')
+        learn: path.resolve(siteDir, 'learn/index.html'),
+        guide: path.resolve(siteDir, 'guide/index.html')
       }
     }
   }
