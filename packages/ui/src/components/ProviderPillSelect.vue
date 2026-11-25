@@ -106,31 +106,30 @@ const emit = defineEmits<{
 const isOverflowExpanded = ref(false)
 
 const providerOrder = [
-  'openai',
+  'siliconflow',
   'deepseek',
-  'gemini',
-  'google-gemini',
-  'anthropic',
   'dashscope',
-  'openrouter',
   'zhipu',
   'zhipuai',
-  'chrome-built-in',
-  'ollama',
-  'magpie',
   'seedream',
   'volcengine',
   'volcano',
-  'siliconflow',
+  'ollama',
+  'magpie',
   'minimax',
   'xiaomi-mimo-token-plan',
   'modelscope',
+  'openai',
+  'gemini',
+  'google-gemini',
+  'anthropic',
+  'openrouter',
+  'chrome-built-in',
   'cloudflare',
   'openai-compatible'
 ]
 
 const overflowProviderIds = new Set([
-  'siliconflow',
   'minimax',
   'xiaomi-mimo-token-plan',
   'modelscope',

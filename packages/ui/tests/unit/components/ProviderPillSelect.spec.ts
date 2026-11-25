@@ -20,19 +20,20 @@ describe('ProviderPillSelect', () => {
 
   it('renders provider options as selectable pills', () => {
     const wrapper = mountComponent({
-      value: 'openai',
+      value: 'siliconflow',
       options,
       ariaLabel: 'Provider'
     })
 
     const pills = wrapper.findAll('button[role="radio"]')
-    expect(pills).toHaveLength(3)
+    expect(pills).toHaveLength(4)
+    expect(pills[0].text()).toBe('SiliconFlow')
     expect(pills[0].attributes('aria-checked')).toBe('true')
     expect(pills[0].classes()).toContain('provider-pill-select__pill--selected')
     expect(wrapper.find('[role="radiogroup"]').attributes('aria-label')).toBe('Provider')
   })
 
-  it('orders common providers first, groups niche providers, and keeps custom last', async () => {
+  it('orders featured siliconflow and common providers first, groups niche providers, and keeps custom last', async () => {
     const wrapper = mountComponent({
       value: 'openai-compatible',
       options,
@@ -44,23 +45,24 @@ describe('ProviderPillSelect', () => {
 
     const buttons = wrapper.findAll('.provider-pill-select > button')
     expect(buttons.map(button => button.text())).toEqual([
-      'OpenAI',
+      'SiliconFlow',
       'Ollama',
+      'OpenAI',
       'OpenAI 兼容（自定义）',
       '更多'
     ])
-    expect(buttons.at(2)?.attributes('aria-checked')).toBe('true')
-    expect(buttons.at(2)?.classes()).toContain('provider-pill-select__pill--custom')
-    expect(buttons.at(3)?.attributes('aria-expanded')).toBe('false')
+    expect(buttons.at(3)?.attributes('aria-checked')).toBe('true')
+    expect(buttons.at(3)?.classes()).toContain('provider-pill-select__pill--custom')
+    expect(buttons.at(4)?.attributes('aria-expanded')).toBe('false')
 
-    await buttons[3].trigger('click')
+    await buttons[4].trigger('click')
 
     expect(wrapper.findAll('.provider-pill-select > button').map(button => button.text())).toEqual([
-      'OpenAI',
+      'SiliconFlow',
       'Ollama',
+      'OpenAI',
       'OpenAI 兼容（自定义）',
       '更多',
-      'SiliconFlow',
       'MiniMax',
       'Xiaomi MiMo Token Plan',
       'Disabled'
@@ -69,26 +71,26 @@ describe('ProviderPillSelect', () => {
 
   it('emits updates only for enabled non-current options', async () => {
     const wrapper = mountComponent({
-      value: 'openai',
+      value: 'siliconflow',
       options
     })
 
     const pills = wrapper.findAll('button[role="radio"]')
     await pills[0].trigger('click')
-    await pills[2].trigger('click')
+    await pills[3].trigger('click')
 
     expect(wrapper.emitted('update:value')).toEqual([['openai-compatible']])
   })
 
   it('emits updates when selecting an expanded overflow provider', async () => {
     const wrapper = mountComponent({
-      value: 'openai',
+      value: 'siliconflow',
       options
     })
 
     await wrapper.find('.provider-pill-select__pill--more').trigger('click')
     await wrapper.findAll('.provider-pill-select__pill--overflow')[0].trigger('click')
 
-    expect(wrapper.emitted('update:value')).toEqual([['siliconflow']])
+    expect(wrapper.emitted('update:value')).toEqual([['minimax']])
   })
 })
