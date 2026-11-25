@@ -239,6 +239,7 @@ const ANNOUNCEMENT_COPY = {
     commentsLoading: '正在加载评论...',
     commentsError: '评论加载失败，请稍后重试或前往工作台查看',
     commentsCta: '注册 / 登录后参与评论 →',
+    commentImageAlt: '评论图片',
     adminBadge: '管理员',
     tiers: {
       free: '非会员',
@@ -262,6 +263,7 @@ const ANNOUNCEMENT_COPY = {
     commentsLoading: 'Loading comments...',
     commentsError: 'Failed to load comments. Please retry or open the workbench.',
     commentsCta: 'Sign up / Sign in to comment →',
+    commentImageAlt: 'Comment image',
     adminBadge: 'Admin',
     tiers: {
       free: 'Free',
@@ -275,6 +277,33 @@ const ANNOUNCEMENT_COPY = {
       maintenance: 'Maintenance'
     }
   }
+}
+
+const COMMENT_IMAGE_PATH_RE = /^\/user-api\/announcements\/comment-images\/[a-zA-Z0-9-]+$/
+
+export function safeCommentImageSrc(rawUrl) {
+  if (typeof rawUrl !== 'string') return null
+  const trimmed = rawUrl.trim()
+  if (!trimmed || trimmed.includes('..')) return null
+  if (COMMENT_IMAGE_PATH_RE.test(trimmed)) {
+    return `${OPTIMIZER_URL}${trimmed}`
+  }
+  try {
+    const parsed = new URL(trimmed)
+    if (
+      parsed.origin === OPTIMIZER_URL &&
+      !parsed.search &&
+      !parsed.hash &&
+      !parsed.username &&
+      !parsed.password &&
+      COMMENT_IMAGE_PATH_RE.test(parsed.pathname)
+    ) {
+      return `${OPTIMIZER_URL}${parsed.pathname}`
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 function normalizeCommentCount(raw) {
@@ -310,23 +339,24 @@ function resolveCommentBadge(comment, copy) {
 export function renderAnnouncementCommentsHtml(comments, locale = 'zh-CN') {
   const copy = ANNOUNCEMENT_COPY[locale] ?? ANNOUNCEMENT_COPY['zh-CN']
   const list = Array.isArray(comments)
-    ? comments.filter(
-        (entry) =>
-          entry &&
-          typeof entry === 'object' &&
-          typeof entry.username === 'string' &&
-          entry.username.trim() &&
-          typeof entry.content === 'string' &&
-          entry.content.trim()
-      )
+    ? comments
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') return null
+          const username = typeof entry.username === 'string' ? entry.username.trim() : ''
+          if (!username) return null
+          const content = typeof entry.content === 'string' ? entry.content : ''
+          const imgSrc = safeCommentImageSrc(entry.imageUrl)
+          if (!content.trim() && !imgSrc) return null
+          return { entry, username, content, imgSrc }
+        })
+        .filter(Boolean)
     : []
 
   const bodyHtml =
     list.length === 0
       ? `<p class="site-announcement-comments__empty">${escapeHtml(copy.commentsEmpty)}</p>`
       : `<ul class="site-announcement-comments__list">${list
-          .map((entry) => {
-            const username = entry.username.trim()
+          .map(({ entry, username, content, imgSrc }) => {
             const badge = resolveCommentBadge(entry, copy)
             const timeStr = formatCommentTime(entry.createdAt)
             return `
@@ -336,7 +366,8 @@ export function renderAnnouncementCommentsHtml(comments, locale = 'zh-CN') {
                   <span class="site-announcement-comments__badge site-announcement-comments__badge--${escapeHtml(badge.modifier)}">${escapeHtml(badge.label)}</span>
                   ${timeStr ? `<span class="site-announcement-comments__time">${escapeHtml(timeStr)}</span>` : ''}
                 </div>
-                <p class="site-announcement-comments__body">${escapeHtml(entry.content)}</p>
+                ${content.trim() ? `<p class="site-announcement-comment__text">${escapeHtml(content)}</p>` : ''}
+                ${imgSrc ? `<a class="site-announcement-comment__img-link" href="${escapeHtml(imgSrc)}" target="_blank" rel="noopener noreferrer"><img class="site-announcement-comment__img" src="${escapeHtml(imgSrc)}" loading="lazy" alt="${escapeHtml(copy.commentImageAlt)}" /></a>` : ''}
               </li>
             `.trim()
           })

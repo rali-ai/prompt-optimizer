@@ -59,6 +59,7 @@ import {
 
 const MAX_AUTH_BODY_BYTES = 16 * 1024;
 const MAX_ADMIN_BODY_BYTES = 64 * 1024;
+const MAX_COMMENT_BODY_BYTES = 3 * 1024 * 1024;
 const MAX_AI_PROXY_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_SYNC_BODY_BYTES = MAX_SYNC_BYTES + 256 * 1024;
 const EXTENSION_ORIGIN_REGEX = /^(chrome|moz)-extension:\/\/[a-zA-Z0-9._-]+$/;
@@ -67,6 +68,9 @@ const PUBLIC_ANNOUNCEMENT_ALLOWED_ORIGINS = new Set([
   'https://www.goprmpt.com',
 ]);
 const PUBLIC_ANNOUNCEMENT_COMMENTS_PATH_REGEX = /^\/user-api\/announcements\/[^/]+\/comments$/;
+const PUBLIC_ANNOUNCEMENT_COMMENT_IMAGE_PATH_REGEX =
+  /^\/user-api\/announcements\/comment-images\/[^/]+$/;
+const COMMENT_IMAGE_ID_REGEX = /^[a-zA-Z0-9-]+$/;
 
 function getAllowedExtensionOrigin(req) {
   const origin = req.headers.origin;
@@ -96,18 +100,26 @@ function applyExtensionCors(req, res) {
 }
 
 function applyPublicAnnouncementCors(req, res, pathname, method) {
+  const isCommentImagePath = PUBLIC_ANNOUNCEMENT_COMMENT_IMAGE_PATH_REGEX.test(pathname);
   const isPublicAnnouncementPath =
     pathname === '/user-api/announcements/active' ||
     PUBLIC_ANNOUNCEMENT_COMMENTS_PATH_REGEX.test(pathname);
-  if (!isPublicAnnouncementPath) return false;
-  if (method !== 'GET' && method !== 'OPTIONS') return false;
+  if (!isPublicAnnouncementPath && !isCommentImagePath) return false;
+  if (isCommentImagePath) {
+    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') return false;
+  } else if (method !== 'GET' && method !== 'OPTIONS') {
+    return false;
+  }
   const origin = req.headers.origin;
   if (typeof origin !== 'string' || !PUBLIC_ANNOUNCEMENT_ALLOWED_ORIGINS.has(origin)) {
     return false;
   }
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Methods',
+    isCommentImagePath ? 'GET, HEAD, OPTIONS' : 'GET, OPTIONS',
+  );
   res.setHeader('Access-Control-Allow-Headers', 'Accept');
   res.setHeader('Access-Control-Max-Age', '86400');
   return true;
@@ -458,6 +470,48 @@ export function createApp(config, options = {}) {
       return sendJson(res, 200, { announcements: db.listActiveAnnouncements() });
     }
 
+    const announcementCommentImageMatch = pathname.match(
+      /^\/user-api\/announcements\/comment-images\/([^/]+)$/,
+    );
+    if ((method === 'GET' || method === 'HEAD') && announcementCommentImageMatch) {
+      const imageId = announcementCommentImageMatch[1];
+      const sendImageNotFound = () => {
+        if (method === 'HEAD') {
+          res.writeHead(404, { 'Cache-Control': 'no-store' });
+          res.end();
+          return;
+        }
+        return sendJson(res, 404, { error: '图片不存在' });
+      };
+      if (!COMMENT_IMAGE_ID_REGEX.test(imageId)) {
+        return sendImageNotFound();
+      }
+      const row = db.findAnnouncementCommentImageById(imageId);
+      if (!row) {
+        return sendImageNotFound();
+      }
+      const userRow = authenticate(req);
+      const isAdminCaller = Boolean(userRow && !userRow.disabled && userRow.role === 'admin');
+      const isParentActive = isAnnouncementCurrentlyActive({
+        isActive: Boolean(row.is_active),
+        expiresAt: row.expires_at ?? null,
+      });
+      if (!isAdminCaller && !isParentActive) {
+        return sendImageNotFound();
+      }
+      const buf = Buffer.from(row.data);
+      res.writeHead(200, {
+        'Content-Type': row.mime_type,
+        'Content-Length': buf.length,
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'; sandbox",
+        'Cross-Origin-Resource-Policy': 'cross-origin',
+      });
+      res.end(method === 'HEAD' ? undefined : buf);
+      return;
+    }
+
     const announcementCommentsMatch = pathname.match(
       /^\/user-api\/announcements\/([^/]+)\/comments$/,
     );
@@ -497,12 +551,13 @@ export function createApp(config, options = {}) {
       if (!announcement || !isAnnouncementCurrentlyActive(announcement)) {
         return sendJson(res, 404, { error: '公告不存在或已下线' });
       }
-      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
-      const { content } = parseCreateCommentInput(body);
+      const body = await readJsonBody(req, MAX_COMMENT_BODY_BYTES);
+      const input = parseCreateCommentInput(body);
       const comment = db.createAnnouncementComment({
         announcementId: id,
         userId: userRow.id,
-        content,
+        content: input.content,
+        image: input.image,
       });
       return sendJson(res, 201, {
         comment,

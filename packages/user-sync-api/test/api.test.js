@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { createApp } from '../src/server.js';
+import {
+  ALLOWED_COMMENT_IMAGE_MIMES,
+  MAX_COMMENT_IMAGE_BYTES,
+  detectImageMimeByMagic,
+} from '../src/announcements.js';
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'user-sync-api-test-'));
@@ -3606,5 +3611,328 @@ test('platform model quota failover, cooldown skip, single credit charge, ledger
   } finally {
     await app.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('announcement comments emoji roundtrip, 2MB image-only validation/serving, security headers, CORS, cascade delete, and admin thumb UI', async () => {
+  assert.equal(MAX_COMMENT_IMAGE_BYTES, 2 * 1024 * 1024);
+  assert.deepEqual(ALLOWED_COMMENT_IMAGE_MIMES, [
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+  ]);
+
+  const pngBytes = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  ]);
+  const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+  const gifBytes = Buffer.concat([Buffer.from('GIF89a', 'ascii'), Buffer.from([0x01, 0x00, 0x01, 0x00])]);
+  const webpBytes = Buffer.concat([
+    Buffer.from('RIFF', 'ascii'),
+    Buffer.from([0x10, 0x00, 0x00, 0x00]),
+    Buffer.from('WEBP', 'ascii'),
+    Buffer.from('VP8 ', 'ascii'),
+  ]);
+  const svgBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  const pdfBytes = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n');
+  const plainTextBytes = Buffer.from('not actually a png image');
+
+  assert.equal(detectImageMimeByMagic(pngBytes), 'image/png');
+  assert.equal(detectImageMimeByMagic(jpegBytes), 'image/jpeg');
+  assert.equal(detectImageMimeByMagic(gifBytes), 'image/gif');
+  assert.equal(detectImageMimeByMagic(webpBytes), 'image/webp');
+  assert.equal(detectImageMimeByMagic(svgBytes), null);
+  assert.equal(detectImageMimeByMagic(pdfBytes), null);
+  assert.equal(detectImageMimeByMagic(plainTextBytes), null);
+  assert.equal(detectImageMimeByMagic(Buffer.alloc(0)), null);
+
+  const ctx = await startTestApp({ RATE_LIMIT_MAX: '200' });
+  try {
+    const adminLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    const userReg = await fetch(`${ctx.baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'emoji_img_user', password: 'Password123!' }),
+    });
+    assert.equal(userReg.status, 201);
+    const userCookie = extractCookieHeader(userReg);
+
+    const createAnn = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '支持表情与图片附件',
+        content: '欢迎使用 Emoji 和图片评论反馈。',
+        isActive: true,
+      }),
+    });
+    assert.equal(createAnn.status, 201);
+    const { announcement: ann } = await createAnn.json();
+
+    // 1. Emoji text comment roundtrips intact
+    const emojiText = '太赞了 🎉🔥👍\n支持多行与组合表情 🚀👨‍👩‍👧‍👦';
+    const emojiRes = await fetch(`${ctx.baseUrl}/user-api/announcements/${ann.id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ content: emojiText }),
+    });
+    assert.equal(emojiRes.status, 201);
+    const emojiBody = await emojiRes.json();
+    assert.equal(emojiBody.comment.content, emojiText);
+    assert.equal(emojiBody.comment.imageId, null);
+    assert.equal(emojiBody.comment.imageUrl, null);
+    assert.equal(emojiBody.comment.imageMime, null);
+    assert.equal(emojiBody.comment.imageSize, null);
+
+    // 2. Valid PNG + text via dataUrl
+    const pngPostRes = await fetch(`${ctx.baseUrl}/user-api/announcements/${ann.id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        content: '附带截图 📸',
+        image: { dataUrl: `data:image/png;base64,${pngBytes.toString('base64')}` },
+      }),
+    });
+    assert.equal(pngPostRes.status, 201);
+    const { comment: pngComment } = await pngPostRes.json();
+    assert.equal(pngComment.content, '附带截图 📸');
+    assert.ok(pngComment.imageId);
+    assert.equal(pngComment.imageUrl, `/user-api/announcements/comment-images/${pngComment.imageId}`);
+    assert.equal(pngComment.imageMime, 'image/png');
+    assert.equal(pngComment.imageSize, pngBytes.length);
+
+    // GET imageUrl returns exact bytes + strict security headers + public CORS
+    const pngGetRes = await fetch(`${ctx.baseUrl}${pngComment.imageUrl}`, {
+      headers: { Origin: 'https://goprmpt.com' },
+    });
+    assert.equal(pngGetRes.status, 200);
+    assert.equal(pngGetRes.headers.get('content-type'), 'image/png');
+    assert.equal(pngGetRes.headers.get('content-length'), String(pngBytes.length));
+    assert.equal(pngGetRes.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    assert.equal(pngGetRes.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(
+      pngGetRes.headers.get('content-security-policy'),
+      "default-src 'none'; sandbox",
+    );
+    assert.equal(pngGetRes.headers.get('cross-origin-resource-policy'), 'cross-origin');
+    assert.equal(pngGetRes.headers.get('access-control-allow-origin'), 'https://goprmpt.com');
+    const fetchedPng = Buffer.from(await pngGetRes.arrayBuffer());
+    assert.equal(Buffer.compare(fetchedPng, pngBytes), 0);
+
+    // HEAD & OPTIONS CORS on comment image route
+    const imgHeadRes = await fetch(`${ctx.baseUrl}${pngComment.imageUrl}`, {
+      method: 'HEAD',
+      headers: { Origin: 'https://www.goprmpt.com' },
+    });
+    assert.equal(imgHeadRes.status, 200);
+    assert.equal(imgHeadRes.headers.get('content-type'), 'image/png');
+    assert.equal(imgHeadRes.headers.get('content-length'), String(pngBytes.length));
+    assert.equal(imgHeadRes.headers.get('access-control-allow-origin'), 'https://www.goprmpt.com');
+    assert.equal((await imgHeadRes.arrayBuffer()).byteLength, 0);
+
+    const imgOptionsRes = await fetch(`${ctx.baseUrl}${pngComment.imageUrl}`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://goprmpt.com' },
+    });
+    assert.equal(imgOptionsRes.status, 204);
+    assert.equal(imgOptionsRes.headers.get('access-control-allow-origin'), 'https://goprmpt.com');
+    assert.equal(imgOptionsRes.headers.get('access-control-allow-methods'), 'GET, HEAD, OPTIONS');
+
+    const imgEvilOrigin = await fetch(`${ctx.baseUrl}${pngComment.imageUrl}`, {
+      headers: { Origin: 'https://evil.example' },
+    });
+    assert.equal(imgEvilOrigin.status, 200);
+    assert.equal(imgEvilOrigin.headers.get('access-control-allow-origin'), null);
+
+    // 3. Image-only comments (empty/omitted content) for WebP, JPEG, and GIF
+    const webpRes = await fetch(`${ctx.baseUrl}/user-api/announcements/${ann.id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        content: '',
+        image: { dataUrl: `data:image/webp;base64,${webpBytes.toString('base64')}` },
+      }),
+    });
+    assert.equal(webpRes.status, 201);
+    const { comment: webpComment } = await webpRes.json();
+    assert.equal(webpComment.content, '');
+    assert.equal(webpComment.imageMime, 'image/webp');
+    assert.equal(webpComment.imageSize, webpBytes.length);
+    const fetchedWebp = Buffer.from(
+      await (await fetch(`${ctx.baseUrl}${webpComment.imageUrl}`)).arrayBuffer(),
+    );
+    assert.equal(Buffer.compare(fetchedWebp, webpBytes), 0);
+
+    const jpegRes = await fetch(`${ctx.baseUrl}/user-api/announcements/${ann.id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        image: { base64: jpegBytes.toString('base64'), mimeType: 'image/jpg' },
+      }),
+    });
+    assert.equal(jpegRes.status, 201);
+    const { comment: jpegComment } = await jpegRes.json();
+    assert.equal(jpegComment.content, '');
+    assert.equal(jpegComment.imageMime, 'image/jpeg');
+    const fetchedJpeg = Buffer.from(
+      await (await fetch(`${ctx.baseUrl}${jpegComment.imageUrl}`)).arrayBuffer(),
+    );
+    assert.equal(Buffer.compare(fetchedJpeg, jpegBytes), 0);
+
+    const gifRes = await fetch(`${ctx.baseUrl}/user-api/announcements/${ann.id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        content: '   ',
+        image: { base64: gifBytes.toString('base64') },
+      }),
+    });
+    assert.equal(gifRes.status, 201);
+    const { comment: gifComment } = await gifRes.json();
+    assert.equal(gifComment.content, '');
+    assert.equal(gifComment.imageMime, 'image/gif');
+    const fetchedGif = Buffer.from(
+      await (await fetch(`${ctx.baseUrl}${gifComment.imageUrl}`)).arrayBuffer(),
+    );
+    assert.equal(Buffer.compare(fetchedGif, gifBytes), 0);
+
+    // List endpoint returns emoji text & image metadata without leaking BLOB data
+    const listRes = await fetch(`${ctx.baseUrl}/user-api/announcements/${ann.id}/comments`);
+    assert.equal(listRes.status, 200);
+    const listBody = await listRes.json();
+    assert.equal(listBody.commentCount, 5);
+    assert.equal(
+      listBody.comments.find((c) => c.id === emojiBody.comment.id).content,
+      emojiText,
+    );
+    const listedPng = listBody.comments.find((c) => c.id === pngComment.id);
+    assert.equal(listedPng.imageUrl, pngComment.imageUrl);
+    assert.equal('data' in listedPng, false);
+
+    // 4. Reject SVG, fake PNG (plain text), and PDF -> 400
+    for (const [label, imagePayload] of [
+      ['svg dataUrl', { dataUrl: `data:image/svg+xml;base64,${svgBytes.toString('base64')}` }],
+      ['svg raw base64', { base64: svgBytes.toString('base64') }],
+      ['svg disguised as png', { dataUrl: `data:image/png;base64,${svgBytes.toString('base64')}` }],
+      ['fake png plain text', { dataUrl: `data:image/png;base64,${plainTextBytes.toString('base64')}` }],
+      ['pdf dataUrl', { dataUrl: `data:application/pdf;base64,${pdfBytes.toString('base64')}` }],
+      ['pdf disguised as png', { dataUrl: `data:image/png;base64,${pdfBytes.toString('base64')}` }],
+      ['empty dataUrl', { dataUrl: 'data:image/png;base64,' }],
+      ['non-object image', 'not-an-object'],
+    ]) {
+      const badRes = await fetch(`${ctx.baseUrl}/user-api/announcements/${ann.id}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+        body: JSON.stringify({ content: '测试拦截', image: imagePayload }),
+      });
+      assert.equal(badRes.status, 400, `expected 400 for ${label}`);
+    }
+
+    // 5. Boundary checks: exact 2MB succeeds (201), 2MB + 1 byte -> 413
+    const exact2MbPng = Buffer.alloc(MAX_COMMENT_IMAGE_BYTES);
+    pngBytes.copy(exact2MbPng, 0);
+    const exact2MbRes = await fetch(`${ctx.baseUrl}/user-api/announcements/${ann.id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        image: { dataUrl: `data:image/png;base64,${exact2MbPng.toString('base64')}` },
+      }),
+    });
+    assert.equal(exact2MbRes.status, 201);
+    const { comment: exact2MbComment } = await exact2MbRes.json();
+    assert.equal(exact2MbComment.imageSize, MAX_COMMENT_IMAGE_BYTES);
+
+    const over2MbPng = Buffer.alloc(MAX_COMMENT_IMAGE_BYTES + 1);
+    pngBytes.copy(over2MbPng, 0);
+    const over2MbRes = await fetch(`${ctx.baseUrl}/user-api/announcements/${ann.id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        image: { dataUrl: `data:image/png;base64,${over2MbPng.toString('base64')}` },
+      }),
+    });
+    assert.equal(over2MbRes.status, 413);
+
+    // 6. Invalid imageId -> 404; inactive parent hides image from public/non-admin (404) but allows admin (200)
+    const badIdGet = await fetch(`${ctx.baseUrl}/user-api/announcements/comment-images/bad.id!`);
+    assert.equal(badIdGet.status, 404);
+    const badIdHead = await fetch(`${ctx.baseUrl}/user-api/announcements/comment-images/bad.id!`, {
+      method: 'HEAD',
+    });
+    assert.equal(badIdHead.status, 404);
+
+    await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${ann.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ isActive: false }),
+    });
+    assert.equal((await fetch(`${ctx.baseUrl}${pngComment.imageUrl}`)).status, 404);
+    assert.equal(
+      (await fetch(`${ctx.baseUrl}${pngComment.imageUrl}`, { headers: { Cookie: userCookie } })).status,
+      404,
+    );
+    assert.equal(
+      (await fetch(`${ctx.baseUrl}${pngComment.imageUrl}`, { headers: { Cookie: adminCookie } })).status,
+      200,
+    );
+    await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${ann.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ isActive: true }),
+    });
+
+    // 7. Deleting comment cascades and removes image (GET imageUrl -> 404)
+    const delPngComment = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${ann.id}/comments/${pngComment.id}`,
+      { method: 'DELETE', headers: { Cookie: userCookie } },
+    );
+    assert.equal(delPngComment.status, 200);
+    const afterDelImg = await fetch(`${ctx.baseUrl}${pngComment.imageUrl}`);
+    assert.equal(afterDelImg.status, 404);
+    const afterDelAdminImg = await fetch(`${ctx.baseUrl}${pngComment.imageUrl}`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(afterDelAdminImg.status, 404);
+    assert.equal(
+      ctx.app.db.raw
+        .prepare('SELECT COUNT(*) AS c FROM announcement_comment_images WHERE id = ?')
+        .get(pngComment.imageId).c,
+      0,
+    );
+
+    // Deleting parent announcement cascades remaining comment images too
+    const delAnn = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${ann.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(delAnn.status, 200);
+    assert.equal((await fetch(`${ctx.baseUrl}${webpComment.imageUrl}`)).status, 404);
+    assert.equal(
+      ctx.app.db.raw.prepare('SELECT COUNT(*) AS c FROM announcement_comment_images').get().c,
+      0,
+    );
+
+    // 8. Admin HTML includes thumbnail class, safe image URL check, zero em dashes, and valid inline JS
+    const adminHtmlRes = await fetch(`${ctx.baseUrl}/user-api/admin`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(adminHtmlRes.status, 200);
+    const html = await adminHtmlRes.text();
+    assert.match(html, /\.ann-comment-thumb/);
+    assert.match(html, /isSafeCommentImageUrl/);
+    assert.match(html, /评论图片附件/);
+    assert.equal(html.includes('—'), false, 'admin UI copy should not contain em dashes');
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    assert.ok(scriptMatch);
+    assert.doesNotThrow(() => new Function(scriptMatch[1]), 'admin inline script should parse cleanly');
+  } finally {
+    await ctx.cleanup();
   }
 });

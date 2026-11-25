@@ -653,6 +653,182 @@ describe('AnnouncementBar interactive comments', () => {
       window.removeEventListener('goprmpt:open-account-panel', openPanelHandler)
     }
   })
+
+  it('supports emoji picker insertion, validates SVG/>2MB images, submits image-only comment, and opens/closes lightbox', async () => {
+    const postPayloads: Array<{ content?: string; image?: { dataUrl: string } | null }> = []
+    const commentsState: Array<Record<string, unknown>> = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method || 'GET'
+        if (url.endsWith('/announcements/active')) {
+          return jsonResponse({
+            announcements: [
+              {
+                id: 'ann-media',
+                title: '评论支持表情与截图',
+                content: '欢迎测试图片评论',
+                type: 'notice',
+                linkUrl: null,
+                linkText: null,
+                isActive: true,
+                isPinned: true,
+                expiresAt: null,
+                commentCount: commentsState.length,
+                createdAt: 1750000000000,
+                updatedAt: 1750000000000,
+              },
+            ],
+          })
+        }
+        if (url.endsWith('/me')) {
+          return jsonResponse({
+            user: {
+              id: 'u-bob',
+              username: 'bob',
+              role: 'user',
+              tier: 'standard',
+              effectiveTier: 'standard',
+              tierExpiresAt: null,
+              disabled: false,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          })
+        }
+        if (url.endsWith('/announcements/ann-media/comments') && method === 'GET') {
+          return jsonResponse({ comments: [...commentsState], commentCount: commentsState.length })
+        }
+        if (url.endsWith('/announcements/ann-media/comments') && method === 'POST') {
+          const body = JSON.parse(String(init?.body || '{}')) as {
+            content?: string
+            image?: { dataUrl: string } | null
+          }
+          postPayloads.push(body)
+          const created = {
+            id: 'c-img-1',
+            announcementId: 'ann-media',
+            userId: 'u-bob',
+            username: 'bob',
+            role: 'user',
+            tier: 'standard',
+            effectiveTier: 'standard',
+            content: body.content ?? '',
+            imageId: body.image ? 'img-777' : null,
+            imageUrl: body.image ? '/user-api/announcements/comment-images/img-777' : null,
+            imageMime: body.image ? 'image/png' : null,
+            imageSize: body.image ? 68 : null,
+            createdAt: 1750000100000,
+          }
+          commentsState.unshift(created)
+          return jsonResponse({ comment: created, commentCount: commentsState.length }, 201)
+        }
+        return jsonResponse({}, 404)
+      }),
+    )
+
+    const setInputFile = (inputEl: HTMLInputElement, file: File) => {
+      Object.defineProperty(inputEl, 'files', {
+        value: [file],
+        configurable: true,
+      })
+      inputEl.dispatchEvent(new Event('change'))
+    }
+
+    const wrapper = mount(AnnouncementBar, { props: { mode: 'banner' } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="announcement-banner-comments-btn"]').trigger('click')
+    await flushPromises()
+
+    // 1. Emoji picker toggles and inserts selected emoji into draft
+    expect(wrapper.find('[data-testid="announcement-comment-emoji-picker"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="announcement-comment-emoji-btn"]').trigger('click')
+    const picker = wrapper.get('[data-testid="announcement-comment-emoji-picker"]')
+    const emojiButtons = picker.findAll('button')
+    expect(emojiButtons).toHaveLength(24)
+
+    await wrapper.get('[data-testid="announcement-comment-input"]').setValue('很好用')
+    await emojiButtons[5].trigger('click') // 👍
+    await flushPromises()
+    expect((wrapper.get('[data-testid="announcement-comment-input"]').element as HTMLTextAreaElement).value).toBe('很好用👍')
+    expect(wrapper.find('[data-testid="announcement-comment-emoji-picker"]').exists()).toBe(false)
+
+    // Clear draft so we can also test image-only submit later
+    await wrapper.get('[data-testid="announcement-comment-input"]').setValue('')
+
+    const fileInputEl = wrapper.get('[data-testid="announcement-comment-file-input"]').element as HTMLInputElement
+
+    // 2. Reject SVG file without calling submit
+    const svgFile = new File(['<svg xmlns="http://www.w3.org/2000/svg"></svg>'], 'bad.svg', {
+      type: 'image/svg+xml',
+    })
+    setInputFile(fileInputEl, svgFile)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="announcement-comment-error"]').text()).toContain('SVG')
+    expect(wrapper.find('[data-testid="announcement-comment-image-preview"]').exists()).toBe(false)
+    expect(postPayloads).toHaveLength(0)
+
+    // 3. Reject >2MB image file without calling submit
+    const oversizedFile = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'huge.png', {
+      type: 'image/png',
+    })
+    setInputFile(fileInputEl, oversizedFile)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="announcement-comment-error"]').text()).toContain('2MB')
+    expect(wrapper.find('[data-testid="announcement-comment-image-preview"]').exists()).toBe(false)
+    expect(postPayloads).toHaveLength(0)
+
+    // 4. Attach valid PNG (<2MB), verify preview, submit image-only comment, and open/close lightbox
+    const validPngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13])
+    const validPng = new File([validPngBytes], 'shot.png', { type: 'image/png' })
+    setInputFile(fileInputEl, validPng)
+
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-testid="announcement-comment-image-preview"]').exists()).toBe(true)
+    })
+    expect(wrapper.find('[data-testid="announcement-comment-error"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="announcement-comment-image-preview"]').text()).toContain('shot.png')
+
+    const submitBtn = wrapper.get('[data-testid="announcement-comment-submit"]')
+    expect((submitBtn.element as HTMLButtonElement).disabled).toBe(false)
+    await submitBtn.trigger('click')
+    await flushPromises()
+
+    expect(postPayloads).toHaveLength(1)
+    expect(postPayloads[0].content).toBe('')
+    expect(postPayloads[0].image?.dataUrl).toMatch(/^data:image\/png;base64,/)
+    expect(wrapper.find('[data-testid="announcement-comment-image-preview"]').exists()).toBe(false)
+
+    // Returned comment renders thumbnail without empty text <p>
+    const item = wrapper.get('[data-testid="announcement-comment-item"]')
+    expect(item.find('.gp-ann-comment-item__content').exists()).toBe(false)
+    const imgBtn = item.get('[data-testid="announcement-comment-image"]')
+    expect(imgBtn.get('img').attributes('src')).toBe('/user-api/announcements/comment-images/img-777')
+
+    // Click thumbnail opens lightbox; Escape closes lightbox without collapsing banner
+    await imgBtn.trigger('click')
+    const lightbox = wrapper.get('[data-testid="announcement-comment-lightbox"]')
+    expect(lightbox.get('img').attributes('src')).toBe('/user-api/announcements/comment-images/img-777')
+    expect(lightbox.get('[data-testid="announcement-comment-lightbox-open"]').attributes('href')).toBe(
+      '/user-api/announcements/comment-images/img-777',
+    )
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="announcement-comment-lightbox"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="announcement-banner-expanded"]').exists()).toBe(true)
+
+    // Re-open and close via close button
+    await imgBtn.trigger('click')
+    expect(wrapper.find('[data-testid="announcement-comment-lightbox"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="announcement-comment-lightbox-close"]').trigger('click')
+    expect(wrapper.find('[data-testid="announcement-comment-lightbox"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
 })
 
 describe('SiliconFlow featured promotion across text and image model managers', () => {

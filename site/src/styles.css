@@ -486,13 +486,33 @@ html[data-theme='dark'] .site-announcement-comments__badge--internal {
   font-variant-numeric: tabular-nums;
 }
 
-.site-announcement-comments__body {
+.site-announcement-comments__body,
+.site-announcement-comment__text {
   margin: 0;
   font-size: 0.82rem;
   line-height: 1.55;
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.site-announcement-comment__img-link {
+  display: inline-block;
+}
+
+.site-announcement-comment__img {
+  max-width: 180px;
+  max-height: 130px;
+  border-radius: 10px;
+  border: 1px solid var(--border, var(--line));
+  object-fit: cover;
+  display: block;
+  margin-top: 6px;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+
+.site-announcement-comment__img-link:hover .site-announcement-comment__img {
+  border-color: var(--accent);
 }
 
 .site-announcement-comments__empty,

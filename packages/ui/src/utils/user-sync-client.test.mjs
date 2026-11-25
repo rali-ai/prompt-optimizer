@@ -1,7 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  ALLOWED_COMMENT_IMAGE_MIMES,
   EXTENSION_SYNC_BASE_URL,
+  MAX_COMMENT_IMAGE_BYTES,
   UserSyncError,
   announcementDismissKey,
   changePassword,
@@ -23,12 +25,14 @@ import {
   pushSync,
   register,
   requestPasswordReset,
+  resolveCommentImageUrl,
   resolveDefaultSyncBaseUrl,
   resolvePlatformAiBaseUrl,
   safeAnnouncementUrl,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
   updateProfile,
+  validateCommentImageFile,
 } from './user-sync-client.ts'
 
 function jsonResponse(body, status = 200) {
@@ -769,6 +773,10 @@ test('announcement comments client lists, creates, deletes, normalizes fields, a
     tier: 'internal',
     effectiveTier: 'internal',
     content: '欢迎留言反馈！',
+    imageId: null,
+    imageUrl: null,
+    imageMime: null,
+    imageSize: null,
     createdAt: 1750000002000,
   })
   assert.equal(listRes.comments[1].role, 'user')
@@ -802,4 +810,217 @@ test('announcement comments client lists, creates, deletes, normalizes fields, a
       body: { content: 'guest' },
     },
   ])
+})
+
+test('validateCommentImageFile enforces allowed image mimes, rejects SVG/PDF/empty, and caps at 2MB', () => {
+  assert.equal(MAX_COMMENT_IMAGE_BYTES, 2 * 1024 * 1024)
+  assert.deepEqual(ALLOWED_COMMENT_IMAGE_MIMES, [
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+  ])
+
+  for (const mime of ALLOWED_COMMENT_IMAGE_MIMES) {
+    assert.deepEqual(validateCommentImageFile({ type: mime, size: 1024, name: 'photo.img' }), {
+      ok: true,
+    })
+  }
+  assert.deepEqual(
+    validateCommentImageFile({ type: 'image/png', size: MAX_COMMENT_IMAGE_BYTES, name: 'exact.png' }),
+    { ok: true },
+  )
+
+  const svgMime = validateCommentImageFile({ type: 'image/svg+xml', size: 512, name: 'icon.svg' })
+  assert.equal(svgMime.ok, false)
+  assert.match(svgMime.error, /SVG/)
+
+  const svgSpoofed = validateCommentImageFile({ type: 'image/png', size: 512, name: 'evil.SVG' }, true)
+  assert.equal(svgSpoofed.ok, false)
+  assert.match(svgSpoofed.error, /SVG/)
+
+  const pdfFile = validateCommentImageFile({ type: 'application/pdf', size: 1024, name: 'doc.pdf' })
+  assert.equal(pdfFile.ok, false)
+  assert.match(pdfFile.error, /PNG/)
+
+  const emptyFile = validateCommentImageFile({ type: 'image/png', size: 0, name: 'empty.png' })
+  assert.equal(emptyFile.ok, false)
+
+  const oversizedZh = validateCommentImageFile({
+    type: 'image/jpeg',
+    size: MAX_COMMENT_IMAGE_BYTES + 1,
+    name: 'huge.jpg',
+  })
+  assert.equal(oversizedZh.ok, false)
+  assert.match(oversizedZh.error, /2MB/)
+
+  const oversizedEn = validateCommentImageFile(
+    { type: 'image/webp', size: MAX_COMMENT_IMAGE_BYTES + 10, name: 'huge.webp' },
+    true,
+  )
+  assert.equal(oversizedEn.ok, false)
+  assert.match(oversizedEn.error, /2MB/)
+})
+
+test('resolveCommentImageUrl validates paths, resolves extension baseUrl, and rejects unsafe URLs', () => {
+  assert.equal(
+    resolveCommentImageUrl('/user-api/announcements/comment-images/img-abc123'),
+    '/user-api/announcements/comment-images/img-abc123',
+  )
+  assert.equal(
+    resolveCommentImageUrl('/user-api/announcements/comment-images/img-abc123', '/user-api'),
+    '/user-api/announcements/comment-images/img-abc123',
+  )
+  assert.equal(
+    resolveCommentImageUrl('/user-api/announcements/comment-images/img-abc123', EXTENSION_SYNC_BASE_URL),
+    'https://goprmpt.net/user-api/announcements/comment-images/img-abc123',
+  )
+  assert.equal(
+    resolveCommentImageUrl('https://goprmpt.net/user-api/announcements/comment-images/img-99'),
+    'https://goprmpt.net/user-api/announcements/comment-images/img-99',
+  )
+  assert.equal(
+    resolveCommentImageUrl(
+      'https://staging.example.com/user-api/announcements/comment-images/img-42',
+      'https://staging.example.com/user-api',
+    ),
+    'https://staging.example.com/user-api/announcements/comment-images/img-42',
+  )
+
+  const unsafeInputs = [
+    'javascript:alert(1)',
+    'data:image/png;base64,iVBORw0KGgo=',
+    'https://evil.com/user-api/announcements/comment-images/img-1',
+    'http://goprmpt.net/user-api/announcements/comment-images/img-1',
+    '//goprmpt.net/user-api/announcements/comment-images/img-1',
+    '/user-api/announcements/comment-images/img-1?token=leak',
+    '/user-api/announcements/comment-images/img-1#frag',
+    '/user-api/announcements/comment-images/../secret',
+    'https://goprmpt.net/user-api/announcements/comment-images/a/../b',
+    '/other/path/img-1',
+    '',
+    null,
+    undefined,
+    42,
+  ]
+  for (const bad of unsafeInputs) {
+    assert.equal(resolveCommentImageUrl(bad), null, `expected null for ${String(bad)}`)
+  }
+})
+
+test('createAnnouncementComment and getAnnouncementComments support image payloads and extension URL resolution', async () => {
+  const calls = []
+  const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  const queue = [
+    jsonResponse(
+      {
+        comment: {
+          id: 'c-img-1',
+          announcementId: 'ann-1',
+          userId: 'u-1',
+          username: 'alice',
+          role: 'user',
+          tier: 'pro',
+          effectiveTier: 'pro',
+          content: '',
+          imageId: 'img-101',
+          imageUrl: '/user-api/announcements/comment-images/img-101',
+          imageMime: 'image/png',
+          imageSize: 68,
+          createdAt: 1750000100000,
+        },
+        commentCount: 1,
+      },
+      201,
+    ),
+    jsonResponse({
+      comments: [
+        {
+          id: 'c-img-1',
+          announcementId: 'ann-1',
+          userId: 'u-1',
+          username: 'alice',
+          role: 'user',
+          tier: 'pro',
+          effectiveTier: 'pro',
+          content: '',
+          imageId: 'img-101',
+          imageUrl: '/user-api/announcements/comment-images/img-101',
+          imageMime: 'image/png',
+          imageSize: 68,
+          createdAt: 1750000100000,
+        },
+        {
+          id: 'c-bad-img',
+          announcementId: 'ann-1',
+          userId: 'u-2',
+          username: 'mallory',
+          role: 'user',
+          tier: 'free',
+          effectiveTier: 'free',
+          content: '附带恶意图片应被剥离',
+          imageId: 'evil-1',
+          imageUrl: 'javascript:alert(1)',
+          imageMime: 'image/png',
+          imageSize: 100,
+          createdAt: 1750000090000,
+        },
+        {
+          id: 'c-only-bad-img',
+          announcementId: 'ann-1',
+          userId: 'u-2',
+          username: 'mallory',
+          role: 'user',
+          tier: 'free',
+          effectiveTier: 'free',
+          content: '   ',
+          imageId: 'evil-2',
+          imageUrl: 'https://evil.example/x.png',
+          imageMime: 'image/png',
+          imageSize: 100,
+          createdAt: 1750000080000,
+        },
+      ],
+      commentCount: 2,
+    }),
+  ]
+
+  const fetchMock = async (url, init) => {
+    calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    return queue.shift()
+  }
+
+  const created = await createAnnouncementComment(
+    'ann-1',
+    { content: '', image: { dataUrl } },
+    EXTENSION_SYNC_BASE_URL,
+    fetchMock,
+  )
+  assert.equal(created.commentCount, 1)
+  assert.equal(created.comment.content, '')
+  assert.equal(created.comment.imageId, 'img-101')
+  assert.equal(
+    created.comment.imageUrl,
+    'https://goprmpt.net/user-api/announcements/comment-images/img-101',
+  )
+  assert.equal(created.comment.imageMime, 'image/png')
+  assert.equal(created.comment.imageSize, 68)
+
+  const listed = await getAnnouncementComments('ann-1', EXTENSION_SYNC_BASE_URL, fetchMock)
+  assert.equal(listed.comments.length, 2)
+  assert.equal(
+    listed.comments[0].imageUrl,
+    'https://goprmpt.net/user-api/announcements/comment-images/img-101',
+  )
+  assert.equal(listed.comments[1].id, 'c-bad-img')
+  assert.equal(listed.comments[1].imageUrl, null)
+  assert.equal(listed.comments[1].imageId, null)
+  assert.equal(listed.comments[1].imageMime, null)
+  assert.equal(listed.comments[1].imageSize, null)
+
+  assert.deepEqual(calls[0], {
+    url: `${EXTENSION_SYNC_BASE_URL}/announcements/ann-1/comments`,
+    method: 'POST',
+    body: { content: '', image: { dataUrl } },
+  })
 })

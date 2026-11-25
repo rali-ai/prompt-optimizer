@@ -121,6 +121,19 @@ export interface ActiveAnnouncement {
   updatedAt: number
 }
 
+export const MAX_COMMENT_IMAGE_BYTES = 2 * 1024 * 1024
+
+export const ALLOWED_COMMENT_IMAGE_MIMES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+] as const
+
+export interface AnnouncementCommentImageInput {
+  dataUrl: string
+}
+
 export interface AnnouncementComment {
   id: string
   announcementId: string
@@ -130,6 +143,10 @@ export interface AnnouncementComment {
   tier: MembershipTier
   effectiveTier: MembershipTier
   content: string
+  imageId: string | null
+  imageUrl: string | null
+  imageMime: string | null
+  imageSize: number | null
   createdAt: number
 }
 
@@ -596,17 +613,114 @@ export async function getActiveAnnouncements(
   return items
 }
 
-function normalizeAnnouncementComment(raw: unknown): AnnouncementComment | null {
+const TRUSTED_COMMENT_IMAGE_ORIGIN = new URL(EXTENSION_SYNC_BASE_URL).origin
+const COMMENT_IMAGE_PATH_RE = /^\/user-api\/announcements\/comment-images\/[a-zA-Z0-9-]+$/
+const ALLOWED_COMMENT_IMAGE_MIME_SET = new Set<string>(ALLOWED_COMMENT_IMAGE_MIMES)
+
+function parseAbsoluteHttpOrigin(raw?: string): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!trimmed || !/^https?:\/\//i.test(trimmed)) return null
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    return parsed.origin
+  } catch {
+    return null
+  }
+}
+
+export function resolveCommentImageUrl(rawUrl: unknown, baseUrl?: string): string | null {
+  if (typeof rawUrl !== 'string') return null
+  const trimmed = rawUrl.trim()
+  if (!trimmed || trimmed.includes('..')) return null
+
+  const baseOrigin = parseAbsoluteHttpOrigin(baseUrl)
+
+  if (COMMENT_IMAGE_PATH_RE.test(trimmed)) {
+    return baseOrigin ? `${baseOrigin}${trimmed}` : trimmed
+  }
+
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    if (parsed.search || parsed.hash || parsed.username || parsed.password) return null
+    if (!COMMENT_IMAGE_PATH_RE.test(parsed.pathname)) return null
+    const isTrustedOrigin =
+      parsed.origin === TRUSTED_COMMENT_IMAGE_ORIGIN ||
+      (baseOrigin !== null && parsed.origin === baseOrigin)
+    if (!isTrustedOrigin) return null
+    return `${parsed.origin}${parsed.pathname}`
+  } catch {
+    return null
+  }
+}
+
+export function validateCommentImageFile(
+  file: { type?: string; size: number; name?: string },
+  isEn = false,
+): { ok: true } | { ok: false; error: string } {
+  const mime = typeof file?.type === 'string' ? file.type.trim().toLowerCase() : ''
+  const name = typeof file?.name === 'string' ? file.name.trim().toLowerCase() : ''
+  const size = typeof file?.size === 'number' ? file.size : NaN
+
+  if (mime === 'image/svg+xml' || /\.svgz?$/i.test(name)) {
+    return {
+      ok: false,
+      error: isEn
+        ? 'SVG files are not supported. Only PNG, JPG, WebP, and GIF images are allowed.'
+        : '不支持 SVG 文件，仅支持 PNG、JPG、WebP、GIF 图片',
+    }
+  }
+
+  if (!ALLOWED_COMMENT_IMAGE_MIME_SET.has(mime)) {
+    return {
+      ok: false,
+      error: isEn
+        ? 'Only PNG, JPG, WebP, and GIF images are supported.'
+        : '仅支持 PNG、JPG、WebP、GIF 图片',
+    }
+  }
+
+  if (!Number.isFinite(size) || size <= 0) {
+    return {
+      ok: false,
+      error: isEn ? 'Image file is empty.' : '图片文件为空，请重新选择',
+    }
+  }
+
+  if (size > MAX_COMMENT_IMAGE_BYTES) {
+    return {
+      ok: false,
+      error: isEn ? 'Image attachment cannot exceed 2MB.' : '图片附件不能超过 2MB',
+    }
+  }
+
+  return { ok: true }
+}
+
+function normalizeAnnouncementComment(
+  raw: unknown,
+  baseUrl?: string,
+): AnnouncementComment | null {
   if (!isPlainObject(raw)) return null
   const id = typeof raw.id === 'string' ? raw.id.trim() : ''
   const announcementId = typeof raw.announcementId === 'string' ? raw.announcementId.trim() : ''
   const userId = typeof raw.userId === 'string' ? raw.userId.trim() : ''
   const username = typeof raw.username === 'string' ? raw.username.trim() : ''
   const content = typeof raw.content === 'string' ? raw.content : ''
-  if (!id || !announcementId || !username || !content.trim()) return null
+  const imageUrl = resolveCommentImageUrl(raw.imageUrl, baseUrl)
+  if (!id || !announcementId || !username || (!content.trim() && !imageUrl)) return null
   const tier = normalizeMembershipTier(raw.tier)
   const effectiveTier =
     raw.effectiveTier !== undefined ? normalizeMembershipTier(raw.effectiveTier) : tier
+  const rawImageMime = typeof raw.imageMime === 'string' ? raw.imageMime.trim().toLowerCase() : ''
+  const imageMime =
+    imageUrl && ALLOWED_COMMENT_IMAGE_MIME_SET.has(rawImageMime) ? rawImageMime : null
+  const rawImageSize =
+    typeof raw.imageSize === 'number' && Number.isFinite(raw.imageSize) && raw.imageSize > 0
+      ? Math.floor(raw.imageSize)
+      : null
   return {
     id,
     announcementId,
@@ -616,6 +730,10 @@ function normalizeAnnouncementComment(raw: unknown): AnnouncementComment | null 
     tier,
     effectiveTier,
     content,
+    imageId: imageUrl ? normalizeOptionalString(raw.imageId) : null,
+    imageUrl,
+    imageMime,
+    imageSize: imageUrl ? rawImageSize : null,
     createdAt: normalizeFiniteNumber(raw.createdAt, 0),
   }
 }
@@ -637,7 +755,7 @@ export async function getAnnouncementComments(
   const rawComments = isPlainObject(res) && Array.isArray(res.comments) ? res.comments : []
   const comments: AnnouncementComment[] = []
   for (const entry of rawComments) {
-    const normalized = normalizeAnnouncementComment(entry)
+    const normalized = normalizeAnnouncementComment(entry, baseUrl)
     if (normalized) comments.push(normalized)
   }
   const commentCount =
@@ -649,20 +767,31 @@ export async function getAnnouncementComments(
 
 export async function createAnnouncementComment(
   announcementId: string,
-  content: string,
+  input: string | { content?: string; image?: AnnouncementCommentImageInput | null },
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ comment: AnnouncementComment; commentCount: number }> {
   const id = String(announcementId || '').trim()
+  const payload: { content?: string; image?: AnnouncementCommentImageInput } = {}
+  if (typeof input === 'string') {
+    payload.content = input
+  } else if (isPlainObject(input)) {
+    if (typeof input.content === 'string') {
+      payload.content = input.content
+    }
+    if (input.image && typeof input.image.dataUrl === 'string' && input.image.dataUrl.trim()) {
+      payload.image = { dataUrl: input.image.dataUrl.trim() }
+    }
+  }
   const res = await requestJson<{ comment?: unknown; commentCount?: unknown }>(
     joinUrl(baseUrl, `/announcements/${encodeURIComponent(id)}/comments`),
     {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(payload),
     },
     fetchImpl,
   )
-  const comment = normalizeAnnouncementComment(isPlainObject(res) ? res.comment : null)
+  const comment = normalizeAnnouncementComment(isPlainObject(res) ? res.comment : null, baseUrl)
   if (!comment) {
     throw new UserSyncError('评论响应异常', 500)
   }

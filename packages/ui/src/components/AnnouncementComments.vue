@@ -93,7 +93,22 @@
               </button>
             </div>
           </div>
-          <p class="gp-ann-comment-item__content">{{ comment.content }}</p>
+          <p v-if="comment.content" class="gp-ann-comment-item__content">{{ comment.content }}</p>
+          <button
+            v-if="comment.imageUrl"
+            type="button"
+            class="gp-ann-comment-item__img-btn"
+            :aria-label="isEn ? 'Preview comment image' : '查看大图'"
+            data-testid="announcement-comment-image"
+            @click="openImagePreview(comment.imageUrl)"
+          >
+            <img
+              class="gp-ann-comment-item__img"
+              :src="comment.imageUrl"
+              loading="lazy"
+              :alt="isEn ? 'Comment image' : '评论图片'"
+            />
+          </button>
         </li>
       </ul>
 
@@ -103,6 +118,7 @@
 
       <div v-if="currentAuthUser" class="gp-ann-composer" data-testid="announcement-comment-composer">
         <textarea
+          ref="textareaRef"
           v-model="draft"
           class="gp-ann-composer__input"
           :maxlength="MAX_COMMENT_LENGTH"
@@ -111,7 +127,97 @@
           :placeholder="isEn ? 'Write your message or feedback (max 500 chars)...' : '写下你的留言或建议（最多 500 字）...'"
           data-testid="announcement-comment-input"
           @keydown="handleKeydown"
+          @paste="handlePaste"
         />
+
+        <div class="gp-ann-composer__toolbar">
+          <div class="gp-ann-composer__tools">
+            <button
+              type="button"
+              class="gp-ann-composer__tool-btn"
+              :class="{ 'gp-ann-composer__tool-btn--active': emojiPickerOpen }"
+              :aria-expanded="emojiPickerOpen"
+              :disabled="submitting"
+              data-testid="announcement-comment-emoji-btn"
+              @click="toggleEmojiPicker"
+            >
+              <NIcon :size="13"><Smile :stroke-width="2" /></NIcon>
+              <span>{{ isEn ? 'Emoji' : '表情' }}</span>
+            </button>
+
+            <button
+              type="button"
+              class="gp-ann-composer__tool-btn"
+              :disabled="submitting || readingImage"
+              data-testid="announcement-comment-image-btn"
+              @click="openFilePicker"
+            >
+              <NIcon :size="13"><ImagePlus :stroke-width="2" /></NIcon>
+              <span>{{ readingImage ? (isEn ? 'Reading...' : '读取中...') : (isEn ? 'Image' : '图片') }}</span>
+            </button>
+
+            <input
+              ref="fileInputRef"
+              type="file"
+              class="gp-ann-composer__file-input"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              data-testid="announcement-comment-file-input"
+              @change="handleFileInputChange"
+            />
+          </div>
+
+          <span class="gp-ann-composer__image-hint">
+            {{ isEn ? 'PNG/JPG/WebP/GIF, ≤ 2MB' : '支持 PNG/JPG/WebP/GIF，≤ 2MB' }}
+          </span>
+        </div>
+
+        <div
+          v-if="emojiPickerOpen"
+          class="gp-ann-emoji-picker"
+          role="listbox"
+          :aria-label="isEn ? 'Select emoji' : '选择表情'"
+          data-testid="announcement-comment-emoji-picker"
+        >
+          <button
+            v-for="emoji in COMMENT_EMOJIS"
+            :key="emoji"
+            type="button"
+            class="gp-ann-emoji-picker__item"
+            :title="emoji"
+            :aria-label="emoji"
+            @click="insertEmoji(emoji)"
+          >
+            {{ emoji }}
+          </button>
+        </div>
+
+        <div
+          v-if="pendingImage"
+          class="gp-ann-image-preview"
+          data-testid="announcement-comment-image-preview"
+        >
+          <img
+            class="gp-ann-image-preview__thumb"
+            :src="pendingImage.dataUrl"
+            :alt="pendingImage.name"
+          />
+          <div class="gp-ann-image-preview__meta">
+            <span class="gp-ann-image-preview__name" :title="pendingImage.name">{{ pendingImage.name }}</span>
+            <span class="gp-ann-image-preview__size">{{ formatFileSize(pendingImage.size) }}</span>
+          </div>
+          <button
+            type="button"
+            class="gp-ann-image-preview__remove"
+            :disabled="submitting"
+            :aria-label="isEn ? 'Remove image' : '移除图片'"
+            data-testid="announcement-comment-image-remove"
+            @click="clearPendingImage"
+          >
+            <NIcon :size="12"><X :stroke-width="2" /></NIcon>
+            <span>{{ isEn ? 'Remove' : '移除' }}</span>
+          </button>
+        </div>
+
         <div class="gp-ann-composer__foot">
           <span class="gp-ann-composer__counter">
             {{ draft.length }} / {{ MAX_COMMENT_LENGTH }}
@@ -122,7 +228,7 @@
           <button
             type="button"
             class="gp-ann-composer__submit"
-            :disabled="submitting || !draft.trim()"
+            :disabled="submitting || readingImage || (!draft.trim() && !pendingImage)"
             data-testid="announcement-comment-submit"
             @click="handleSubmit"
           >
@@ -145,17 +251,82 @@
         </button>
       </div>
     </div>
+
+    <div
+      v-if="previewImageUrl"
+      class="gp-ann-lightbox"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="isEn ? 'Image preview' : '图片预览'"
+      data-testid="announcement-comment-lightbox"
+      @click.self="closeImagePreview"
+    >
+      <div class="gp-ann-lightbox__panel">
+        <div class="gp-ann-lightbox__bar">
+          <a
+            class="gp-ann-lightbox__open"
+            :href="previewImageUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="announcement-comment-lightbox-open"
+          >
+            <NIcon :size="13"><ExternalLink :stroke-width="2" /></NIcon>
+            <span>{{ isEn ? 'Open in new tab' : '新标签页打开' }}</span>
+          </a>
+          <button
+            type="button"
+            class="gp-ann-lightbox__close"
+            :aria-label="isEn ? 'Close preview' : '关闭预览'"
+            data-testid="announcement-comment-lightbox-close"
+            @click="closeImagePreview"
+          >
+            <NIcon :size="15"><X :stroke-width="2" /></NIcon>
+          </button>
+        </div>
+        <img
+          class="gp-ann-lightbox__img"
+          :src="previewImageUrl"
+          :alt="isEn ? 'Comment image preview' : '评论图片预览'"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
-import { ChevronDown, ChevronUp, MessageSquare, RefreshCw } from '@lucide/vue'
+import {
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  ImagePlus,
+  MessageSquare,
+  RefreshCw,
+  Smile,
+  X,
+} from '@lucide/vue'
 import { formatTierLabel } from '../composables/model/usePlatformModelCatalog'
-import type { AnnouncementComment, SyncUser } from '../utils/user-sync-client'
+import {
+  validateCommentImageFile,
+  type AnnouncementComment,
+  type AnnouncementCommentImageInput,
+  type SyncUser,
+} from '../utils/user-sync-client'
 
 const MAX_COMMENT_LENGTH = 500
+const COMMENT_EMOJIS = [
+  '😀', '😄', '😂', '🥰', '🤔', '👍', '👏', '🔥',
+  '🎉', '💡', '❤️', '🚀', '✨', '🙏', '💯', '🎯',
+  '📌', '⚡', '🌟', '🥳', '🤝', '👌', '😅', '😭',
+] as const
+
+interface PendingCommentImage {
+  dataUrl: string
+  name: string
+  size: number
+  mime: string
+}
 
 const props = withDefaults(
   defineProps<{
@@ -169,7 +340,10 @@ const props = withDefaults(
     collapsible?: boolean
     expanded?: boolean
     compact?: boolean
-    onSubmitComment: (announcementId: string, content: string) => Promise<void>
+    onSubmitComment: (
+      announcementId: string,
+      payload: { content: string; image?: AnnouncementCommentImageInput | null },
+    ) => Promise<void>
     onDeleteComment: (announcementId: string, commentId: string) => Promise<void>
   }>(),
   {
@@ -188,10 +362,19 @@ const emit = defineEmits<{
   'open-auth': []
 }>()
 
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 const draft = ref('')
 const submitting = ref(false)
+const readingImage = ref(false)
 const deletingId = ref<string | null>(null)
 const actionError = ref<string | null>(null)
+const emojiPickerOpen = ref(false)
+const pendingImage = ref<PendingCommentImage | null>(null)
+const previewImageUrl = ref<string | null>(null)
+
+let activeReadToken = 0
+let keydownBound = false
 
 const headerTitle = computed(() => {
   const count = Math.max(0, props.commentCount)
@@ -221,16 +404,196 @@ function formatCommentTime(ts: number): string {
   return `${mm}-${dd} ${hh}:${min}`
 }
 
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
 function canDelete(comment: AnnouncementComment): boolean {
   const user = props.currentAuthUser
   if (!user) return false
   return user.role === 'admin' || user.id === comment.userId
 }
 
-async function handleSubmit(): Promise<void> {
+function resetFileInput(): void {
+  if (fileInputRef.value) {
+    fileInputRef.value.value = ''
+  }
+}
+
+function clearPendingImage(): void {
+  activeReadToken += 1
+  readingImage.value = false
+  pendingImage.value = null
+  resetFileInput()
+}
+
+function toggleEmojiPicker(): void {
   if (submitting.value) return
+  emojiPickerOpen.value = !emojiPickerOpen.value
+}
+
+function insertEmoji(emoji: string): void {
+  if (submitting.value) return
+  const el = textareaRef.value
+  const current = draft.value
+  const start = el && typeof el.selectionStart === 'number' ? el.selectionStart : current.length
+  const end = el && typeof el.selectionEnd === 'number' ? el.selectionEnd : start
+  const next = current.slice(0, start) + emoji + current.slice(end)
+  if (next.length > MAX_COMMENT_LENGTH) {
+    actionError.value = props.isEn
+      ? `Comment cannot exceed ${MAX_COMMENT_LENGTH} characters`
+      : `评论内容不能超过 ${MAX_COMMENT_LENGTH} 字`
+    return
+  }
+  actionError.value = null
+  draft.value = next
+  emojiPickerOpen.value = false
+  const cursorPos = start + emoji.length
+  void nextTick(() => {
+    if (textareaRef.value) {
+      textareaRef.value.focus()
+      try {
+        textareaRef.value.setSelectionRange(cursorPos, cursorPos)
+      } catch {
+        // Ignore environments where setSelectionRange is unavailable
+      }
+    }
+  })
+}
+
+function openFilePicker(): void {
+  if (submitting.value || readingImage.value) return
+  resetFileInput()
+  fileInputRef.value?.click()
+}
+
+function attachImageFile(file: File): void {
+  const validation = validateCommentImageFile(file, props.isEn)
+  if (!validation.ok) {
+    actionError.value = validation.error
+    resetFileInput()
+    return
+  }
+
+  const token = ++activeReadToken
+  readingImage.value = true
+  actionError.value = null
+
+  const reader = new FileReader()
+  reader.onload = () => {
+    if (token !== activeReadToken) return
+    readingImage.value = false
+    resetFileInput()
+    if (typeof reader.result === 'string' && reader.result.startsWith('data:')) {
+      pendingImage.value = {
+        dataUrl: reader.result,
+        name: file.name || (props.isEn ? 'image' : '图片'),
+        size: file.size,
+        mime: file.type,
+      }
+    } else {
+      actionError.value = props.isEn ? 'Failed to read image file' : '图片读取失败，请重新选择'
+    }
+  }
+  reader.onerror = () => {
+    if (token !== activeReadToken) return
+    readingImage.value = false
+    resetFileInput()
+    actionError.value = props.isEn ? 'Failed to read image file' : '图片读取失败，请重新选择'
+  }
+  reader.readAsDataURL(file)
+}
+
+function handleFileInputChange(event: Event): void {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) return
+  attachImageFile(file)
+}
+
+function handlePaste(event: ClipboardEvent): void {
+  if (submitting.value || readingImage.value) return
+  const clipboard = event.clipboardData
+  if (!clipboard) return
+
+  let pastedFile: File | null = null
+  if (clipboard.items && clipboard.items.length > 0) {
+    for (const item of Array.from(clipboard.items)) {
+      if (item.kind === 'file') {
+        const candidate = item.getAsFile()
+        if (candidate && (candidate.type.startsWith('image/') || /\.svgz?$/i.test(candidate.name))) {
+          pastedFile = candidate
+          break
+        }
+      }
+    }
+  }
+  if (!pastedFile && clipboard.files && clipboard.files.length > 0) {
+    for (const candidate of Array.from(clipboard.files)) {
+      if (candidate.type.startsWith('image/') || /\.svgz?$/i.test(candidate.name)) {
+        pastedFile = candidate
+        break
+      }
+    }
+  }
+  if (!pastedFile) return
+  event.preventDefault()
+  attachImageFile(pastedFile)
+}
+
+function openImagePreview(url: string): void {
+  previewImageUrl.value = url
+}
+
+function closeImagePreview(): void {
+  previewImageUrl.value = null
+}
+
+function handleGlobalKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  if (previewImageUrl.value) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    previewImageUrl.value = null
+    return
+  }
+  if (emojiPickerOpen.value) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    emojiPickerOpen.value = false
+  }
+}
+
+function syncGlobalKeydownListener(active: boolean): void {
+  if (typeof window === 'undefined') return
+  if (active && !keydownBound) {
+    window.addEventListener('keydown', handleGlobalKeydown, true)
+    keydownBound = true
+  } else if (!active && keydownBound) {
+    window.removeEventListener('keydown', handleGlobalKeydown, true)
+    keydownBound = false
+  }
+}
+
+watch(
+  () => Boolean(previewImageUrl.value || emojiPickerOpen.value),
+  (active) => {
+    syncGlobalKeydownListener(active)
+  },
+)
+
+onBeforeUnmount(() => {
+  syncGlobalKeydownListener(false)
+})
+
+async function handleSubmit(): Promise<void> {
+  if (submitting.value || readingImage.value) return
   const content = draft.value.trim()
-  if (!content) return
+  const image = pendingImage.value ? { dataUrl: pendingImage.value.dataUrl } : null
+  if (!content && !image) return
   if (content.length > MAX_COMMENT_LENGTH) {
     actionError.value = props.isEn
       ? `Comment cannot exceed ${MAX_COMMENT_LENGTH} characters`
@@ -240,8 +603,13 @@ async function handleSubmit(): Promise<void> {
   submitting.value = true
   actionError.value = null
   try {
-    await props.onSubmitComment(props.announcementId, content)
+    await props.onSubmitComment(
+      props.announcementId,
+      image ? { content, image } : { content },
+    )
     draft.value = ''
+    clearPendingImage()
+    emojiPickerOpen.value = false
   } catch (err) {
     actionError.value = err instanceof Error && err.message
       ? err.message
@@ -530,9 +898,39 @@ html.dark .gp-ann-comment-badge--pro,
   word-break: break-word;
 }
 
+.gp-ann-comment-item__img-btn {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 0;
+  border: 1px solid var(--gp-border, rgba(24, 24, 27, 0.12));
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--gp-surface-muted, #F7F5EE);
+  cursor: zoom-in;
+  line-height: 0;
+  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.gp-ann-comment-item__img-btn:hover {
+  border-color: var(--gp-accent, #0F766E);
+  box-shadow: 0 4px 12px -4px rgba(15, 118, 110, 0.25);
+}
+
+.gp-ann-comment-item__img {
+  display: block;
+  max-width: 180px;
+  max-height: 130px;
+  object-fit: cover;
+}
+
 .gp-ann-comments__error {
   font-size: 11.5px;
   color: #DC2626;
+}
+
+html.dark .gp-ann-comments__error,
+:root[data-workspace-theme="dark"] .gp-ann-comments__error {
+  color: #F87171;
 }
 
 .gp-ann-composer {
@@ -561,6 +959,245 @@ html.dark .gp-ann-comment-badge--pro,
   outline: none;
   border-color: var(--gp-accent, #0F766E);
   box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.14);
+}
+
+.gp-ann-composer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gp-ann-composer__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gp-ann-composer__tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--gp-border, rgba(24, 24, 27, 0.12));
+  background: var(--gp-surface, #FFFFFF);
+  color: var(--gp-muted, #52525B);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.gp-ann-composer__tool-btn:hover:not(:disabled),
+.gp-ann-composer__tool-btn--active {
+  color: var(--gp-accent, #0F766E);
+  border-color: var(--gp-border-strong, rgba(15, 118, 110, 0.36));
+  background: var(--gp-accent-soft, rgba(15, 118, 110, 0.08));
+}
+
+.gp-ann-composer__tool-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.gp-ann-composer__file-input {
+  display: none;
+}
+
+.gp-ann-composer__image-hint {
+  font-size: 10.5px;
+  color: var(--gp-muted, #52525B);
+  opacity: 0.85;
+}
+
+.gp-ann-emoji-picker {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--gp-border, rgba(24, 24, 27, 0.12));
+  background: var(--gp-surface, #FFFFFF);
+  box-shadow: 0 8px 20px -8px rgba(24, 24, 27, 0.14);
+}
+
+html.dark .gp-ann-emoji-picker,
+:root[data-workspace-theme="dark"] .gp-ann-emoji-picker {
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.55);
+}
+
+.gp-ann-emoji-picker__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.gp-ann-emoji-picker__item:hover {
+  background: var(--gp-accent-soft, rgba(15, 118, 110, 0.10));
+  transform: scale(1.1);
+}
+
+.gp-ann-image-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--gp-border-strong, rgba(15, 118, 110, 0.28));
+  background: var(--gp-surface, #FFFFFF);
+}
+
+.gp-ann-image-preview__thumb {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--gp-border, rgba(24, 24, 27, 0.10));
+}
+
+.gp-ann-image-preview__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.gp-ann-image-preview__name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gp-ink, #18181B);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gp-ann-image-preview__size {
+  font-size: 10.5px;
+  color: var(--gp-muted, #52525B);
+  font-variant-numeric: tabular-nums;
+}
+
+.gp-ann-image-preview__remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  flex-shrink: 0;
+  border: 1px solid var(--gp-border, rgba(24, 24, 27, 0.12));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gp-muted, #52525B);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.gp-ann-image-preview__remove:hover:not(:disabled) {
+  color: #DC2626;
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.gp-ann-image-preview__remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gp-ann-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(13, 14, 17, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.gp-ann-lightbox__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(92vw, 960px);
+  max-height: 90vh;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #15171C;
+  box-shadow: 0 24px 64px -12px rgba(0, 0, 0, 0.72);
+}
+
+.gp-ann-lightbox__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gp-ann-lightbox__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #F4F4F5;
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.gp-ann-lightbox__open:hover {
+  background: rgba(20, 184, 166, 0.24);
+  border-color: rgba(20, 184, 166, 0.5);
+  color: #5EEAD4;
+}
+
+.gp-ann-lightbox__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #F4F4F5;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.gp-ann-lightbox__close:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.gp-ann-lightbox__img {
+  display: block;
+  max-width: min(88vw, 920px);
+  max-height: calc(90vh - 64px);
+  border-radius: 8px;
+  object-fit: contain;
+  background: #0D0E11;
 }
 
 .gp-ann-composer__foot {
@@ -637,9 +1274,17 @@ html.dark .gp-ann-comment-badge--pro,
   color: #FAF9F5;
 }
 
+.gp-ann-comments--compact .gp-ann-emoji-picker {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 @media (max-width: 640px) {
   .gp-ann-composer__hint {
     display: none;
+  }
+
+  .gp-ann-emoji-picker {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 </style>

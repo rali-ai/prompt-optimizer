@@ -306,6 +306,7 @@ import {
   safeAnnouncementUrl,
   type ActiveAnnouncement,
   type AnnouncementComment,
+  type AnnouncementCommentImageInput,
   type AnnouncementType,
   type SyncUser,
 } from '../utils/user-sync-client'
@@ -593,8 +594,11 @@ function toggleDropdown(): void {
   activeDropdownSource.value = isDropdownOpen.value ? null : props.mode
 }
 
-async function handleSubmitComment(announcementId: string, content: string): Promise<void> {
-  const res = await createAnnouncementComment(announcementId, content, resolveDefaultSyncBaseUrl())
+async function handleSubmitComment(
+  announcementId: string,
+  payload: { content: string; image?: AnnouncementCommentImageInput | null },
+): Promise<void> {
+  const res = await createAnnouncementComment(announcementId, payload, resolveDefaultSyncBaseUrl())
   const existing = sharedCommentsById.value[announcementId] ?? []
   sharedCommentsById.value = {
     ...sharedCommentsById.value,

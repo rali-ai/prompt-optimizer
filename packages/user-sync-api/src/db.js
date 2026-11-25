@@ -317,6 +317,17 @@ export function openDatabase(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS idx_announcement_comments_ann_created
       ON announcement_comments(announcement_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS announcement_comment_images (
+      id TEXT PRIMARY KEY,
+      comment_id TEXT NOT NULL UNIQUE REFERENCES announcement_comments(id) ON DELETE CASCADE,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      data BLOB NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_announcement_comment_images_comment
+      ON announcement_comment_images(comment_id);
   `);
 
   migratePlatformModelsTableIfNeeded(db);
@@ -463,9 +474,13 @@ export function openDatabase(dbPath) {
       u.username,
       u.role,
       u.tier,
-      u.tier_expires_at
+      u.tier_expires_at,
+      ci.id AS image_id,
+      ci.mime_type AS image_mime,
+      ci.size_bytes AS image_size
     FROM announcement_comments c
     JOIN users u ON u.id = c.user_id
+    LEFT JOIN announcement_comment_images ci ON ci.comment_id = c.id
     WHERE c.announcement_id = ?
     ORDER BY c.created_at DESC, c.rowid DESC
     LIMIT ?
@@ -480,9 +495,13 @@ export function openDatabase(dbPath) {
       u.username,
       u.role,
       u.tier,
-      u.tier_expires_at
+      u.tier_expires_at,
+      ci.id AS image_id,
+      ci.mime_type AS image_mime,
+      ci.size_bytes AS image_size
     FROM announcement_comments c
     JOIN users u ON u.id = c.user_id
+    LEFT JOIN announcement_comment_images ci ON ci.comment_id = c.id
     WHERE c.id = ?
   `);
   const stmtCountAnnouncementComments = db.prepare(
@@ -491,6 +510,26 @@ export function openDatabase(dbPath) {
   const stmtInsertAnnouncementComment = db.prepare(`
     INSERT INTO announcement_comments (id, announcement_id, user_id, content, created_at)
     VALUES (?, ?, ?, ?, ?)
+  `);
+  const stmtInsertAnnouncementCommentImage = db.prepare(`
+    INSERT INTO announcement_comment_images (id, comment_id, mime_type, size_bytes, data, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const stmtFindAnnouncementCommentImageById = db.prepare(`
+    SELECT
+      ci.id,
+      ci.comment_id,
+      c.announcement_id,
+      a.is_active,
+      a.expires_at,
+      ci.mime_type,
+      ci.size_bytes,
+      ci.data,
+      ci.created_at
+    FROM announcement_comment_images ci
+    JOIN announcement_comments c ON c.id = ci.comment_id
+    JOIN announcements a ON a.id = c.announcement_id
+    WHERE ci.id = ?
   `);
   const stmtFindAnnouncementCommentById = db.prepare(
     'SELECT id, announcement_id, user_id, content, created_at FROM announcement_comments WHERE id = ?',
@@ -1131,11 +1170,39 @@ export function openDatabase(dbPath) {
       return Number(row?.count ?? 0);
     },
 
-    createAnnouncementComment({ announcementId, userId, content }) {
+    createAnnouncementComment({ announcementId, userId, content, image = null }) {
       const now = Date.now();
       const id = crypto.randomUUID();
-      stmtInsertAnnouncementComment.run(id, announcementId, userId, content, now);
-      return serializeAnnouncementComment(stmtFindAnnouncementCommentWithUser.get(id), now);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        stmtInsertAnnouncementComment.run(id, announcementId, userId, content, now);
+        if (image) {
+          const imageId = crypto.randomUUID();
+          stmtInsertAnnouncementCommentImage.run(
+            imageId,
+            id,
+            image.mimeType,
+            image.sizeBytes,
+            image.data,
+            now,
+          );
+        }
+        const row = stmtFindAnnouncementCommentWithUser.get(id);
+        db.exec('COMMIT');
+        return serializeAnnouncementComment(row, now);
+      } catch (err) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          // ignore rollback error
+        }
+        throw err;
+      }
+    },
+
+    findAnnouncementCommentImageById(imageId) {
+      if (!imageId) return null;
+      return stmtFindAnnouncementCommentImageById.get(imageId) || null;
     },
 
     findAnnouncementCommentById(commentId) {

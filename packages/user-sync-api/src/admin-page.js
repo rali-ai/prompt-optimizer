@@ -759,6 +759,13 @@ export function renderAdminHtml({
         return typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'));
       }
 
+      function isSafeCommentImageUrl(url) {
+        return (
+          typeof url === 'string' &&
+          /^\\/user-api\\/announcements\\/comment-images\\/[a-zA-Z0-9-]+$/.test(url)
+        );
+      }
+
       function getTierInfo(tier) {
         return TIER_META_MAP[tier] || TIER_META_MAP.free;
       }
@@ -1284,6 +1291,12 @@ export function renderAdminHtml({
         }
         annCommentsListEl.innerHTML = comments.map((c) => {
           const adminTag = c.role === 'admin' ? ' <span class="badge badge-admin">管理员</span>' : '';
+          const bodyHtml = c.content
+            ? '<div class="ann-comment-body">' + esc(c.content) + '</div>'
+            : '';
+          const thumbHtml = isSafeCommentImageUrl(c.imageUrl)
+            ? '<a href="' + esc(c.imageUrl) + '" target="_blank" rel="noopener noreferrer"><img src="' + esc(c.imageUrl) + '" alt="评论图片附件" class="ann-comment-thumb" /></a>'
+            : '';
           return '<div class="ann-comment-item">' +
             '<div class="ann-comment-head">' +
               '<div class="ann-comment-meta">' +
@@ -1294,7 +1307,8 @@ export function renderAdminHtml({
               '</div>' +
               '<button class="btn btn-sm btn-danger" type="button" data-comment-del="1" data-comment-id="' + esc(c.id) + '" data-comment-user="' + esc(c.username) + '">删除</button>' +
             '</div>' +
-            '<div class="ann-comment-body">' + esc(c.content) + '</div>' +
+            bodyHtml +
+            thumbHtml +
           '</div>';
         }).join('');
       }
@@ -2947,6 +2961,15 @@ export function renderAdminHtml({
       color: var(--ink);
       white-space: pre-wrap;
       word-break: break-word;
+    }
+    .ann-comment-thumb {
+      max-width: 140px;
+      max-height: 100px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      margin-top: 6px;
+      object-fit: cover;
+      display: block;
     }
     @media (max-width: 900px) {
       .announcement-form-row, .announcement-link-row { grid-template-columns: 1fr; }

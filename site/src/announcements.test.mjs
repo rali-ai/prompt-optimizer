@@ -6,7 +6,8 @@ import {
   ANNOUNCEMENT_COMMENTS_API_BASE,
   pickVisibleAnnouncement,
   renderAnnouncementBannerHtml,
-  renderAnnouncementCommentsHtml
+  renderAnnouncementCommentsHtml,
+  safeCommentImageSrc
 } from './shell.js'
 
 const NOW = 1_750_000_000_000
@@ -283,4 +284,106 @@ test('renderAnnouncementCommentsHtml renders bilingual states, badges, CTA link,
   assert.match(enHtml, /Comments \(2\)/)
   assert.match(enHtml, /site-announcement-comments__badge--admin">Admin<\/span>/)
   assert.match(enHtml, /site-announcement-comments__badge--pro">Pro<\/span>/)
+})
+
+test('safeCommentImageSrc allows only goprmpt.net comment-images paths and rejects unsafe URLs', () => {
+  assert.equal(
+    safeCommentImageSrc('/user-api/announcements/comment-images/img-abc123'),
+    'https://goprmpt.net/user-api/announcements/comment-images/img-abc123'
+  )
+  assert.equal(
+    safeCommentImageSrc('https://goprmpt.net/user-api/announcements/comment-images/img-99'),
+    'https://goprmpt.net/user-api/announcements/comment-images/img-99'
+  )
+
+  for (const bad of [
+    'http://goprmpt.net/user-api/announcements/comment-images/img-1',
+    'https://evil.com/user-api/announcements/comment-images/img-1',
+    'https://goprmpt.net/other/path/img-1',
+    'https://goprmpt.net/user-api/announcements/comment-images/img-1?x=1',
+    'https://goprmpt.net/user-api/announcements/comment-images/img-1#hash',
+    'https://goprmpt.net/user-api/announcements/comment-images/a/../b',
+    '/user-api/announcements/comment-images/../secret',
+    'javascript:alert(1)',
+    'data:image/png;base64,AAA',
+    '//goprmpt.net/user-api/announcements/comment-images/img-1',
+    '',
+    null,
+    undefined
+  ]) {
+    assert.equal(safeCommentImageSrc(bad), null, `expected null for ${String(bad)}`)
+  }
+})
+
+test('renderAnnouncementCommentsHtml renders safe image thumbnails, image-only comments, and strips unsafe imageUrl', () => {
+  const comments = [
+    {
+      id: 'c-both',
+      username: 'alice',
+      role: 'user',
+      tier: 'pro',
+      effectiveTier: 'pro',
+      content: '附一张截图 📸',
+      imageUrl: '/user-api/announcements/comment-images/img-100',
+      createdAt: 1750000000000
+    },
+    {
+      id: 'c-img-only',
+      username: 'bob',
+      role: 'user',
+      tier: 'standard',
+      effectiveTier: 'standard',
+      content: '',
+      imageUrl: 'https://goprmpt.net/user-api/announcements/comment-images/img-200',
+      createdAt: 1750000060000
+    },
+    {
+      id: 'c-unsafe-with-text',
+      username: 'charlie',
+      role: 'user',
+      tier: 'free',
+      effectiveTier: 'free',
+      content: '仅保留安全文本',
+      imageUrl: 'https://evil.example/evil.png',
+      createdAt: 1750000120000
+    },
+    {
+      id: 'c-unsafe-only',
+      username: 'mallory',
+      role: 'user',
+      tier: 'free',
+      effectiveTier: 'free',
+      content: '   ',
+      imageUrl: 'javascript:alert(1)',
+      createdAt: 1750000180000
+    }
+  ]
+
+  const zhHtml = renderAnnouncementCommentsHtml(comments, 'zh-CN')
+  assert.match(zhHtml, /评论区 \(3\)/)
+  assert.ok(
+    zhHtml.includes(
+      '<p class="site-announcement-comment__text">附一张截图 📸</p>'
+    )
+  )
+  assert.ok(
+    zhHtml.includes(
+      '<a class="site-announcement-comment__img-link" href="https://goprmpt.net/user-api/announcements/comment-images/img-100" target="_blank" rel="noopener noreferrer"><img class="site-announcement-comment__img" src="https://goprmpt.net/user-api/announcements/comment-images/img-100" loading="lazy" alt="评论图片" /></a>'
+    )
+  )
+  assert.ok(
+    zhHtml.includes(
+      '<a class="site-announcement-comment__img-link" href="https://goprmpt.net/user-api/announcements/comment-images/img-200" target="_blank" rel="noopener noreferrer"><img class="site-announcement-comment__img" src="https://goprmpt.net/user-api/announcements/comment-images/img-200" loading="lazy" alt="评论图片" /></a>'
+    )
+  )
+  // Image-only comment renders without an empty text <p>
+  assert.equal((zhHtml.match(/class="site-announcement-comment__text"/g) || []).length, 2)
+  assert.equal((zhHtml.match(/class="site-announcement-comment__img"/g) || []).length, 2)
+  assert.equal(zhHtml.includes('evil.example'), false)
+  assert.equal(zhHtml.includes('javascript:'), false)
+  assert.equal(zhHtml.includes('mallory'), false)
+
+  const enHtml = renderAnnouncementCommentsHtml(comments, 'en')
+  assert.match(enHtml, /Comments \(3\)/)
+  assert.ok(enHtml.includes('alt="Comment image"'))
 })
