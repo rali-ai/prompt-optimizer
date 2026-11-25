@@ -317,16 +317,17 @@ describe('image model editor with the real save controller', () => {
     state.useRealManager = true
     state.compact.value = compact
     const provider = {
-      id: 'openai', name: 'OpenAI', supportsDynamicModels: false,
+      id: 'seedream', name: 'Seedream', supportsDynamicModels: false,
       connectionSchema: { required: ['apiKey'], optional: [], fieldTypes: { apiKey: 'string' } },
     }
     const model = {
-      id: 'image-model-a', providerId: 'openai', name: 'Image model A',
+      id: 'image-model-a', providerId: 'seedream', name: 'Image model A',
       capabilities: { text2image: true }, parameterDefinitions: [], defaultParameterValues: {},
     }
+    const domesticDraft = () => ({ ...draft(), providerId: 'seedream' })
     const persist = vi.fn().mockRejectedValueOnce(new Error('storage unavailable')).mockResolvedValue(undefined)
     const manager = {
-      getAllConfigs: vi.fn().mockResolvedValue([draft()]),
+      getAllConfigs: vi.fn().mockResolvedValue([domesticDraft()]),
       addConfig: editing ? vi.fn() : persist,
       updateConfig: editing ? persist : vi.fn(),
     }
@@ -335,7 +336,7 @@ describe('image model editor with the real save controller', () => {
       getAdapter: () => ({ buildDefaultModel: () => model }), supportsDynamicModels: () => false,
     }
     const wrapper = shallowMount(ImageModelEditModal, {
-      props: { show: false, ...(editing ? { configId: 'image-a' } : { initialConfig: { ...draft(), provider, model } as any }) },
+      props: { show: false, ...(editing ? { configId: 'image-a' } : { initialConfig: { ...domesticDraft(), provider, model } as any }) },
       global: {
         renderStubDefaultSlot: true, stubs,
         provide: { imageRegistry: registry, imageModelManager: manager, imageService: {} },

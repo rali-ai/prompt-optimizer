@@ -28,6 +28,12 @@ import { useModelAdvancedParameters } from './useModelAdvancedParameters'
 import { computeConnectionConfig } from './useConnectionConfig'
 import type { AppServices } from '../../types/services'
 import { hasDiscoveredService, isChromeBuiltInPlaceholder, normalizeLocalServiceAddress, type DiscoveredLocalService } from '../../utils/local-model-discovery'
+import {
+  filterDomesticProviders,
+  isPlatformModelId,
+  mergePresetDefaultParams,
+} from '../../utils/domestic-models'
+import { usePlatformModelCatalog } from './usePlatformModelCatalog'
 
 type CustomHeaderRow = { key?: unknown; name?: unknown; value?: unknown }
 type TextConnectionValue = string | number | boolean | Record<string, string> | CustomHeaderRow[] | undefined
@@ -95,11 +101,16 @@ export function useTextModelManager() {
     throw new Error('textAdapterRegistry not provided!')
   }
 
+  const catalog = usePlatformModelCatalog()
+
   const models = ref<TextModelConfig[]>([])
   const loadingModels = ref(false)
   const testingConnections = ref<Record<string, boolean>>({})
 
-  const providers = ref<TextProvider[]>([])
+  const allProviders = ref<TextProvider[]>([])
+  const providers = computed<TextProvider[]>(() =>
+    filterDomesticProviders(allProviders.value, catalog.presetsByProviderId.value)
+  )
   const providersLoaded = ref(false)
   const isLoadingProviders = ref(false)
 
@@ -155,7 +166,7 @@ export function useTextModelManager() {
 
   const selectedProvider = computed(() => {
     if (!form.value.providerId) return null
-    return providers.value.find(p => p.id === form.value.providerId) || null
+    return allProviders.value.find(p => p.id === form.value.providerId) || null
   })
 
   // 简化后的接口:直接传入必要的参数
@@ -263,7 +274,25 @@ export function useTextModelManager() {
   const modalTitle = computed(() => (editingModelId.value ? t('modelManager.editModel') : t('modelManager.addModel')))
 
   const isDefaultModel = (id: string) => {
-    return getBuiltinModelIds().includes(id)
+    return getBuiltinModelIds().includes(id) || isPlatformModelId(id)
+  }
+
+  const applyDefaultsWithPreset = (mergeWithExisting = false) => {
+    const currentBefore = mergeWithExisting ? { ...(form.value.paramOverrides || {}) } : {}
+    advancedParameters.applyDefaultsFromModel(mergeWithExisting)
+    const mergedWithPreset = mergePresetDefaultParams(
+      form.value.providerId,
+      form.value.paramOverrides,
+      catalog.presetsByProviderId.value,
+    )
+    if (mergeWithExisting) {
+      for (const key of Object.keys(currentBefore)) {
+        if (currentBefore[key] !== undefined) {
+          mergedWithPreset[key] = currentBefore[key]
+        }
+      }
+    }
+    form.value.paramOverrides = mergedWithPreset
   }
 
   const getCustomHeaderValidationMessage = () => {
@@ -336,12 +365,13 @@ export function useTextModelManager() {
     if (providersLoaded.value) return
     isLoadingProviders.value = true
     try {
-      providers.value = textAdapterRegistry?.getAllProviders?.() || []
+      await catalog.loadModelPresets()
+      allProviders.value = textAdapterRegistry?.getAllProviders?.() || []
       providersLoaded.value = true
     } catch (error) {
       console.error('Failed to load text model providers:', error)
       toast.error(t('modelManager.loadFailed'))
-      providers.value = []
+      allProviders.value = []
     } finally {
       isLoadingProviders.value = false
     }
@@ -380,7 +410,7 @@ export function useTextModelManager() {
   const getEditableIdentity = (model: TextModelConfig) => {
     const providerId = model.providerId ?? model.providerMeta?.id ?? ''
     const modelId = model.modelId ?? model.modelMeta?.id ?? ''
-    const providerExists = providers.value.some(provider => provider.id === providerId)
+    const providerExists = allProviders.value.some(provider => provider.id === providerId)
 
     if (isUnknownIdentity(providerId) || isUnknownIdentity(modelId) || !providerExists) {
       return { providerId: '', modelId: '' }
@@ -451,11 +481,24 @@ export function useTextModelManager() {
     loadingModels.value = true
     try {
       const all = await modelManager.getAllModels()
+      const platformMetaMap = catalog.platformMetaByConfigId.value
       models.value = all
         .map((model: TextModelConfig) => ({ ...model }))
         .sort((a: TextModelConfig, b: TextModelConfig) => {
           if (a.enabled !== b.enabled) {
             return a.enabled ? -1 : 1
+          }
+          const aPlatform = isPlatformModelId(a.id)
+          const bPlatform = isPlatformModelId(b.id)
+          if (aPlatform !== bPlatform) {
+            return aPlatform ? -1 : 1
+          }
+          if (aPlatform && bPlatform) {
+            const aOrder = platformMetaMap.get(a.id)?.sortOrder ?? 0
+            const bOrder = platformMetaMap.get(b.id)?.sortOrder ?? 0
+            if (aOrder !== bOrder) {
+              return aOrder - bOrder
+            }
           }
           const aDefault = isDefaultModel(a.id)
           const bDefault = isDefaultModel(b.id)
@@ -530,6 +573,7 @@ export function useTextModelManager() {
   }
 
   const prepareForClone = async (id: string) => {
+    if (isPlatformModelId(id)) return
     try {
       const model = await modelManager.getModel(id)
       if (!model) throw new Error(t('modelManager.noModelsAvailable'))
@@ -573,6 +617,7 @@ export function useTextModelManager() {
   }
 
   const deleteModel = async (id: string) => {
+    if (isPlatformModelId(id)) return
     try {
       await modelManager.deleteModel(id)
       await loadModels()
@@ -623,7 +668,7 @@ export function useTextModelManager() {
     loadStaticModelsForProvider(providerId)
 
     // 使用共享函数处理连接配置
-    const providerMeta = providers.value.find(p => p.id === providerId)
+    const providerMeta = allProviders.value.find(p => p.id === providerId)
     form.value.connectionConfig = computeConnectionConfig(
       form.value.connectionConfig,
       providerMeta,
@@ -631,17 +676,27 @@ export function useTextModelManager() {
     ) as TextConnectionConfig
 
     if (autoSelectFirstModel && modelOptions.value.length > 0) {
-      const firstModelId = modelOptions.value[0].value
+      const preset = catalog.presetsByProviderId.value.get(providerId.trim().toLowerCase())
+      const presetModelOption = preset?.defaultModelId
+        ? modelOptions.value.find(option => option.value === preset.defaultModelId)
+        : undefined
+      const firstModelId = presetModelOption?.value ?? modelOptions.value[0].value
       form.value.modelId = firstModelId
       form.value.defaultModel = firstModelId
-      // 切换提供商后自动应用第一个模型的默认参数
+      // 切换提供商后自动应用第一个模型的默认参数（并合入后台预设默认参数）
       if (firstModelId && providerId && !repairingMissingProvider) {
-        advancedParameters.applyDefaultsFromModel(false)
+        applyDefaultsWithPreset(false)
       }
     } else if (autoSelectFirstModel && !repairingMissingProvider) {
       // A provider with a dynamic-only catalog must not inherit another provider's model.
       form.value.modelId = ''
       form.value.defaultModel = ''
+      if (shouldResetOverrides) {
+        const presetParams = mergePresetDefaultParams(providerId, {}, catalog.presetsByProviderId.value)
+        if (Object.keys(presetParams).length > 0) {
+          form.value.paramOverrides = presetParams
+        }
+      }
     }
   }
 
@@ -655,9 +710,9 @@ export function useTextModelManager() {
         autoSelectFirstModel: true,
         resetOverrides: true
       })
-      // 创建模式：自动应用第一个模型的默认参数
+      // 创建模式：自动应用第一个模型的默认参数（并合入后台预设默认参数）
       if (form.value.modelId && form.value.providerId) {
-        advancedParameters.applyDefaultsFromModel(false)
+        applyDefaultsWithPreset(false)
       }
     }
 
@@ -710,6 +765,7 @@ export function useTextModelManager() {
   }
 
   const prepareForEdit = async (id: string, forceReload = true) => {
+    if (isPlatformModelId(id)) return
     // 如果已经在编辑同一个模型且不强制重新加载，则跳过
     if (!forceReload && editingModelId.value === id && formReady.value) {
       return
@@ -1160,9 +1216,9 @@ export function useTextModelManager() {
 
     if (modelId && form.value.providerId) {
       // 编辑模式：合并参数（保留用户已有配置）
-      // 创建模式：替换参数（使用新模型的默认值）
+      // 创建模式：替换参数（使用新模型的默认值并合入后台预设参数）
       const isEditing = !!editingModelId.value
-      advancedParameters.applyDefaultsFromModel(isEditing)
+      applyDefaultsWithPreset(isEditing)
     }
   }
 

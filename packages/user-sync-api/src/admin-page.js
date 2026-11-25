@@ -1,4 +1,5 @@
 import { ANNOUNCEMENT_TYPES } from './announcements.js';
+import { DEFAULT_MONTHLY_CREDITS, TIER_META } from './membership.js';
 
 function escapeHtml(text) {
   return String(text ?? '')
@@ -37,6 +38,7 @@ export function renderAdminHtml({
   isAdmin,
   username,
   membershipEnabled,
+  monthlyCredits = DEFAULT_MONTHLY_CREDITS,
   emailResetEnabled = false,
   resendKeyHint = '',
   mailFrom = '高词 · GoPrmpt <noreply@goprmpt.com>',
@@ -44,9 +46,22 @@ export function renderAdminHtml({
   const title = '高词 · GoPrmpt 用户与会员管理后台';
   const enabledFlag = Boolean(membershipEnabled);
   const mailEnabledFlag = Boolean(emailResetEnabled);
+  const credits = {
+    free: Number(monthlyCredits?.free ?? DEFAULT_MONTHLY_CREDITS.free),
+    standard: Number(monthlyCredits?.standard ?? DEFAULT_MONTHLY_CREDITS.standard),
+    pro: Number(monthlyCredits?.pro ?? DEFAULT_MONTHLY_CREDITS.pro),
+    internal: Number(monthlyCredits?.internal ?? DEFAULT_MONTHLY_CREDITS.internal),
+  };
   const statusBadge = enabledFlag
     ? '<span id="topMembershipBadge" class="badge badge-pro">会员体系：已启用</span>'
     : '<span id="topMembershipBadge" class="badge badge-free">会员体系：未启用（全站免费开放）</span>';
+
+  const tierOptionsHtml = Object.values(TIER_META)
+    .map(
+      (item) =>
+        `<option value="${escapeHtml(item.key)}">${escapeHtml(item.label)} (${escapeHtml(item.key)})</option>`,
+    )
+    .join('');
 
   const bodyContent =
     authenticated && isAdmin
@@ -106,34 +121,249 @@ export function renderAdminHtml({
       </div>
 
       <section class="card switch-card" id="membershipCard" data-enabled="${enabledFlag ? '1' : '0'}">
-        <div class="switch-info">
-          <div class="switch-eyebrow">会员体系控制</div>
-          <h2>会员功能总开关</h2>
-          <p id="membershipDesc" class="muted">
-            ${
-              enabledFlag
-                ? '当前已启用会员功能：工作台将向已登录用户展示 Free / Pro 会员等级，并按此处设置的等级与有效期生效。'
-                : '当前未启用会员限制：所有用户均可免费使用全站功能；您仍可提前在下方列表中为用户预置 Pro 会员等级与有效期。'
-            }
-          </p>
-        </div>
-        <div class="switch-controls">
-          <button
-            id="membershipSwitch"
-            type="button"
-            role="switch"
-            aria-checked="${enabledFlag ? 'true' : 'false'}"
-            aria-label="切换会员功能启用状态"
-            class="toggle-switch ${enabledFlag ? 'is-on' : ''}"
-          >
-            <span class="toggle-thumb"></span>
-          </button>
-          <div class="switch-status-block">
-            <strong id="membershipStateLabel">${enabledFlag ? '已启用' : '未启用'}</strong>
-            <button id="membershipActionBtn" type="button" class="btn ${enabledFlag ? '' : 'btn-primary'} btn-sm">
-              ${enabledFlag ? '关闭会员功能' : '启用会员功能'}
-            </button>
+        <div class="switch-top">
+          <div class="switch-info">
+            <div class="switch-eyebrow">会员体系与月度积分控制</div>
+            <h2>会员功能总开关</h2>
+            <p id="membershipDesc" class="muted">
+              ${
+                enabledFlag
+                  ? '当前已启用会员功能：工作台将按非会员 / 标准会员 / 专业会员 / 内部会员等级展示权限，并按下方月度积分额度自动发放。'
+                  : '当前未启用会员限制：所有用户均可免费使用全站功能；您仍可提前配置四档月度积分与平台模型，并为账号预置会员等级。'
+              }
+            </p>
           </div>
+          <div class="switch-controls">
+            <button
+              id="membershipSwitch"
+              type="button"
+              role="switch"
+              aria-checked="${enabledFlag ? 'true' : 'false'}"
+              aria-label="切换会员功能启用状态"
+              class="toggle-switch ${enabledFlag ? 'is-on' : ''}"
+            >
+              <span class="toggle-thumb"></span>
+            </button>
+            <div class="switch-status-block">
+              <strong id="membershipStateLabel">${enabledFlag ? '已启用' : '未启用'}</strong>
+              <button id="membershipActionBtn" type="button" class="btn ${enabledFlag ? '' : 'btn-primary'} btn-sm">
+                ${enabledFlag ? '关闭会员功能' : '启用会员功能'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <form id="monthlyCreditsForm" class="credits-grid">
+          <label>非会员每月积分
+            <input id="creditsFreeInput" type="number" min="0" max="1000000" step="1" value="${escapeHtml(credits.free)}" required />
+          </label>
+          <label>标准会员每月积分
+            <input id="creditsStandardInput" type="number" min="0" max="1000000" step="1" value="${escapeHtml(credits.standard)}" required />
+          </label>
+          <label>专业会员每月积分
+            <input id="creditsProInput" type="number" min="0" max="1000000" step="1" value="${escapeHtml(credits.pro)}" required />
+          </label>
+          <label>内部会员每月积分
+            <input id="creditsInternalInput" type="number" min="0" max="1000000" step="1" value="${escapeHtml(credits.internal)}" required />
+          </label>
+          <div class="credits-submit">
+            <button id="saveCreditsBtn" class="btn btn-primary" type="submit">保存积分设置</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card" id="platformModelsCard">
+        <div class="card-head" style="margin-bottom:14px;">
+          <div>
+            <div class="switch-eyebrow">平台模型代理与积分计费</div>
+            <h2>平台模型池 · 网站积分扣费</h2>
+            <p class="muted">由服务端安全托管上游 API Key 并代理 OpenAI 兼容接口，按会员等级开放并按次扣减网站积分，调用失败自动退回积分。</p>
+          </div>
+          <div class="announcements-head-actions">
+            <span id="activePlatformModelsBadge" class="badge badge-ok">已启用 0 个</span>
+            <button id="togglePlatformModelFormBtn" class="btn btn-primary" type="button">添加平台模型</button>
+          </div>
+        </div>
+
+        <div id="platformModelFormWrap" class="announcement-form-wrap" style="display:none">
+          <div class="announcement-form-head">
+            <strong id="platformModelFormTitle">添加平台模型</strong>
+            <span class="muted">上游密钥仅保存在服务端数据库，前端与管理列表均不返回明文 Key。</span>
+          </div>
+          <form id="platformModelForm" class="announcement-form">
+            <div class="grid-3">
+              <label>模型显示名称（必填）
+                <input id="pmName" type="text" maxlength="80" placeholder="例如：DeepSeek V3 平台直连" required />
+              </label>
+              <label>模型 ID / Slug（选填，留空自动生成）
+                <input id="pmId" type="text" maxlength="64" placeholder="例如：platform-deepseek-v3" />
+              </label>
+              <label>厂商 / 来源标签
+                <input id="pmProviderLabel" type="text" maxlength="60" value="平台模型" placeholder="例如：DeepSeek 官方" />
+              </label>
+            </div>
+
+            <div class="grid-3">
+              <label>上游 Base URL（必填，http/https）
+                <input id="pmBaseUrl" type="url" maxlength="500" placeholder="https://api.deepseek.com/v1" required />
+              </label>
+              <label>上游 API Key
+                <input id="pmApiKey" type="password" autocomplete="off" maxlength="512" placeholder="输入上游 API Key" />
+              </label>
+              <label>上游模型名称（必填）
+                <input id="pmUpstreamModel" type="text" maxlength="128" placeholder="例如：deepseek-chat" required />
+              </label>
+            </div>
+
+            <div class="grid-3">
+              <label>每次调用消耗积分（0 至 10000）
+                <input id="pmCreditCost" type="number" min="0" max="10000" step="1" value="1" required />
+              </label>
+              <label>最低可用会员等级
+                <select id="pmMinTier">
+                  ${tierOptionsHtml}
+                </select>
+              </label>
+              <label>排序值（越小越靠前）
+                <input id="pmSortOrder" type="number" min="-100000" max="100000" step="1" value="0" />
+              </label>
+            </div>
+
+            <div class="grid-3">
+              <label>默认 temperature（选填）
+                <input id="pmTemp" type="number" step="0.05" placeholder="例如：0.7" />
+              </label>
+              <label>默认 top_p（选填）
+                <input id="pmTopP" type="number" step="0.05" placeholder="例如：0.95" />
+              </label>
+              <label>默认 max_tokens（选填）
+                <input id="pmMaxTokens" type="number" min="1" step="1" placeholder="例如：4096" />
+              </label>
+            </div>
+
+            <div class="grid-2">
+              <label>额外默认参数 JSON（选填）
+                <textarea id="pmExtraParams" rows="2" placeholder='例如：{"enable_thinking": false}'></textarea>
+              </label>
+              <div class="stack-fields">
+                <label>推广 / Key 申请链接（选填，支持带推广参数）
+                  <input id="pmApplyUrl" type="url" maxlength="500" placeholder="https://platform.deepseek.com/?ref=..." />
+                </label>
+                <label>模型简介说明（选填）
+                  <input id="pmDescription" type="text" maxlength="300" placeholder="例如：高性价比中文提示词优化主力模型" />
+                </label>
+              </div>
+            </div>
+
+            <div class="announcement-form-footer">
+              <div class="announcement-checks">
+                <label class="check-label">
+                  <input id="pmEnabled" type="checkbox" checked />
+                  <span>启用该平台模型</span>
+                </label>
+              </div>
+              <div class="actions">
+                <button id="cancelPlatformModelBtn" class="btn" type="button">取消</button>
+                <button id="savePlatformModelBtn" class="btn btn-primary" type="submit">保存平台模型</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>模型与 ID</th>
+                <th>上游接口与 Key</th>
+                <th>积分与门槛</th>
+                <th>默认参数与推广链接</th>
+                <th>状态</th>
+                <th>管理操作</th>
+              </tr>
+            </thead>
+            <tbody id="platformModelRows">
+              <tr><td colspan="6" class="muted">正在加载平台模型列表...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card" id="modelPresetsCard">
+        <div class="card-head" style="margin-bottom:14px;">
+          <div>
+            <div class="switch-eyebrow">国内预设模型配置</div>
+            <h2>国内预设模型参数与申请推广链接</h2>
+            <p class="muted">统一配置 10 个内置国内模型厂商的 API Key 申请/推广链接、默认模型与推理参数，支持任意 http/https 推广链接与参数。</p>
+          </div>
+          <span id="enabledPresetsBadge" class="badge badge-ok">已启用 10 / 10</span>
+        </div>
+
+        <div id="modelPresetFormWrap" class="announcement-form-wrap" style="display:none">
+          <div class="announcement-form-head">
+            <strong id="modelPresetFormTitle">编辑国内预设模型</strong>
+            <span id="modelPresetDefaultUrlHint" class="muted"></span>
+          </div>
+          <form id="modelPresetForm" class="announcement-form">
+            <div class="grid-3">
+              <label>自定义申请 / 推广链接（留空恢复默认）
+                <input id="mpApplyUrl" type="url" maxlength="500" placeholder="https://.../?ref=yourcode" />
+              </label>
+              <label>按钮文案（选填，最多 40 字）
+                <input id="mpApplyLabel" type="text" maxlength="40" placeholder="例如：注册领取免费额度" />
+              </label>
+              <label>默认模型 ID（选填）
+                <input id="mpDefaultModelId" type="text" maxlength="128" placeholder="例如：deepseek-chat" />
+              </label>
+            </div>
+
+            <div class="grid-3">
+              <label>默认 temperature（选填）
+                <input id="mpTemp" type="number" step="0.05" placeholder="例如：0.7" />
+              </label>
+              <label>默认 top_p（选填）
+                <input id="mpTopP" type="number" step="0.05" placeholder="例如：0.95" />
+              </label>
+              <label>默认 max_tokens（选填）
+                <input id="mpMaxTokens" type="number" min="1" step="1" placeholder="例如：4096" />
+              </label>
+            </div>
+
+            <label>额外默认参数 JSON（选填）
+              <textarea id="mpExtraParams" rows="2" placeholder='例如：{"enable_thinking": false}'></textarea>
+            </label>
+
+            <div class="announcement-form-footer">
+              <div class="announcement-checks">
+                <label class="check-label">
+                  <input id="mpEnabled" type="checkbox" checked />
+                  <span>启用该国内预设厂商</span>
+                </label>
+              </div>
+              <div class="actions">
+                <button id="resetPresetUrlBtn" class="btn" type="button">清空自定义链接</button>
+                <button id="cancelModelPresetBtn" class="btn" type="button">取消</button>
+                <button id="saveModelPresetBtn" class="btn btn-primary" type="submit">保存预设配置</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>厂商与类别</th>
+                <th>当前申请 / 推广链接</th>
+                <th>默认模型与参数</th>
+                <th>状态</th>
+                <th>管理操作</th>
+              </tr>
+            </thead>
+            <tbody id="modelPresetRows">
+              <tr><td colspan="5" class="muted">正在加载国内预设模型配置...</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -289,9 +519,9 @@ export function renderAdminHtml({
           <div class="stat-sub" id="statAdmins">含管理员 -</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Pro 会员数</div>
-          <div class="stat-value stat-accent" id="statPro">-</div>
-          <div class="stat-sub" id="statFree">Free 免费用户 -</div>
+          <div class="stat-label">会员人数（标准/专业/内部）</div>
+          <div class="stat-value stat-accent" id="statPaid">-</div>
+          <div class="stat-sub" id="statTierBreakdown">标准 - · 专业 - · 内部 -</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">账号状态</div>
@@ -309,14 +539,16 @@ export function renderAdminHtml({
         <div class="card-head">
           <div>
             <h2>用户与会员列表</h2>
-            <p class="muted">支持按用户名检索与按会员状态筛选，可随时调整 Pro 有效期或停用账号。</p>
+            <p class="muted">支持按用户名或邮箱检索、按四档会员等级筛选，可快捷升降级、手工调整积分、重置密码或停用账号。</p>
           </div>
           <div class="filter-bar">
             <input id="searchInput" type="search" class="search-input" placeholder="搜索用户名或邮箱..." aria-label="搜索用户名或邮箱" />
             <div class="filter-pills" id="filterPills">
               <button type="button" class="pill is-active" data-filter="all">全部</button>
-              <button type="button" class="pill" data-filter="pro">Pro 会员</button>
-              <button type="button" class="pill" data-filter="free">Free 免费</button>
+              <button type="button" class="pill" data-filter="standard">标准会员</button>
+              <button type="button" class="pill" data-filter="pro">专业会员</button>
+              <button type="button" class="pill" data-filter="internal">内部会员</button>
+              <button type="button" class="pill" data-filter="free">非会员</button>
               <button type="button" class="pill" data-filter="disabled">已停用</button>
             </div>
           </div>
@@ -330,6 +562,7 @@ export function renderAdminHtml({
                 <th>邮箱</th>
                 <th>角色</th>
                 <th>会员等级</th>
+                <th>可用积分</th>
                 <th>到期时间</th>
                 <th>云同步占用</th>
                 <th>最近同步</th>
@@ -338,7 +571,7 @@ export function renderAdminHtml({
               </tr>
             </thead>
             <tbody id="userRows">
-              <tr><td colspan="9" class="muted">正在加载用户列表...</td></tr>
+              <tr><td colspan="10" class="muted">正在加载用户列表...</td></tr>
             </tbody>
           </table>
         </div>
@@ -348,6 +581,7 @@ export function renderAdminHtml({
     <script>
       const CURRENT_ADMIN_USERNAME = ${JSON.stringify(String(username || ''))};
       const ANNOUNCEMENT_TYPES_META = ${JSON.stringify(ANNOUNCEMENT_TYPES)};
+      const TIER_META_MAP = ${JSON.stringify(TIER_META)};
       const ONE_DAY_MS = 24 * 60 * 60 * 1000;
       const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
       const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -360,6 +594,56 @@ export function renderAdminHtml({
       const membershipSwitchEl = document.getElementById('membershipSwitch');
       const membershipStateLabelEl = document.getElementById('membershipStateLabel');
       const membershipActionBtnEl = document.getElementById('membershipActionBtn');
+      const monthlyCreditsFormEl = document.getElementById('monthlyCreditsForm');
+      const creditsFreeInputEl = document.getElementById('creditsFreeInput');
+      const creditsStandardInputEl = document.getElementById('creditsStandardInput');
+      const creditsProInputEl = document.getElementById('creditsProInput');
+      const creditsInternalInputEl = document.getElementById('creditsInternalInput');
+      const saveCreditsBtnEl = document.getElementById('saveCreditsBtn');
+
+      const activePlatformModelsBadgeEl = document.getElementById('activePlatformModelsBadge');
+      const togglePlatformModelFormBtnEl = document.getElementById('togglePlatformModelFormBtn');
+      const platformModelFormWrapEl = document.getElementById('platformModelFormWrap');
+      const platformModelFormTitleEl = document.getElementById('platformModelFormTitle');
+      const platformModelFormEl = document.getElementById('platformModelForm');
+      const pmNameEl = document.getElementById('pmName');
+      const pmIdEl = document.getElementById('pmId');
+      const pmProviderLabelEl = document.getElementById('pmProviderLabel');
+      const pmBaseUrlEl = document.getElementById('pmBaseUrl');
+      const pmApiKeyEl = document.getElementById('pmApiKey');
+      const pmUpstreamModelEl = document.getElementById('pmUpstreamModel');
+      const pmCreditCostEl = document.getElementById('pmCreditCost');
+      const pmMinTierEl = document.getElementById('pmMinTier');
+      const pmSortOrderEl = document.getElementById('pmSortOrder');
+      const pmTempEl = document.getElementById('pmTemp');
+      const pmTopPEl = document.getElementById('pmTopP');
+      const pmMaxTokensEl = document.getElementById('pmMaxTokens');
+      const pmExtraParamsEl = document.getElementById('pmExtraParams');
+      const pmApplyUrlEl = document.getElementById('pmApplyUrl');
+      const pmDescriptionEl = document.getElementById('pmDescription');
+      const pmEnabledEl = document.getElementById('pmEnabled');
+      const cancelPlatformModelBtnEl = document.getElementById('cancelPlatformModelBtn');
+      const savePlatformModelBtnEl = document.getElementById('savePlatformModelBtn');
+      const platformModelRowsEl = document.getElementById('platformModelRows');
+
+      const enabledPresetsBadgeEl = document.getElementById('enabledPresetsBadge');
+      const modelPresetFormWrapEl = document.getElementById('modelPresetFormWrap');
+      const modelPresetFormTitleEl = document.getElementById('modelPresetFormTitle');
+      const modelPresetDefaultUrlHintEl = document.getElementById('modelPresetDefaultUrlHint');
+      const modelPresetFormEl = document.getElementById('modelPresetForm');
+      const mpApplyUrlEl = document.getElementById('mpApplyUrl');
+      const mpApplyLabelEl = document.getElementById('mpApplyLabel');
+      const mpDefaultModelIdEl = document.getElementById('mpDefaultModelId');
+      const mpTempEl = document.getElementById('mpTemp');
+      const mpTopPEl = document.getElementById('mpTopP');
+      const mpMaxTokensEl = document.getElementById('mpMaxTokens');
+      const mpExtraParamsEl = document.getElementById('mpExtraParams');
+      const mpEnabledEl = document.getElementById('mpEnabled');
+      const resetPresetUrlBtnEl = document.getElementById('resetPresetUrlBtn');
+      const cancelModelPresetBtnEl = document.getElementById('cancelModelPresetBtn');
+      const saveModelPresetBtnEl = document.getElementById('saveModelPresetBtn');
+      const modelPresetRowsEl = document.getElementById('modelPresetRows');
+
       const searchInputEl = document.getElementById('searchInput');
       const filterPillsEl = document.getElementById('filterPills');
       const adminPwdPanelEl = document.getElementById('adminPwdPanel');
@@ -391,11 +675,15 @@ export function renderAdminHtml({
       const saveAnnouncementBtnEl = document.getElementById('saveAnnouncementBtn');
       const cancelAnnouncementBtnEl = document.getElementById('cancelAnnouncementBtn');
       const announcementRowsEl = document.getElementById('announcementRows');
-      let latestTempPassword = '';
 
+      let latestTempPassword = '';
       let currentMembershipEnabled = ${enabledFlag ? 'true' : 'false'};
       let allUsers = [];
       let currentFilter = 'all';
+      let allPlatformModels = [];
+      let editingPlatformModelId = null;
+      let allModelPresets = [];
+      let editingPresetProviderId = null;
       let allAnnouncements = [];
       let announcementsLoaded = false;
       let emailableUsersCount = 0;
@@ -427,6 +715,75 @@ export function renderAdminHtml({
         }[c]));
       }
 
+      function isSafeHttpUrl(url) {
+        return typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'));
+      }
+
+      function getTierInfo(tier) {
+        return TIER_META_MAP[tier] || TIER_META_MAP.free;
+      }
+
+      function renderTierBadge(tier) {
+        const info = getTierInfo(tier);
+        return '<span class="badge ' + esc(info.badgeClass) + '">' + esc(info.label) + '</span>';
+      }
+
+      function summarizeParams(params) {
+        if (!params || typeof params !== 'object') return '<span class="muted">默认</span>';
+        const keys = Object.keys(params);
+        if (!keys.length) return '<span class="muted">默认</span>';
+        return keys
+          .slice(0, 5)
+          .map((k) => '<code class="param-chip">' + esc(k) + '=' + esc(JSON.stringify(params[k])) + '</code>')
+          .join(' ') + (keys.length > 5 ? ' <span class="sub">+' + (keys.length - 5) + '</span>' : '');
+      }
+
+      function fillParamInputs(params, tempEl, topPEl, maxTokensEl, extraEl) {
+        const obj = params && typeof params === 'object' ? params : {};
+        tempEl.value = obj.temperature !== undefined ? String(obj.temperature) : '';
+        topPEl.value = obj.top_p !== undefined ? String(obj.top_p) : '';
+        maxTokensEl.value = obj.max_tokens !== undefined ? String(obj.max_tokens) : '';
+        const extra = {};
+        for (const key of Object.keys(obj)) {
+          if (key === 'temperature' || key === 'top_p' || key === 'max_tokens') continue;
+          extra[key] = obj[key];
+        }
+        extraEl.value = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '';
+      }
+
+      function collectParamsFromInputs(tempEl, topPEl, maxTokensEl, extraEl) {
+        let params = {};
+        const extraText = extraEl.value.trim();
+        if (extraText) {
+          let parsed;
+          try {
+            parsed = JSON.parse(extraText);
+          } catch {
+            throw new Error('额外默认参数不是合法的 JSON 格式');
+          }
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('额外默认参数必须为 JSON 对象');
+          }
+          params = Object.assign({}, parsed);
+        }
+        if (tempEl.value.trim() !== '') {
+          const val = Number(tempEl.value.trim());
+          if (!Number.isFinite(val)) throw new Error('temperature 必须为有效数字');
+          params.temperature = val;
+        }
+        if (topPEl.value.trim() !== '') {
+          const val = Number(topPEl.value.trim());
+          if (!Number.isFinite(val)) throw new Error('top_p 必须为有效数字');
+          params.top_p = val;
+        }
+        if (maxTokensEl.value.trim() !== '') {
+          const val = Number(maxTokensEl.value.trim());
+          if (!Number.isInteger(val) || val < 1) throw new Error('max_tokens 必须为正整数');
+          params.max_tokens = val;
+        }
+        return params;
+      }
+
       function renderMembershipState(enabled) {
         currentMembershipEnabled = Boolean(enabled);
         membershipCardEl.dataset.enabled = currentMembershipEnabled ? '1' : '0';
@@ -436,12 +793,20 @@ export function renderAdminHtml({
         membershipActionBtnEl.textContent = currentMembershipEnabled ? '关闭会员功能' : '启用会员功能';
         membershipActionBtnEl.className = currentMembershipEnabled ? 'btn btn-sm' : 'btn btn-primary btn-sm';
         membershipDescEl.textContent = currentMembershipEnabled
-          ? '当前已启用会员功能：工作台将向已登录用户展示 Free / Pro 会员等级，并按此处设置的等级与有效期生效。'
-          : '当前未启用会员限制：所有用户均可免费使用全站功能；您仍可提前在下方列表中为用户预置 Pro 会员等级与有效期。';
+          ? '当前已启用会员功能：工作台将按非会员 / 标准会员 / 专业会员 / 内部会员等级展示权限，并按下方月度积分额度自动发放。'
+          : '当前未启用会员限制：所有用户均可免费使用全站功能；您仍可提前配置四档月度积分与平台模型，并为账号预置会员等级。';
         topBadgeEl.className = currentMembershipEnabled ? 'badge badge-pro' : 'badge badge-free';
         topBadgeEl.textContent = currentMembershipEnabled
           ? '会员体系：已启用'
           : '会员体系：未启用（全站免费开放）';
+      }
+
+      function renderMonthlyCreditsInputs(mc) {
+        if (!mc || typeof mc !== 'object') return;
+        if (mc.free !== undefined) creditsFreeInputEl.value = String(mc.free);
+        if (mc.standard !== undefined) creditsStandardInputEl.value = String(mc.standard);
+        if (mc.pro !== undefined) creditsProInputEl.value = String(mc.pro);
+        if (mc.internal !== undefined) creditsInternalInputEl.value = String(mc.internal);
       }
 
       function renderMailState(info) {
@@ -462,6 +827,207 @@ export function renderAdminHtml({
         announcementEmailEnabled = enabled;
         if (announcementsLoaded) {
           renderAnnouncements();
+        }
+      }
+
+      function openPlatformModelForm(item) {
+        if (item) {
+          editingPlatformModelId = item.id;
+          platformModelFormTitleEl.textContent = '编辑平台模型：' + item.name;
+          savePlatformModelBtnEl.textContent = '保存修改';
+          pmNameEl.value = item.name || '';
+          pmIdEl.value = item.id || '';
+          pmIdEl.disabled = true;
+          pmProviderLabelEl.value = item.providerLabel || '平台模型';
+          pmBaseUrlEl.value = item.baseUrl || '';
+          pmApiKeyEl.value = '';
+          pmApiKeyEl.required = false;
+          pmApiKeyEl.placeholder = '当前已保存 ' + (item.apiKeyHint || '') + '，留空则保持不变';
+          pmUpstreamModelEl.value = item.upstreamModel || '';
+          pmCreditCostEl.value = String(item.creditCost ?? 1);
+          pmMinTierEl.value = item.minTier || 'standard';
+          pmSortOrderEl.value = String(item.sortOrder ?? 0);
+          pmApplyUrlEl.value = item.applyUrl || '';
+          pmDescriptionEl.value = item.description || '';
+          pmEnabledEl.checked = Boolean(item.enabled);
+          fillParamInputs(item.defaultParams, pmTempEl, pmTopPEl, pmMaxTokensEl, pmExtraParamsEl);
+        } else {
+          editingPlatformModelId = null;
+          platformModelFormTitleEl.textContent = '添加平台模型';
+          savePlatformModelBtnEl.textContent = '保存平台模型';
+          platformModelFormEl.reset();
+          pmIdEl.disabled = false;
+          pmProviderLabelEl.value = '平台模型';
+          pmCreditCostEl.value = '1';
+          pmMinTierEl.value = 'standard';
+          pmSortOrderEl.value = '0';
+          pmApiKeyEl.required = true;
+          pmApiKeyEl.placeholder = '输入上游 API Key（必填）';
+          pmEnabledEl.checked = true;
+        }
+        platformModelFormWrapEl.style.display = 'block';
+        togglePlatformModelFormBtnEl.textContent = '收起表单';
+        pmNameEl.focus();
+      }
+
+      function closePlatformModelForm() {
+        editingPlatformModelId = null;
+        platformModelFormEl.reset();
+        pmIdEl.disabled = false;
+        platformModelFormWrapEl.style.display = 'none';
+        togglePlatformModelFormBtnEl.textContent = '添加平台模型';
+      }
+
+      function renderPlatformModels() {
+        const activeCount = allPlatformModels.filter((m) => m.enabled).length;
+        activePlatformModelsBadgeEl.textContent = '已启用 ' + activeCount + ' 个';
+        activePlatformModelsBadgeEl.className = activeCount > 0 ? 'badge badge-ok' : 'badge badge-free';
+
+        if (!allPlatformModels.length) {
+          platformModelRowsEl.innerHTML =
+            '<tr><td colspan="6" class="muted">暂无平台模型，点击右上角「添加平台模型」配置第一个服务端代理模型。</td></tr>';
+          return;
+        }
+
+        platformModelRowsEl.innerHTML = allPlatformModels.map((m) => {
+          const statusBadge = m.enabled
+            ? '<span class="badge badge-ok">已启用</span>'
+            : '<span class="badge badge-free">已停用</span>';
+          const applyLinkHtml = isSafeHttpUrl(m.applyUrl)
+            ? '<div class="ann-link-preview"><a href="' + esc(m.applyUrl) + '" target="_blank" rel="noopener noreferrer">推广/申请链接 ↗</a></div>'
+            : '';
+          const descHtml = m.description
+            ? '<div class="ann-preview">' + esc(m.description) + '</div>'
+            : '';
+          return '<tr>' +
+            '<td>' +
+              '<strong>' + esc(m.name) + '</strong> ' +
+              '<span class="badge badge-neutral">' + esc(m.providerLabel) + '</span>' +
+              '<div class="sub">' + esc(m.id) + ' · 排序 ' + esc(m.sortOrder) + '</div>' +
+              descHtml +
+            '</td>' +
+            '<td>' +
+              '<div><code>' + esc(m.upstreamModel) + '</code></div>' +
+              '<div class="sub">' + esc(m.baseUrl) + '</div>' +
+              '<div class="sub">Key: ' + esc(m.apiKeyHint || '已保存') + '</div>' +
+            '</td>' +
+            '<td>' +
+              '<div>' + renderTierBadge(m.minTier) + '</div>' +
+              '<div class="sub" style="margin-top:4px;">' + esc(m.creditCost) + ' 积分 / 次</div>' +
+            '</td>' +
+            '<td>' +
+              '<div>' + summarizeParams(m.defaultParams) + '</div>' +
+              applyLinkHtml +
+            '</td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td class="op-cell">' +
+              '<button class="btn btn-sm" data-pm-act="test" data-id="' + esc(m.id) + '">测试连通</button>' +
+              '<button class="btn btn-sm" data-pm-act="edit" data-id="' + esc(m.id) + '">编辑</button>' +
+              '<button class="btn btn-sm" data-pm-act="toggle" data-id="' + esc(m.id) + '">' + (m.enabled ? '停用' : '启用') + '</button>' +
+              '<button class="btn btn-sm btn-danger" data-pm-act="delete" data-id="' + esc(m.id) + '">删除</button>' +
+            '</td>' +
+          '</tr>';
+        }).join('');
+      }
+
+      async function loadPlatformModels() {
+        try {
+          const res = await fetch('/user-api/admin/platform-models', { credentials: 'same-origin' });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '加载平台模型失败', true);
+            return;
+          }
+          allPlatformModels = Array.isArray(body.models) ? body.models : [];
+          renderPlatformModels();
+        } catch (err) {
+          showNotice('加载平台模型异常：' + err.message, true);
+        }
+      }
+
+      function openModelPresetForm(item) {
+        editingPresetProviderId = item.providerId;
+        modelPresetFormTitleEl.textContent = '编辑国内预设：' + item.name + ' (' + item.providerId + ')';
+        modelPresetDefaultUrlHintEl.textContent = item.defaultApplyUrl
+          ? '内置默认链接：' + item.defaultApplyUrl
+          : '该厂商无内置默认链接，可直接填写自定义链接。';
+        mpApplyUrlEl.value = item.customApplyUrl || '';
+        mpApplyUrlEl.placeholder = item.defaultApplyUrl || 'https://...';
+        mpApplyLabelEl.value = item.applyLabel || '';
+        mpDefaultModelIdEl.value = item.defaultModelId || '';
+        mpEnabledEl.checked = Boolean(item.enabled);
+        fillParamInputs(item.defaultParams, mpTempEl, mpTopPEl, mpMaxTokensEl, mpExtraParamsEl);
+        modelPresetFormWrapEl.style.display = 'block';
+        mpApplyUrlEl.focus();
+      }
+
+      function closeModelPresetForm() {
+        editingPresetProviderId = null;
+        modelPresetFormEl.reset();
+        modelPresetFormWrapEl.style.display = 'none';
+      }
+
+      function formatPresetCategory(category) {
+        if (category === 'text') return '<span class="badge badge-neutral">文本</span>';
+        if (category === 'image') return '<span class="badge badge-warn">图像</span>';
+        return '<span class="badge badge-standard">文本 + 图像</span>';
+      }
+
+      function renderModelPresets() {
+        const enabledCount = allModelPresets.filter((p) => p.enabled).length;
+        enabledPresetsBadgeEl.textContent = '已启用 ' + enabledCount + ' / ' + allModelPresets.length;
+
+        if (!allModelPresets.length) {
+          modelPresetRowsEl.innerHTML = '<tr><td colspan="5" class="muted">暂无国内预设模型配置</td></tr>';
+          return;
+        }
+
+        modelPresetRowsEl.innerHTML = allModelPresets.map((p) => {
+          const isCustomUrl = Boolean(p.customApplyUrl);
+          const linkHtml = isSafeHttpUrl(p.applyUrl)
+            ? '<a class="preset-url-link" href="' + esc(p.applyUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(p.applyUrl) + '</a>' +
+              '<div>' +
+                (isCustomUrl ? '<span class="badge badge-admin">自定义推广链接</span>' : '<span class="badge badge-free">内置默认链接</span>') +
+                (p.applyLabel ? ' <span class="sub">文案：' + esc(p.applyLabel) + '</span>' : '') +
+              '</div>'
+            : '<span class="muted">无申请链接</span>';
+
+          const modelHtml = p.defaultModelId
+            ? '<div><code>' + esc(p.defaultModelId) + '</code></div>'
+            : '<div class="muted">使用客户端默认模型</div>';
+
+          const statusBadge = p.enabled
+            ? '<span class="badge badge-ok">已启用</span>'
+            : '<span class="badge badge-free">已停用</span>';
+
+          return '<tr>' +
+            '<td>' +
+              '<strong>' + esc(p.name) + '</strong> ' + formatPresetCategory(p.category) +
+              '<div class="sub">' + esc(p.providerId) + '</div>' +
+            '</td>' +
+            '<td class="preset-url-cell">' + linkHtml + '</td>' +
+            '<td>' + modelHtml + '<div style="margin-top:4px;">' + summarizeParams(p.defaultParams) + '</div></td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td class="op-cell">' +
+              '<button class="btn btn-sm" data-mp-act="edit" data-id="' + esc(p.providerId) + '">编辑</button>' +
+              '<button class="btn btn-sm" data-mp-act="toggle" data-id="' + esc(p.providerId) + '">' + (p.enabled ? '停用' : '启用') + '</button>' +
+            '</td>' +
+          '</tr>';
+        }).join('');
+      }
+
+      async function loadModelPresets() {
+        try {
+          const res = await fetch('/user-api/admin/model-presets', { credentials: 'same-origin' });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '加载国内预设模型失败', true);
+            return;
+          }
+          allModelPresets = Array.isArray(body.presets) ? body.presets : [];
+          renderModelPresets();
+        } catch (err) {
+          showNotice('加载国内预设模型异常：' + err.message, true);
         }
       }
 
@@ -573,15 +1139,13 @@ export function renderAdminHtml({
           const previewText = String(a.content || '').length > 96
             ? String(a.content).slice(0, 96) + '...'
             : String(a.content || '');
-          const safeLink =
-            typeof a.linkUrl === 'string' &&
-            (a.linkUrl.startsWith('https://') || a.linkUrl.startsWith('http://'))
-              ? '<div class="ann-link-preview"><a href="' +
-                esc(a.linkUrl) +
-                '" target="_blank" rel="noopener noreferrer">' +
-                esc(a.linkText || a.linkUrl) +
-                '</a></div>'
-              : '';
+          const safeLink = isSafeHttpUrl(a.linkUrl)
+            ? '<div class="ann-link-preview"><a href="' +
+              esc(a.linkUrl) +
+              '" target="_blank" rel="noopener noreferrer">' +
+              esc(a.linkText || a.linkUrl) +
+              '</a></div>'
+            : '';
 
           const expiryText = a.expiresAt ? fmtDate(a.expiresAt) : '长期有效';
           const emailStatusHtml = a.emailedAt
@@ -634,8 +1198,11 @@ export function renderAdminHtml({
       function renderStats(users) {
         const total = users.length;
         const admins = users.filter((u) => u.role === 'admin').length;
-        const pro = users.filter((u) => u.tier === 'pro').length;
-        const free = total - pro;
+        const standardCount = users.filter((u) => u.tier === 'standard').length;
+        const proCount = users.filter((u) => u.tier === 'pro').length;
+        const internalCount = users.filter((u) => u.tier === 'internal').length;
+        const freeCount = total - standardCount - proCount - internalCount;
+        const paidCount = standardCount + proCount + internalCount;
         const disabled = users.filter((u) => u.disabled).length;
         const active = total - disabled;
         const totalBytes = users.reduce((sum, u) => sum + (u.syncBytes || 0), 0);
@@ -643,8 +1210,9 @@ export function renderAdminHtml({
 
         document.getElementById('statTotal').textContent = String(total);
         document.getElementById('statAdmins').textContent = '含管理员 ' + admins + ' 人';
-        document.getElementById('statPro').textContent = String(pro);
-        document.getElementById('statFree').textContent = 'Free 免费用户 ' + free + ' 人';
+        document.getElementById('statPaid').textContent = String(paidCount);
+        document.getElementById('statTierBreakdown').textContent =
+          '标准 ' + standardCount + ' · 专业 ' + proCount + ' · 内部 ' + internalCount + ' · 非会员 ' + freeCount;
         document.getElementById('statActive').textContent = active + ' 正常';
         document.getElementById('statDisabled').textContent = '已停用 ' + disabled + ' 人';
         document.getElementById('statBytes').textContent = fmtBytes(totalBytes);
@@ -659,14 +1227,16 @@ export function renderAdminHtml({
             const matchEmail = String(u.email || '').toLowerCase().includes(q);
             if (!matchName && !matchEmail) return false;
           }
+          if (currentFilter === 'standard') return u.tier === 'standard';
           if (currentFilter === 'pro') return u.tier === 'pro';
-          if (currentFilter === 'free') return u.tier !== 'pro';
+          if (currentFilter === 'internal') return u.tier === 'internal';
+          if (currentFilter === 'free') return u.tier === 'free';
           if (currentFilter === 'disabled') return Boolean(u.disabled);
           return true;
         });
 
         if (!filtered.length) {
-          rowsEl.innerHTML = '<tr><td colspan="9" class="muted">没有符合条件的用户</td></tr>';
+          rowsEl.innerHTML = '<tr><td colspan="10" class="muted">没有符合条件的用户</td></tr>';
           return;
         }
 
@@ -678,9 +1248,16 @@ export function renderAdminHtml({
           const roleBadge = u.role === 'admin'
             ? '<span class="badge badge-admin">管理员</span>'
             : '<span class="badge badge-neutral">普通用户</span>';
-          const tierBadge = u.tier === 'pro'
-            ? '<span class="badge badge-pro">Pro 会员</span>'
-            : '<span class="badge badge-free">Free</span>';
+          const tierBadge = renderTierBadge(u.tier);
+          const effectiveHint = u.effectiveTier && u.effectiveTier !== u.tier
+            ? '<div class="sub">当前生效：' + esc(getTierInfo(u.effectiveTier).label) + '</div>'
+            : '';
+          const grantSub = u.lastCreditGrantMonth
+            ? esc(u.lastCreditGrantMonth) + ' 已赠 ' + esc(u.lastCreditGrantAmount ?? 0)
+            : '本月已赠 ' + esc(u.lastCreditGrantAmount ?? 0);
+          const creditCell =
+            '<strong>' + esc(u.creditBalance ?? 0) + '</strong>' +
+            '<div class="sub">' + grantSub + '</div>';
           const stateBadge = u.disabled
             ? '<span class="badge badge-danger">已停用</span>'
             : '<span class="badge badge-ok">正常</span>';
@@ -691,19 +1268,39 @@ export function renderAdminHtml({
             ? '<button class="btn btn-sm" disabled title="不能停用当前登录的管理员账号">当前管理员</button>'
             : '<button class="btn btn-sm ' + (u.disabled ? '' : 'btn-danger') + '" data-act="toggle" data-disabled="' + (u.disabled ? '1' : '0') + '" data-id="' + esc(u.id) + '">' + (u.disabled ? '启用' : '停用') + '</button>';
 
+          const tierSelectHtml =
+            '<span class="inline-tier-picker">' +
+              '<select class="mini-select" data-tier-select aria-label="选择会员等级">' +
+                '<option value="free"' + (u.tier === 'free' ? ' selected' : '') + '>非会员</option>' +
+                '<option value="standard"' + (u.tier === 'standard' ? ' selected' : '') + '>标准会员</option>' +
+                '<option value="pro"' + (u.tier === 'pro' ? ' selected' : '') + '>专业会员</option>' +
+                '<option value="internal"' + (u.tier === 'internal' ? ' selected' : '') + '>内部会员</option>' +
+              '</select>' +
+              '<select class="mini-select" data-dur-select aria-label="选择有效期">' +
+                '<option value="30d">30天</option>' +
+                '<option value="365d">1年</option>' +
+                '<option value="forever">永久</option>' +
+              '</select>' +
+              '<button class="btn btn-sm" data-act="apply-tier" data-id="' + esc(u.id) + '">应用</button>' +
+            '</span>';
+
           return '<tr>' +
             '<td><strong>' + esc(u.username) + '</strong><div class="sub">' + esc(u.id) + '</div></td>' +
             '<td>' + emailCell + '</td>' +
             '<td>' + roleBadge + '</td>' +
-            '<td>' + tierBadge + '</td>' +
+            '<td>' + tierBadge + effectiveHint + '</td>' +
+            '<td>' + creditCell + '</td>' +
             '<td>' + fmtDate(u.tierExpiresAt) + '</td>' +
             '<td>' + fmtBytes(u.syncBytes) + ' <span class="sub">v' + (u.syncVersion || 0) + '</span></td>' +
             '<td>' + fmtDate(u.syncUpdatedAt) + '</td>' +
             '<td>' + stateBadge + '</td>' +
             '<td class="op-cell">' +
-              '<button class="btn btn-sm" data-act="pro30" data-id="' + esc(u.id) + '">设为 Pro +30天</button>' +
-              '<button class="btn btn-sm" data-act="pro365" data-id="' + esc(u.id) + '">设为 Pro +1年</button>' +
+              tierSelectHtml +
+              '<button class="btn btn-sm" data-act="std30" data-id="' + esc(u.id) + '">设为标准+30天</button>' +
+              '<button class="btn btn-sm" data-act="pro30" data-id="' + esc(u.id) + '">设为专业+30天</button>' +
+              '<button class="btn btn-sm" data-act="intForever" data-id="' + esc(u.id) + '">设为内部(永久)</button>' +
               '<button class="btn btn-sm" data-act="free" data-id="' + esc(u.id) + '">恢复免费</button>' +
+              '<button class="btn btn-sm" data-act="adjust-credits" data-username="' + esc(u.username) + '" data-id="' + esc(u.id) + '">调积分</button>' +
               resetPwdBtn +
               disableBtn +
             '</td>' +
@@ -712,7 +1309,7 @@ export function renderAdminHtml({
       }
 
       async function loadUsers() {
-        rowsEl.innerHTML = '<tr><td colspan="9" class="muted">正在加载...</td></tr>';
+        rowsEl.innerHTML = '<tr><td colspan="10" class="muted">正在加载...</td></tr>';
         try {
           const res = await fetch('/user-api/admin/users', { credentials: 'same-origin' });
           const body = await res.json();
@@ -721,6 +1318,7 @@ export function renderAdminHtml({
             return;
           }
           renderMembershipState(Boolean(body.membershipEnabled));
+          renderMonthlyCreditsInputs(body.monthlyCredits);
           renderMailState(body);
           allUsers = Array.isArray(body.users) ? body.users : [];
           renderStats(allUsers);
@@ -762,6 +1360,289 @@ export function renderAdminHtml({
 
       membershipSwitchEl.addEventListener('click', toggleMembershipSetting);
       membershipActionBtnEl.addEventListener('click', toggleMembershipSetting);
+
+      monthlyCreditsFormEl.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const monthlyCredits = {
+          free: Number(creditsFreeInputEl.value),
+          standard: Number(creditsStandardInputEl.value),
+          pro: Number(creditsProInputEl.value),
+          internal: Number(creditsInternalInputEl.value),
+        };
+        for (const key of Object.keys(monthlyCredits)) {
+          if (!Number.isInteger(monthlyCredits[key]) || monthlyCredits[key] < 0) {
+            showNotice('各等级月度积分必须为非负整数', true);
+            return;
+          }
+        }
+        saveCreditsBtnEl.disabled = true;
+        try {
+          const res = await fetch('/user-api/admin/settings', {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ monthlyCredits }),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '保存月度积分设置失败', true);
+            return;
+          }
+          renderMonthlyCreditsInputs(body.monthlyCredits);
+          showNotice('四档会员月度积分额度已保存并生效。');
+        } catch (err) {
+          showNotice('网络异常：' + err.message, true);
+        } finally {
+          saveCreditsBtnEl.disabled = false;
+        }
+      });
+
+      togglePlatformModelFormBtnEl.addEventListener('click', () => {
+        const isOpen = platformModelFormWrapEl.style.display !== 'none';
+        if (isOpen) {
+          closePlatformModelForm();
+        } else {
+          openPlatformModelForm(null);
+        }
+      });
+      cancelPlatformModelBtnEl.addEventListener('click', closePlatformModelForm);
+
+      platformModelFormEl.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        let defaultParams;
+        try {
+          defaultParams = collectParamsFromInputs(pmTempEl, pmTopPEl, pmMaxTokensEl, pmExtraParamsEl);
+        } catch (err) {
+          showNotice(err.message, true);
+          return;
+        }
+        const isEdit = Boolean(editingPlatformModelId);
+        const payload = {
+          name: pmNameEl.value.trim(),
+          providerLabel: pmProviderLabelEl.value.trim() || '平台模型',
+          baseUrl: pmBaseUrlEl.value.trim(),
+          upstreamModel: pmUpstreamModelEl.value.trim(),
+          creditCost: Number(pmCreditCostEl.value),
+          minTier: pmMinTierEl.value,
+          defaultParams,
+          applyUrl: pmApplyUrlEl.value.trim() || null,
+          description: pmDescriptionEl.value.trim() || null,
+          sortOrder: Number(pmSortOrderEl.value || 0),
+          enabled: pmEnabledEl.checked,
+        };
+        const apiKeyVal = pmApiKeyEl.value.trim();
+        if (!isEdit) {
+          if (pmIdEl.value.trim()) payload.id = pmIdEl.value.trim();
+          payload.apiKey = apiKeyVal;
+        } else if (apiKeyVal) {
+          payload.apiKey = apiKeyVal;
+        }
+
+        savePlatformModelBtnEl.disabled = true;
+        try {
+          const endpoint = isEdit
+            ? '/user-api/admin/platform-models/' + encodeURIComponent(editingPlatformModelId)
+            : '/user-api/admin/platform-models';
+          const res = await fetch(endpoint, {
+            method: isEdit ? 'PATCH' : 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '保存平台模型失败', true);
+            return;
+          }
+          closePlatformModelForm();
+          showNotice(isEdit ? '平台模型已更新。' : '平台模型已添加。');
+          await loadPlatformModels();
+        } catch (err) {
+          showNotice('网络异常：' + err.message, true);
+        } finally {
+          savePlatformModelBtnEl.disabled = false;
+        }
+      });
+
+      platformModelRowsEl.addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-pm-act]');
+        if (!btn) return;
+        const id = btn.dataset.id;
+        const act = btn.dataset.pmAct;
+        const item = allPlatformModels.find((m) => m.id === id);
+        if (!item) return;
+
+        if (act === 'edit') {
+          openPlatformModelForm(item);
+          return;
+        }
+
+        if (act === 'test') {
+          btn.disabled = true;
+          const prevText = btn.textContent;
+          btn.textContent = '测试中...';
+          try {
+            const res = await fetch(
+              '/user-api/admin/platform-models/' + encodeURIComponent(id) + '/test',
+              {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+              }
+            );
+            const body = await res.json();
+            if (!res.ok) {
+              showNotice('模型「' + item.name + '」测试失败：' + (body.error || '未知错误'), true);
+            } else {
+              showNotice(
+                '模型「' + item.name + '」连通成功（' + body.latencyMs + 'ms）' +
+                (body.replyPreview ? '，回复预览：' + body.replyPreview : '')
+              );
+            }
+          } catch (err) {
+            showNotice('连通测试异常：' + err.message, true);
+          } finally {
+            btn.disabled = false;
+            btn.textContent = prevText;
+          }
+          return;
+        }
+
+        if (act === 'toggle') {
+          btn.disabled = true;
+          try {
+            const res = await fetch('/user-api/admin/platform-models/' + encodeURIComponent(id), {
+              method: 'PATCH',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ enabled: !item.enabled }),
+            });
+            const body = await res.json();
+            if (!res.ok) {
+              showNotice(body.error || '更新模型状态失败', true);
+            } else {
+              showNotice('已' + (body.model.enabled ? '启用' : '停用') + '平台模型「' + item.name + '」。');
+              await loadPlatformModels();
+            }
+          } catch (err) {
+            showNotice('请求失败：' + err.message, true);
+          } finally {
+            btn.disabled = false;
+          }
+          return;
+        }
+
+        if (act === 'delete') {
+          if (!window.confirm('确定要删除平台模型「' + item.name + '」吗？删除后前端将无法继续调用。')) {
+            return;
+          }
+          btn.disabled = true;
+          try {
+            const res = await fetch('/user-api/admin/platform-models/' + encodeURIComponent(id), {
+              method: 'DELETE',
+              credentials: 'same-origin',
+            });
+            const body = await res.json();
+            if (!res.ok) {
+              showNotice(body.error || '删除平台模型失败', true);
+            } else {
+              if (editingPlatformModelId === id) closePlatformModelForm();
+              showNotice('已删除平台模型「' + item.name + '」。');
+              await loadPlatformModels();
+            }
+          } catch (err) {
+            showNotice('请求失败：' + err.message, true);
+          } finally {
+            btn.disabled = false;
+          }
+        }
+      });
+
+      resetPresetUrlBtnEl.addEventListener('click', () => {
+        mpApplyUrlEl.value = '';
+      });
+      cancelModelPresetBtnEl.addEventListener('click', closeModelPresetForm);
+
+      modelPresetFormEl.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!editingPresetProviderId) return;
+        let defaultParams;
+        try {
+          defaultParams = collectParamsFromInputs(mpTempEl, mpTopPEl, mpMaxTokensEl, mpExtraParamsEl);
+        } catch (err) {
+          showNotice(err.message, true);
+          return;
+        }
+        const payload = {
+          customApplyUrl: mpApplyUrlEl.value.trim() || null,
+          applyLabel: mpApplyLabelEl.value.trim() || null,
+          defaultModelId: mpDefaultModelIdEl.value.trim() || null,
+          defaultParams,
+          enabled: mpEnabledEl.checked,
+        };
+        saveModelPresetBtnEl.disabled = true;
+        try {
+          const res = await fetch(
+            '/user-api/admin/model-presets/' + encodeURIComponent(editingPresetProviderId),
+            {
+              method: 'PATCH',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            }
+          );
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '保存国内预设配置失败', true);
+            return;
+          }
+          closeModelPresetForm();
+          showNotice('已保存国内预设「' + body.preset.name + '」配置。');
+          await loadModelPresets();
+        } catch (err) {
+          showNotice('网络异常：' + err.message, true);
+        } finally {
+          saveModelPresetBtnEl.disabled = false;
+        }
+      });
+
+      modelPresetRowsEl.addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-mp-act]');
+        if (!btn) return;
+        const id = btn.dataset.id;
+        const act = btn.dataset.mpAct;
+        const item = allModelPresets.find((p) => p.providerId === id);
+        if (!item) return;
+
+        if (act === 'edit') {
+          openModelPresetForm(item);
+          return;
+        }
+        if (act === 'toggle') {
+          btn.disabled = true;
+          try {
+            const res = await fetch('/user-api/admin/model-presets/' + encodeURIComponent(id), {
+              method: 'PATCH',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ enabled: !item.enabled }),
+            });
+            const body = await res.json();
+            if (!res.ok) {
+              showNotice(body.error || '更新预设状态失败', true);
+            } else {
+              showNotice('已' + (body.preset.enabled ? '启用' : '停用') + '国内预设「' + item.name + '」。');
+              await loadModelPresets();
+            }
+          } catch (err) {
+            showNotice('请求失败：' + err.message, true);
+          } finally {
+            btn.disabled = false;
+          }
+        }
+      });
+
       searchInputEl.addEventListener('input', renderRows);
       filterPillsEl.addEventListener('click', (e) => {
         const pill = e.target.closest('button[data-filter]');
@@ -778,6 +1659,41 @@ export function renderAdminHtml({
         if (!btn) return;
         const id = btn.dataset.id;
         const act = btn.dataset.act;
+
+        if (act === 'adjust-credits') {
+          const uname = btn.dataset.username || id;
+          const rawDelta = window.prompt('请输入要为用户「' + uname + '」调整的积分数量（正数为增加，负数为扣减）：', '100');
+          if (rawDelta === null) return;
+          const delta = Number(rawDelta.trim());
+          if (!Number.isInteger(delta) || delta === 0) {
+            showNotice('积分调整值必须为非零整数', true);
+            return;
+          }
+          const note = window.prompt('调整备注（可选）：', delta > 0 ? '活动赠送积分' : '人工扣减积分');
+          if (note === null) return;
+          btn.disabled = true;
+          try {
+            const res = await fetch('/user-api/admin/users/' + encodeURIComponent(id) + '/credits', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ delta, note: note.trim() || undefined }),
+            });
+            const body = await res.json();
+            if (!res.ok) {
+              showNotice(body.error || '调整积分失败', true);
+            } else {
+              showNotice('已为用户 ' + body.user.username + ' 调整积分（当前余额 ' + body.creditBalance + '）。');
+              await loadUsers();
+            }
+          } catch (err) {
+            showNotice('请求失败：' + err.message, true);
+          } finally {
+            btn.disabled = false;
+          }
+          return;
+        }
+
         if (act === 'reset-pwd') {
           const uname = btn.dataset.username || id;
           if (!window.confirm('确定要重置用户「' + uname + '」的密码吗？系统将生成新的 12 位随机临时密码。')) {
@@ -808,16 +1724,31 @@ export function renderAdminHtml({
           }
           return;
         }
+
         let payload = {};
-        if (act === 'pro30') {
+        if (act === 'apply-tier') {
+          const picker = btn.closest('.inline-tier-picker');
+          const tierVal = picker ? picker.querySelector('[data-tier-select]').value : 'free';
+          const durVal = picker ? picker.querySelector('[data-dur-select]').value : '30d';
+          let tierExpiresAt = null;
+          if (tierVal !== 'free') {
+            if (durVal === '30d') tierExpiresAt = Date.now() + THIRTY_DAYS_MS;
+            else if (durVal === '365d') tierExpiresAt = Date.now() + ONE_YEAR_MS;
+            else tierExpiresAt = null;
+          }
+          payload = { tier: tierVal, tierExpiresAt };
+        } else if (act === 'std30') {
+          payload = { tier: 'standard', tierExpiresAt: Date.now() + THIRTY_DAYS_MS };
+        } else if (act === 'pro30') {
           payload = { tier: 'pro', tierExpiresAt: Date.now() + THIRTY_DAYS_MS };
-        } else if (act === 'pro365') {
-          payload = { tier: 'pro', tierExpiresAt: Date.now() + ONE_YEAR_MS };
+        } else if (act === 'intForever') {
+          payload = { tier: 'internal', tierExpiresAt: null };
         } else if (act === 'free') {
           payload = { tier: 'free', tierExpiresAt: null };
         } else if (act === 'toggle') {
           payload = { disabled: btn.dataset.disabled !== '1' };
         }
+
         btn.disabled = true;
         try {
           const res = await fetch('/user-api/admin/users/' + encodeURIComponent(id), {
@@ -830,7 +1761,7 @@ export function renderAdminHtml({
           if (!res.ok) {
             showNotice(body.error || '操作失败', true);
           } else {
-            showNotice('已更新用户 ' + body.user.username);
+            showNotice('已更新用户 ' + body.user.username + '（当前可用积分 ' + (body.user.creditBalance ?? 0) + '）。');
             await refreshAll();
           }
         } catch (err) {
@@ -1167,7 +2098,7 @@ export function renderAdminHtml({
       });
 
       async function refreshAll() {
-        await Promise.all([loadUsers(), loadAnnouncements()]);
+        await Promise.all([loadUsers(), loadPlatformModels(), loadModelPresets(), loadAnnouncements()]);
       }
 
       document.getElementById('refreshBtn').addEventListener('click', refreshAll);
@@ -1191,7 +2122,7 @@ export function renderAdminHtml({
         <p class="muted">${
           authenticated
             ? `当前账号（${escapeHtml(username)}）不是管理员，请切换管理员账号登录。`
-            : '请使用管理员账号登录，以控制会员总开关、管理注册用户与 Pro 会员等级。'
+            : '请使用管理员账号登录，以控制会员总开关、月度积分、平台模型池与用户等级。'
         }</p>
         <div id="loginNotice" class="notice" style="display:none"></div>
         <form id="loginForm">
@@ -1367,7 +2298,7 @@ export function renderAdminHtml({
       color: var(--ink);
       -webkit-font-smoothing: antialiased;
     }
-    .shell { max-width: 1220px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .shell { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .topbar {
       display: flex;
       justify-content: space-between;
@@ -1395,14 +2326,19 @@ export function renderAdminHtml({
     }
     .switch-card {
       display: flex;
+      flex-direction: column;
+      gap: 16px;
+      border-color: var(--border-strong);
+      background: linear-gradient(135deg, #FFFFFF 0%, #F7F5EE 100%);
+    }
+    .switch-top {
+      display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 20px;
       flex-wrap: wrap;
-      border-color: var(--border-strong);
-      background: linear-gradient(135deg, #FFFFFF 0%, #F7F5EE 100%);
     }
-    .switch-info { max-width: 720px; }
+    .switch-info { max-width: 740px; }
     .switch-eyebrow {
       font-size: 11px;
       font-weight: 600;
@@ -1440,6 +2376,37 @@ export function renderAdminHtml({
       transition: transform 180ms ease;
     }
     .toggle-switch.is-on .toggle-thumb { transform: translateX(24px); }
+
+    .credits-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+      gap: 12px;
+      align-items: end;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+    .credits-grid label { margin: 0; }
+    .credits-submit { display: flex; align-items: flex-end; }
+    @media (max-width: 900px) {
+      .credits-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      align-items: end;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      align-items: start;
+    }
+    .stack-fields { display: flex; flex-direction: column; gap: 8px; }
+    @media (max-width: 900px) {
+      .grid-3, .grid-2 { grid-template-columns: 1fr; }
+    }
 
     .stats-grid {
       display: grid;
@@ -1505,7 +2472,45 @@ export function renderAdminHtml({
     tbody tr:hover { background: rgba(243, 241, 234, 0.45); }
     .sub { font-size: 11px; color: var(--subtle); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     .muted { color: var(--muted); }
-    .op-cell { display: flex; gap: 6px; flex-wrap: wrap; }
+    .op-cell { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+    .inline-tier-picker {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px;
+      border-radius: 9px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .mini-select {
+      width: auto !important;
+      margin-top: 0 !important;
+      padding: 4px 6px !important;
+      font-size: 12px !important;
+      border-radius: 7px !important;
+      background: #FFFFFF !important;
+    }
+
+    .param-chip {
+      display: inline-block;
+      margin: 1px 2px 1px 0;
+      padding: 1px 6px;
+      border-radius: 6px;
+      background: var(--chrome);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: var(--ink);
+    }
+    .preset-url-cell { max-width: 340px; word-break: break-all; }
+    .preset-url-link {
+      display: inline-block;
+      margin-bottom: 4px;
+      color: var(--accent);
+      font-size: 12px;
+      text-decoration: none;
+    }
+    .preset-url-link:hover { text-decoration: underline; }
 
     .btn {
       display: inline-flex;
@@ -1533,8 +2538,10 @@ export function renderAdminHtml({
     .btn-danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); }
 
     .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-    .badge-pro { background: var(--accent-soft); color: var(--accent); }
     .badge-free { background: var(--chrome); color: var(--muted); }
+    .badge-standard { background: #E0F2FE; color: #0369A1; }
+    .badge-pro { background: var(--accent-soft); color: var(--accent); }
+    .badge-internal { background: var(--copper-soft); color: #9A3412; }
     .badge-admin { background: var(--copper-soft); color: #9A3412; }
     .badge-neutral { background: #F4F4F5; color: var(--muted); }
     .badge-ok { background: var(--ok-soft); color: var(--ok); }
@@ -1590,7 +2597,7 @@ export function renderAdminHtml({
     .login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
     .login-eyebrow { font-size: 12px; font-weight: 600; color: var(--accent); }
     label { display: block; margin: 14px 0; font-size: 13px; font-weight: 500; color: var(--ink); }
-    input[type="text"], input[type="password"], input[type="url"], input[type="email"]:not(.search-input), input:not([type]), select, textarea {
+    input[type="text"], input[type="password"], input[type="url"], input[type="number"], input[type="email"]:not(.search-input), input:not([type]), select, textarea {
       width: 100%;
       margin-top: 6px;
       padding: 9px 12px;

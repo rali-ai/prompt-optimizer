@@ -1,7 +1,7 @@
 <template>
   <div class="image-model-list">
     <!-- 空状态 -->
-    <NEmpty v-if="configs.length === 0" :description="t('image.model.empty')">
+    <NEmpty v-if="visibleConfigs.length === 0" :description="t('image.model.empty')">
       <template #extra>
         <NButton type="primary" @click="openAddModal">{{ t('image.model.addFirst') }}</NButton>
       </template>
@@ -29,6 +29,16 @@
           <NText v-if="config.model?.capabilities?.text2image" depth="3">{{ t('image.capability.text2image') }}</NText>
           <NText v-if="config.model?.capabilities?.image2image" depth="3">{{ t('image.capability.image2image') }}</NText>
           <NText v-if="config.provider?.corsRestricted && !isElectronEnv" type="warning">{{ t('modelManager.corsRestrictedTag') }}</NText>
+          <a
+            v-if="getApplyLink(config).url"
+            class="image-mobile-apply-link"
+            :href="getApplyLink(config).url!"
+            target="_blank"
+            rel="noopener noreferrer"
+            @click.stop
+          >
+            {{ getApplyLink(config).label }} ↗
+          </a>
         </div>
         <template v-if="testResults[config.id]" #test-result>
           <div class="image-model-mobile-result" role="status">
@@ -52,7 +62,7 @@
     <!-- Desktop model list retains its existing presentation. -->
     <NSpace v-else vertical :size="12" class="image-model-stack">
       <NCard
-        v-for="config in configs"
+        v-for="config in visibleConfigs"
         :key="config.id"
         size="small"
         hoverable
@@ -108,6 +118,24 @@
         
         <template #header-extra>
           <NSpace @click.stop :size="4" class="image-model-actions">
+            <NButton
+              v-if="getApplyLink(config).url"
+              text
+              size="small"
+              type="primary"
+              tag="a"
+              :href="getApplyLink(config).url!"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="image-apply-link-btn"
+              data-testid="image-model-card-apply-link"
+            >
+              <template #icon>
+                <ExternalLinkIcon />
+              </template>
+              <span class="hidden md:inline">{{ getApplyLink(config).label }}</span>
+            </NButton>
+
             <NButton
               @click="testConnection(config.id)"
               size="small"
@@ -195,13 +223,16 @@ import {
   NSpace, NCard, NText, NTag, NButton, NEmpty, NInput, useDialog
 } from 'naive-ui'
 import { useImageModelManager } from '../composables/model/useImageModelManager'
+import { usePlatformModelCatalog } from '../composables/model/usePlatformModelCatalog'
 import { useConfirmDialog } from '../composables/ui/useConfirmDialog'
 import { useToast } from '../composables/ui/useToast'
 import { getI18nErrorMessage } from '../utils/error'
-import { isRunningInElectron, type IImageService, type ImageModel } from '@prompt-optimizer/core'
+import { isRunningInElectron, type IImageService, type ImageModel, type ImageModelConfig } from '@prompt-optimizer/core'
 import { getProviderDisplayName } from '../utils/provider-display'
+import { filterDomesticImageConfigs, resolveProviderApplyLink } from '../utils/domestic-models'
 import AppPreviewImage from './media/AppPreviewImage.vue'
 import MobileModelRow from './common/MobileModelRow.vue'
+import ExternalLinkIcon from './icons/ExternalLinkIcon.vue'
 import { useWorkspaceLayout } from '../composables/ui/useWorkspaceLayout'
 
 const { t } = useI18n()
@@ -210,6 +241,7 @@ const toast = useToast()
 const dialog = useDialog()
 const confirmDialog = useConfirmDialog()
 const isElectronEnv = isRunningInElectron()
+const platformCatalog = usePlatformModelCatalog()
 
 // 定义事件
 const emit = defineEmits(['add', 'edit', 'clone'])
@@ -245,11 +277,22 @@ const isTestingConnectionFor = (configId: string) => !!testingConnections.value[
 const providerDisplayName = (config: { provider?: { id?: string; name?: string }; providerId?: string }) =>
   getProviderDisplayName(config.provider || { id: config.providerId }, t)
 
+const visibleConfigs = computed(() =>
+  filterDomesticImageConfigs(configs.value, platformCatalog.presetsByProviderId.value)
+)
+
+const getApplyLink = (config: ImageModelConfig) =>
+  resolveProviderApplyLink(
+    config.providerId ?? config.provider?.id,
+    config.provider?.apiKeyUrl,
+    platformCatalog.presetsByProviderId.value,
+  )
+
 const searchQuery = ref('')
 const filteredConfigs = computed(() => {
   const query = searchQuery.value.trim().toLocaleLowerCase()
-  if (!query) return configs.value
-  return configs.value.filter(config => [config.name, config.id, config.modelId, config.model?.name, providerDisplayName(config)]
+  if (!query) return visibleConfigs.value
+  return visibleConfigs.value.filter(config => [config.name, config.id, config.modelId, config.model?.name, providerDisplayName(config)]
     .some(value => value?.toLocaleLowerCase().includes(query)))
 })
 
@@ -427,7 +470,10 @@ const deleteConfig = async (configId: string) => {
 // 初始化
 onMounted(async () => {
   try {
-    await initialize()
+    await Promise.all([
+      platformCatalog.loadModelPresets(),
+      initialize(),
+    ])
   } catch (error) {
     console.error('[ImageModelManager] Failed to initialize:', error)
   }
@@ -496,6 +542,21 @@ defineExpose({
 .image-model-actions {
   align-items: center;
   flex-wrap: nowrap;
+}
+
+.image-apply-link-btn {
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.image-mobile-apply-link {
+  color: var(--gp-accent, #0f766e);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.image-mobile-apply-link:hover {
+  text-decoration: underline;
 }
 
 /* 文本截断样式 */

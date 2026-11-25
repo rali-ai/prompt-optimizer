@@ -266,15 +266,94 @@
         <div class="account-summary" data-testid="account-sync-summary">
           <div class="account-row">
             <strong>{{ currentUser.username }}</strong>
-            <NTag v-if="membershipEnabled" size="small" :type="currentUser.tier === 'pro' ? 'info' : 'default'">
-              {{ currentUser.tier === 'pro' ? 'Pro' : 'Free' }}
+            <NTag
+              v-if="showTierBadge"
+              size="small"
+              :type="tierTagType(effectiveTier)"
+              data-testid="account-sync-tier-badge"
+            >
+              {{ formatTierLabel(effectiveTier, isZh) }}
             </NTag>
           </div>
           <div class="account-row account-row--muted">
             <span class="account-email-text">{{ currentUser.email || text.emailUnbound }}</span>
           </div>
+          <div v-if="tierExpiresText" class="account-row account-row--muted">
+            <span>{{ tierExpiresText }}</span>
+          </div>
           <div class="account-row account-row--muted">
             <span>{{ syncSummaryText }}</span>
+          </div>
+        </div>
+
+        <div class="credits-card" data-testid="account-sync-credits-card">
+          <div class="credits-card-header">
+            <span class="credits-card-title">{{ text.creditsTitle }}</span>
+            <NButton
+              quaternary
+              size="tiny"
+              :loading="loadingCredits"
+              data-testid="account-sync-refresh-credits"
+              :title="text.refreshCredits"
+              @click="handleRefreshCredits"
+            >
+              <template #icon>
+                <NIcon :size="12"><RefreshCw :stroke-width="1.75" /></NIcon>
+              </template>
+              {{ text.refreshCredits }}
+            </NButton>
+          </div>
+          <div class="credits-balance-row">
+            <span class="credits-balance-label">{{ text.availableCredits }}</span>
+            <strong class="credits-balance-value" data-testid="account-sync-credit-balance">
+              {{ displayCreditBalance }}
+            </strong>
+          </div>
+          <div v-if="credits" class="credits-quota-row">
+            <span>{{ monthlyQuotaText }}</span>
+          </div>
+          <div class="credits-hint">
+            {{ creditsHintText }}
+          </div>
+          <div v-if="credits" class="credits-ledger-section">
+            <button
+              type="button"
+              class="inline-text-btn credits-ledger-toggle"
+              data-testid="account-sync-ledger-toggle"
+              @click="showCreditLedger = !showCreditLedger"
+            >
+              <span>{{ showCreditLedger ? text.hideLedger : `${text.showLedger} (${credits.ledger.length})` }}</span>
+              <NIcon :size="12" class="credits-ledger-chevron" :class="{ 'credits-ledger-chevron--open': showCreditLedger }">
+                <ChevronDown :stroke-width="1.75" />
+              </NIcon>
+            </button>
+            <div v-if="showCreditLedger" class="credits-ledger-list" data-testid="account-sync-ledger-list">
+              <div v-if="credits.ledger.length === 0" class="credits-ledger-empty">
+                {{ text.ledgerEmpty }}
+              </div>
+              <div
+                v-for="entry in credits.ledger"
+                :key="entry.id"
+                class="credits-ledger-item"
+              >
+                <div class="credits-ledger-item-main">
+                  <span class="credits-ledger-reason">{{ formatLedgerReason(entry.reason) }}</span>
+                  <span
+                    class="credits-ledger-delta"
+                    :class="entry.delta >= 0 ? 'credits-ledger-delta--plus' : 'credits-ledger-delta--minus'"
+                  >
+                    {{ entry.delta >= 0 ? `+${entry.delta}` : entry.delta }}
+                  </span>
+                </div>
+                <div class="credits-ledger-item-meta">
+                  <span v-if="entry.modelId || entry.note" class="credits-ledger-note">
+                    {{ entry.modelId || entry.note }}
+                  </span>
+                  <span>{{ formatLedgerTime(entry.createdAt) }}</span>
+                  <span>{{ text.balanceAfterLabel(entry.balanceAfter) }}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -410,7 +489,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, onUnmounted, reactive, ref, type Ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref, watch, type Ref } from 'vue'
 import { i18n } from '../../plugins/i18n'
 import {
   NAlert,
@@ -424,7 +503,7 @@ import {
   NTabs,
   NTag,
 } from 'naive-ui'
-import { Cloud, ChevronDown, ShieldCheck } from '@lucide/vue'
+import { Cloud, ChevronDown, RefreshCw, ShieldCheck } from '@lucide/vue'
 import type { AppServices } from '../../types/services'
 import {
   UserSyncError,
@@ -442,9 +521,16 @@ import {
   stripSecretsForSync,
   toDataManagerImportEnvelope,
   updateProfile,
+  type MembershipTier,
+  type MonthlyCreditsConfig,
   type SyncPayload,
   type SyncUser,
 } from '../../utils/user-sync-client'
+import {
+  formatTierLabel,
+  tierTagType,
+  usePlatformModelCatalog,
+} from '../../composables/model/usePlatformModelCatalog'
 
 export interface AccountSyncButtonProps {
   baseUrl?: string
@@ -523,6 +609,14 @@ const text = computed(() =>
         okPulled: (v: number) => `已从云端拉取合并（版本 v${v}），本地模型 Key 保持不变`,
         okLoggedOut: '已退出登录',
         errConflict: '云端已有更新版本，请先点击「从云端拉取合并」后再上传',
+        creditsTitle: '网站积分',
+        refreshCredits: '刷新',
+        availableCredits: '可用积分',
+        showLedger: '积分明细',
+        hideLedger: '收起积分明细',
+        ledgerEmpty: '暂无积分变动记录',
+        balanceAfterLabel: (v: number) => `余 ${v}`,
+        tierExpiresPrefix: '会员到期：',
       }
     : {
         triggerSignedOut: 'Sign in / Sync',
@@ -580,18 +674,31 @@ const text = computed(() =>
         okPulled: (v: number) => `Pulled & merged from cloud (v${v}). Local API keys untouched.`,
         okLoggedOut: 'Signed out',
         errConflict: 'Cloud has a newer version. Please pull & merge first before uploading.',
+        creditsTitle: 'Site Credits',
+        refreshCredits: 'Refresh',
+        availableCredits: 'Available credits',
+        showLedger: 'Credit ledger',
+        hideLedger: 'Hide ledger',
+        ledgerEmpty: 'No credit transactions yet',
+        balanceAfterLabel: (v: number) => `Bal ${v}`,
+        tierExpiresPrefix: 'Expires: ',
       },
 )
+
+const platformCatalog = usePlatformModelCatalog()
+const { credits, loadingCredits } = platformCatalog
 
 const available = ref(false)
 const membershipEnabled = ref(false)
 const emailResetEnabled = ref(false)
+const monthlyCreditsConfig = ref<MonthlyCreditsConfig | null>(null)
 const currentUser = ref<SyncUser | null>(null)
 const lastSyncVersion = ref(0)
 const lastSyncUpdatedAt = ref<number | null>(null)
 
 const showModal = ref(false)
 const showSecurity = ref(false)
+const showCreditLedger = ref(false)
 const showForgotReset = ref(false)
 const resetCooldownSec = ref(0)
 let resetCooldownTimer: ReturnType<typeof setInterval> | null = null
@@ -623,6 +730,117 @@ const syncSummaryText = computed(() => {
   return `v${lastSyncVersion.value} · ${timeStr}`
 })
 
+const effectiveTier = computed<MembershipTier>(
+  () => credits.value?.effectiveTier || currentUser.value?.effectiveTier || currentUser.value?.tier || 'free',
+)
+
+const showTierBadge = computed(() => {
+  if (!currentUser.value) return false
+  return membershipEnabled.value || effectiveTier.value !== 'free' || credits.value !== null
+})
+
+const tierExpiresText = computed(() => {
+  const expiresAt = credits.value?.tierExpiresAt ?? currentUser.value?.tierExpiresAt ?? null
+  if (!expiresAt || expiresAt <= 0) return ''
+  return `${text.value.tierExpiresPrefix}${new Date(expiresAt).toLocaleDateString()}`
+})
+
+const displayCreditBalance = computed(() => {
+  if (credits.value) return credits.value.balance
+  if (typeof currentUser.value?.creditBalance === 'number') return currentUser.value.creditBalance
+  return 0
+})
+
+const monthlyQuotaText = computed(() => {
+  if (!credits.value) return ''
+  const { grantedThisMonth, monthlyAllowance } = credits.value
+  return isZh.value
+    ? `本月额度：已赠 ${grantedThisMonth} / ${monthlyAllowance}`
+    : `Monthly quota: ${grantedThisMonth} / ${monthlyAllowance} granted`
+})
+
+const creditsHintText = computed(() => {
+  const mc = credits.value?.monthlyCredits || monthlyCreditsConfig.value || {
+    free: 0,
+    standard: 100,
+    pro: 500,
+    internal: 1000,
+  }
+  return isZh.value
+    ? `会员每月自动获赠积分（标准 ${mc.standard} / 专业 ${mc.pro} / 内部 ${mc.internal}），可在模型列表中直接使用网站提供的平台模型，也可随时添加自己的 API Key（仅存本地）。`
+    : `Members get monthly credits (Standard ${mc.standard} / Pro ${mc.pro} / Internal ${mc.internal}) for platform-hosted models. You can also add your own local API keys anytime.`
+})
+
+function formatLedgerReason(reason: string): string {
+  const labelsZh: Record<string, string> = {
+    monthly_grant: '月度赠送',
+    tier_upgrade_grant: '升级补差',
+    model_usage: '模型调用',
+    usage_refund: '调用退还',
+    admin_adjust: '后台调整',
+  }
+  const labelsEn: Record<string, string> = {
+    monthly_grant: 'Monthly grant',
+    tier_upgrade_grant: 'Upgrade grant',
+    model_usage: 'Model usage',
+    usage_refund: 'Usage refund',
+    admin_adjust: 'Admin adjust',
+  }
+  return (isZh.value ? labelsZh[reason] : labelsEn[reason]) || reason
+}
+
+function formatLedgerTime(ts: number): string {
+  if (!ts || !Number.isFinite(ts)) return ''
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return ''
+  }
+}
+
+async function refreshCreditsAndPlatformModels(loggedIn: boolean) {
+  if (!loggedIn) {
+    if (services?.value?.modelManager) {
+      await platformCatalog.syncUserPlatformModels(services.value.modelManager, props.baseUrl, false)
+    }
+    return
+  }
+  const [creditRes] = await Promise.all([
+    platformCatalog.loadUserCredits(props.baseUrl),
+    services?.value?.modelManager
+      ? platformCatalog.syncUserPlatformModels(services.value.modelManager, props.baseUrl, true)
+      : platformCatalog.loadPlatformModels(props.baseUrl, true),
+  ])
+  if (creditRes && currentUser.value) {
+    currentUser.value = {
+      ...currentUser.value,
+      tier: creditRes.tier,
+      effectiveTier: creditRes.effectiveTier,
+      tierExpiresAt: creditRes.tierExpiresAt,
+      creditBalance: creditRes.balance,
+    }
+  }
+}
+
+async function handleRefreshCredits() {
+  if (!currentUser.value || loadingCredits.value) return
+  await refreshCreditsAndPlatformModels(true)
+}
+
+watch(
+  () => services?.value?.modelManager,
+  (modelManager) => {
+    if (modelManager && currentUser.value) {
+      void platformCatalog.syncUserPlatformModels(modelManager, props.baseUrl, true)
+    }
+  },
+)
+
 async function refreshSyncMeta() {
   try {
     const meta = await pullSync(props.baseUrl)
@@ -639,10 +857,13 @@ onMounted(async () => {
     available.value = true
     membershipEnabled.value = Boolean(cfg.membershipEnabled)
     emailResetEnabled.value = Boolean(cfg.emailResetEnabled)
+    monthlyCreditsConfig.value = cfg.monthlyCredits || null
     const user = await getMe(props.baseUrl)
     currentUser.value = user
     if (user) {
-      await refreshSyncMeta()
+      await Promise.all([refreshSyncMeta(), refreshCreditsAndPlatformModels(true)])
+    } else {
+      await refreshCreditsAndPlatformModels(false)
     }
   } catch {
     // /user-api is absent (desktop, extension, static build): stay hidden cleanly.
@@ -753,10 +974,16 @@ function togglePanel() {
       .then((cfg) => {
         membershipEnabled.value = Boolean(cfg.membershipEnabled)
         emailResetEnabled.value = Boolean(cfg.emailResetEnabled)
+        if (cfg.monthlyCredits) {
+          monthlyCreditsConfig.value = cfg.monthlyCredits
+        }
       })
       .catch(() => {
         // ignore transient refresh errors
       })
+    if (currentUser.value) {
+      void refreshCreditsAndPlatformModels(true)
+    }
   }
   showModal.value = !showModal.value
 }
@@ -792,7 +1019,7 @@ async function handleLogin() {
     currentUser.value = await login(form.username.trim(), form.password, props.baseUrl)
     form.password = ''
     securityForm.email = currentUser.value?.email || ''
-    await refreshSyncMeta()
+    await Promise.all([refreshSyncMeta(), refreshCreditsAndPlatformModels(true)])
   } catch (err) {
     notice.value = { type: 'error', text: errorMessage(err) }
   } finally {
@@ -832,6 +1059,7 @@ async function handleRegister() {
     securityForm.email = currentUser.value?.email || ''
     lastSyncVersion.value = 0
     lastSyncUpdatedAt.value = null
+    await refreshCreditsAndPlatformModels(true)
   } catch (err) {
     notice.value = { type: 'error', text: errorMessage(err) }
   } finally {
@@ -989,12 +1217,14 @@ async function handleLogout() {
     await logout(props.baseUrl)
     currentUser.value = null
     showSecurity.value = false
+    showCreditLedger.value = false
     securityForm.email = ''
     securityForm.currentPassword = ''
     securityForm.newPassword = ''
     securityForm.confirmNewPassword = ''
     lastSyncVersion.value = 0
     lastSyncUpdatedAt.value = null
+    await platformCatalog.clearUserPlatformState(services?.value?.modelManager)
     notice.value = { type: 'success', text: text.value.okLoggedOut }
   } catch (err) {
     notice.value = { type: 'error', text: errorMessage(err) }
@@ -1227,5 +1457,146 @@ async function handleLogout() {
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.credits-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--gp-surface-muted, rgba(128, 128, 128, 0.08));
+  border: 1px solid var(--gp-border, rgba(24, 24, 27, 0.08));
+  font-size: 12px;
+}
+
+.credits-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.credits-card-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.credits-balance-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.credits-balance-label {
+  font-size: 11px;
+  color: var(--gp-muted, #52525b);
+}
+
+.credits-balance-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gp-accent, #0f766e);
+  font-variant-numeric: tabular-nums;
+}
+
+.credits-quota-row {
+  font-size: 11px;
+  color: var(--gp-muted, #52525b);
+}
+
+.credits-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--gp-muted, #52525b);
+}
+
+.credits-ledger-section {
+  padding-top: 4px;
+  border-top: 1px solid var(--gp-border, rgba(24, 24, 27, 0.08));
+}
+
+.credits-ledger-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.credits-ledger-chevron {
+  transition: transform 160ms ease;
+}
+
+.credits-ledger-chevron--open {
+  transform: rotate(180deg);
+}
+
+.credits-ledger-list {
+  margin-top: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.credits-ledger-empty {
+  font-size: 11px;
+  color: var(--gp-muted, #52525b);
+  padding: 4px 0;
+}
+
+.credits-ledger-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 5px;
+  border-bottom: 1px dashed var(--gp-border, rgba(24, 24, 27, 0.08));
+  font-size: 11px;
+}
+
+.credits-ledger-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.credits-ledger-item-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.credits-ledger-reason {
+  font-weight: 500;
+}
+
+.credits-ledger-delta {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.credits-ledger-delta--plus {
+  color: var(--gp-accent, #0f766e);
+}
+
+.credits-ledger-delta--minus {
+  color: var(--gp-copper, #d96b43);
+}
+
+.credits-ledger-item-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--gp-muted, #52525b);
+}
+
+.credits-ledger-note {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

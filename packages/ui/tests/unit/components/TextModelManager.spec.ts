@@ -78,15 +78,25 @@ describe('TextModelManager deletion updates', () => {
 })
 
 
-describe('Chrome placeholder visibility', () => {
-  it('hides only the untouched placeholder and preserves explicitly disabled connections', async () => {
+describe('Domestic and platform model visibility', () => {
+  it('hides overseas providers and chrome-built-in while preserving domestic and platform models', async () => {
     const placeholder = { id: 'chrome-built-in', providerId: 'chrome-built-in', providerMeta: { id: 'chrome-built-in' }, enabled: false, connectionConfig: {}, activationState: { userConfigured: false } }
-    const saved = { ...placeholder, id: 'custom-chrome', activationState: { userConfigured: true } }
-    manager.current = { models: ref([placeholder, saved]), testingConnections: ref({}), isDefaultModel: () => false, cancelLocalModelRequest: vi.fn(), loadProviders: vi.fn(), loadModels: vi.fn() }
+    const savedChrome = { ...placeholder, id: 'custom-chrome', activationState: { userConfigured: true } }
+    const overseas = { id: 'openai', providerId: 'openai', providerMeta: { id: 'openai' }, enabled: true, connectionConfig: {} }
+    const domestic = { id: 'deepseek', providerId: 'deepseek', providerMeta: { id: 'deepseek' }, enabled: false, connectionConfig: {} }
+    const platform = { id: 'platform:deepseek-v3', providerId: 'openai-compatible', providerMeta: { id: 'openai-compatible' }, enabled: true, connectionConfig: {} }
+    manager.current = {
+      models: ref([placeholder, savedChrome, overseas, domestic, platform]),
+      testingConnections: ref({}),
+      isDefaultModel: () => false,
+      cancelLocalModelRequest: vi.fn(),
+      loadProviders: vi.fn(),
+      loadModels: vi.fn(),
+    }
     const wrapper = mount(TextModelManager, { global: { stubs: { TextModelList: true, TextModelEditModal: true, LocalServiceDiscovery: true } } })
     await flushPromises()
-    expect(wrapper.findComponent({ name: 'TextModelList' }).props('models')).toEqual([saved])
-    expect(wrapper.findComponent(LocalServiceDiscovery).props('models')).toHaveLength(2)
+    expect(wrapper.findComponent({ name: 'TextModelList' }).props('models')).toEqual([domestic, platform])
+    expect(wrapper.findComponent(LocalServiceDiscovery).props('models')).toHaveLength(5)
     wrapper.unmount()
   })
 })

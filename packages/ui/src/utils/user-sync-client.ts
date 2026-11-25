@@ -1,7 +1,17 @@
+export type MembershipTier = 'free' | 'standard' | 'pro' | 'internal'
+
+export interface MonthlyCreditsConfig {
+  free: number
+  standard: number
+  pro: number
+  internal: number
+}
+
 export interface UserSyncConfig {
   membershipEnabled: boolean
   registrationEnabled: boolean
   emailResetEnabled?: boolean
+  monthlyCredits?: MonthlyCreditsConfig
 }
 
 export interface SyncUser {
@@ -9,11 +19,65 @@ export interface SyncUser {
   username: string
   email?: string | null
   role: 'user' | 'admin'
-  tier: 'free' | 'pro'
+  tier: MembershipTier
+  effectiveTier?: MembershipTier
   tierExpiresAt: number | null
+  creditBalance?: number
+  lastCreditGrantMonth?: string | null
+  lastCreditGrantAmount?: number
   disabled: boolean
   createdAt: number
   updatedAt: number
+}
+
+export interface CreditLedgerEntry {
+  id: string
+  delta: number
+  balanceAfter: number
+  reason: string
+  modelId: string | null
+  note: string | null
+  createdAt: number
+}
+
+export interface UserCreditsResponse {
+  balance: number
+  tier: MembershipTier
+  effectiveTier: MembershipTier
+  tierExpiresAt: number | null
+  monthlyAllowance: number
+  currentMonth: string
+  grantedThisMonth: number
+  monthlyCredits: MonthlyCreditsConfig
+  ledger: CreditLedgerEntry[]
+}
+
+export interface PublicPlatformModel {
+  id: string
+  name: string
+  providerLabel: string
+  creditCost: number
+  minTier: MembershipTier
+  defaultParams: Record<string, unknown>
+  applyUrl: string | null
+  description: string | null
+  sortOrder: number
+  accessible: boolean
+  accessReason: string | null
+}
+
+export interface DomesticModelPreset {
+  providerId: string
+  name: string
+  category: 'text' | 'image' | 'both'
+  applyUrl: string | null
+  customApplyUrl: string | null
+  defaultApplyUrl: string | null
+  applyLabel: string
+  defaultModelId: string | null
+  defaultParams: Record<string, unknown>
+  enabled: boolean
+  updatedAt: number | null
 }
 
 export interface SyncPayload {
@@ -78,6 +142,23 @@ export function isExtensionRuntime(): boolean {
 
 export function resolveDefaultSyncBaseUrl(): string {
   return isExtensionRuntime() ? EXTENSION_SYNC_BASE_URL : DEFAULT_BASE_URL
+}
+
+export function getStoredExtensionToken(): string {
+  return readStoredToken()
+}
+
+export function resolvePlatformAiBaseUrl(baseUrl?: string): string {
+  const raw = typeof baseUrl === 'string' && baseUrl.trim() ? baseUrl.trim() : resolveDefaultSyncBaseUrl()
+  const normalized = raw.replace(/\/+$/, '')
+  if (/^https?:\/\//i.test(normalized)) {
+    return `${normalized}/ai/v1`
+  }
+  const normalizedPath = normalized.startsWith('/') ? normalized : `/${normalized}`
+  if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
+    return `${window.location.origin.replace(/\/+$/, '')}${normalizedPath}/ai/v1`
+  }
+  return `${normalizedPath}/ai/v1`
 }
 
 function readStoredToken(): string {
@@ -488,6 +569,179 @@ export async function getActiveAnnouncements(
   const items: ActiveAnnouncement[] = []
   for (const entry of res.announcements) {
     const normalized = normalizeAnnouncement(entry)
+    if (normalized) items.push(normalized)
+  }
+  return items
+}
+
+function normalizeMembershipTier(raw: unknown): MembershipTier {
+  if (raw === 'free' || raw === 'standard' || raw === 'pro' || raw === 'internal') {
+    return raw
+  }
+  return 'free'
+}
+
+function normalizeFiniteNumber(raw: unknown, fallback = 0): number {
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : fallback
+}
+
+function normalizeNullableNumber(raw: unknown): number | null {
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null
+}
+
+function normalizeOptionalString(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed ? trimmed : null
+}
+
+function normalizePlainParams(raw: unknown): Record<string, unknown> {
+  return isPlainObject(raw) ? { ...raw } : {}
+}
+
+function normalizeMonthlyCredits(raw: unknown): MonthlyCreditsConfig {
+  const src = isPlainObject(raw) ? raw : {}
+  return {
+    free: Math.max(0, normalizeFiniteNumber(src.free, 0)),
+    standard: Math.max(0, normalizeFiniteNumber(src.standard, 0)),
+    pro: Math.max(0, normalizeFiniteNumber(src.pro, 0)),
+    internal: Math.max(0, normalizeFiniteNumber(src.internal, 0)),
+  }
+}
+
+function normalizeCreditLedgerEntry(raw: unknown): CreditLedgerEntry | null {
+  if (!isPlainObject(raw)) return null
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  if (!id) return null
+  return {
+    id,
+    delta: normalizeFiniteNumber(raw.delta, 0),
+    balanceAfter: normalizeFiniteNumber(raw.balanceAfter, 0),
+    reason: typeof raw.reason === 'string' && raw.reason.trim() ? raw.reason.trim() : 'unknown',
+    modelId: normalizeOptionalString(raw.modelId),
+    note: normalizeOptionalString(raw.note),
+    createdAt: normalizeFiniteNumber(raw.createdAt, 0),
+  }
+}
+
+function normalizePublicPlatformModel(raw: unknown): PublicPlatformModel | null {
+  if (!isPlainObject(raw)) return null
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const name = typeof raw.name === 'string' ? raw.name.trim() : ''
+  if (!id || !name) return null
+  return {
+    id,
+    name,
+    providerLabel:
+      typeof raw.providerLabel === 'string' && raw.providerLabel.trim()
+        ? raw.providerLabel.trim()
+        : '平台模型',
+    creditCost: Math.max(0, normalizeFiniteNumber(raw.creditCost, 0)),
+    minTier: normalizeMembershipTier(raw.minTier),
+    defaultParams: normalizePlainParams(raw.defaultParams),
+    applyUrl: safeAnnouncementUrl(raw.applyUrl),
+    description: normalizeOptionalString(raw.description),
+    sortOrder: normalizeFiniteNumber(raw.sortOrder, 0),
+    accessible: Boolean(raw.accessible),
+    accessReason: normalizeOptionalString(raw.accessReason),
+  }
+}
+
+function normalizePresetCategory(raw: unknown): 'text' | 'image' | 'both' {
+  if (raw === 'text' || raw === 'image' || raw === 'both') {
+    return raw
+  }
+  return 'text'
+}
+
+function normalizeDomesticModelPreset(raw: unknown): DomesticModelPreset | null {
+  if (!isPlainObject(raw)) return null
+  const providerId = typeof raw.providerId === 'string' ? raw.providerId.trim() : ''
+  if (!providerId) return null
+  return {
+    providerId,
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : providerId,
+    category: normalizePresetCategory(raw.category),
+    applyUrl: safeAnnouncementUrl(raw.applyUrl),
+    customApplyUrl: safeAnnouncementUrl(raw.customApplyUrl),
+    defaultApplyUrl: safeAnnouncementUrl(raw.defaultApplyUrl),
+    applyLabel:
+      typeof raw.applyLabel === 'string' && raw.applyLabel.trim()
+        ? raw.applyLabel.trim()
+        : '申请 API Key',
+    defaultModelId: normalizeOptionalString(raw.defaultModelId),
+    defaultParams: normalizePlainParams(raw.defaultParams),
+    enabled: raw.enabled !== false,
+    updatedAt: normalizeNullableNumber(raw.updatedAt),
+  }
+}
+
+export async function getCredits(
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<UserCreditsResponse> {
+  const raw = await requestJson<Record<string, unknown>>(
+    joinUrl(baseUrl, '/credits'),
+    { method: 'GET' },
+    fetchImpl,
+  )
+  const src = isPlainObject(raw) ? raw : {}
+  const tier = normalizeMembershipTier(src.tier)
+  const effectiveTier = src.effectiveTier !== undefined ? normalizeMembershipTier(src.effectiveTier) : tier
+  const rawLedger = Array.isArray(src.ledger) ? src.ledger : []
+  const ledger: CreditLedgerEntry[] = []
+  for (const entry of rawLedger) {
+    const normalized = normalizeCreditLedgerEntry(entry)
+    if (normalized) ledger.push(normalized)
+  }
+  return {
+    balance: Math.max(0, normalizeFiniteNumber(src.balance, 0)),
+    tier,
+    effectiveTier,
+    tierExpiresAt: normalizeNullableNumber(src.tierExpiresAt),
+    monthlyAllowance: Math.max(0, normalizeFiniteNumber(src.monthlyAllowance, 0)),
+    currentMonth: typeof src.currentMonth === 'string' ? src.currentMonth.trim() : '',
+    grantedThisMonth: Math.max(0, normalizeFiniteNumber(src.grantedThisMonth, 0)),
+    monthlyCredits: normalizeMonthlyCredits(src.monthlyCredits),
+    ledger,
+  }
+}
+
+export async function getPlatformModels(
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PublicPlatformModel[]> {
+  const res = await requestJson<{ models?: unknown }>(
+    joinUrl(baseUrl, '/platform-models'),
+    { method: 'GET' },
+    fetchImpl,
+  )
+  if (!isPlainObject(res) || !Array.isArray(res.models)) {
+    return []
+  }
+  const items: PublicPlatformModel[] = []
+  for (const entry of res.models) {
+    const normalized = normalizePublicPlatformModel(entry)
+    if (normalized) items.push(normalized)
+  }
+  return items.sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+export async function getModelPresets(
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DomesticModelPreset[]> {
+  const res = await requestJson<{ presets?: unknown }>(
+    joinUrl(baseUrl, '/model-presets'),
+    { method: 'GET' },
+    fetchImpl,
+  )
+  if (!isPlainObject(res) || !Array.isArray(res.presets)) {
+    return []
+  }
+  const items: DomesticModelPreset[] = []
+  for (const entry of res.presets) {
+    const normalized = normalizeDomesticModelPreset(entry)
     if (normalized) items.push(normalized)
   }
   return items

@@ -16,8 +16,8 @@ vi.mock('naive-ui', async original => ({ ...await original<typeof import('naive-
 vi.mock('../../../src/composables/ui/useToast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn() }) }))
 
 const model = () => ({
-  id: 'image-a', name: 'Image A', providerId: 'openai', modelId: 'image-model-a', enabled: true,
-  provider: { id: 'openai', name: 'OpenAI' }, model: { id: 'image-model-a', name: 'Image Model A', capabilities: { text2image: true } },
+  id: 'image-a', name: 'Image A', providerId: 'seedream', modelId: 'image-model-a', enabled: true,
+  provider: { id: 'seedream', name: 'Seedream' }, model: { id: 'image-model-a', name: 'Image Model A', capabilities: { text2image: true } },
 })
 const stubs = {
   NSpace: { template: '<div><slot /></div>' },
@@ -78,9 +78,24 @@ describe('image model mobile list', () => {
     expect(wrapper.find('.image-model-card').exists()).toBe(true)
     state.compact.value = true
     await flushPromises()
-    wrapper.findComponent(NInput).vm.$emit('update:value', 'OPENAI')
+    wrapper.findComponent(NInput).vm.$emit('update:value', 'SEEDREAM')
     await flushPromises()
     expect(wrapper.findAllComponents(MobileModelRow)).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('filters out overseas image model configs while keeping domestic configs', async () => {
+    state.current.configs.value = [
+      model(),
+      {
+        id: 'image-overseas', name: 'Overseas Image', providerId: 'openai', modelId: 'gpt-image-1', enabled: true,
+        provider: { id: 'openai', name: 'OpenAI' }, model: { id: 'gpt-image-1', name: 'GPT Image', capabilities: { text2image: true } },
+      },
+    ]
+    const wrapper = shallowMount(ImageModelManager, { global: { renderStubDefaultSlot: true, stubs, provide: { imageService: { testConnection: vi.fn() } } } })
+    await flushPromises()
+    expect(wrapper.findAllComponents(MobileModelRow)).toHaveLength(1)
+    expect(wrapper.findComponent(MobileModelRow).props('title')).toBe('Image A')
     wrapper.unmount()
   })
 

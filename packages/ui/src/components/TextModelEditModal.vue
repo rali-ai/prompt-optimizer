@@ -138,23 +138,25 @@
             </template>
 
             <template v-if="field.name === 'apiKey'" #label>
-              <NSpace align="center" :size="4">
+              <NSpace align="center" :size="6">
                 <span>{{ t('modelManager.apiKey') }}</span>
                 <NButton
-                  v-if="currentProviderApiKeyUrl"
+                  v-if="currentProviderApiKeyLink.url"
                   text
                   size="tiny"
                   type="primary"
                   tag="a"
-                  :href="currentProviderApiKeyUrl"
+                  :href="currentProviderApiKeyLink.url"
                   target="_blank"
                   rel="noopener noreferrer"
                   style="padding: 0 4px;"
-                  :title="t('modelManager.getApiKey')"
+                  data-testid="text-model-apply-link"
+                  :title="currentProviderApiKeyLink.label"
                 >
                   <template #icon>
                     <ExternalLinkIcon />
                   </template>
+                  {{ currentProviderApiKeyLink.label }}
                 </NButton>
               </NSpace>
             </template>
@@ -398,6 +400,8 @@ import LocalProviderHelp from './LocalProviderHelp.vue'
 import type { TextModelManager } from '../composables/model/useTextModelManager'
 import { resolveTextConnectionFieldLabel } from '../utils/model-connection-label'
 import { getProviderDisplayName } from '../utils/provider-display'
+import { resolveProviderApplyLink } from '../utils/domestic-models'
+import { usePlatformModelCatalog } from '../composables/model/usePlatformModelCatalog'
 import { useWorkspaceLayout } from '../composables/ui/useWorkspaceLayout'
 import { useCompactSelectMenu } from '../composables/ui/useSelectMenuViewport'
 
@@ -540,10 +544,15 @@ watch(customHeaderValidationMessage, message => {
   if (message) headersExpanded.value = true
 })
 
-// 获取当前选择的 Provider 的 API Key URL
-const currentProviderApiKeyUrl = computed(() => {
-  return manager.selectedProvider.value?.apiKeyUrl || null
-})
+// 获取当前选择的 Provider 的 API Key 申请/推广链接（优先使用后台预设配置）
+const platformCatalog = usePlatformModelCatalog()
+const currentProviderApiKeyLink = computed(() =>
+  resolveProviderApplyLink(
+    form.value.providerId,
+    manager.selectedProvider.value?.apiKeyUrl,
+    platformCatalog.presetsByProviderId.value,
+  )
+)
 
 const currentProviderHint = computed(() => {
   const provider = manager.selectedProvider.value

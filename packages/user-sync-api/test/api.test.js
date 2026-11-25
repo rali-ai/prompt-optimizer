@@ -63,6 +63,7 @@ test('healthz, default config (MEMBERSHIP_ENABLED=false), and auto-persisted .se
       membershipEnabled: false,
       registrationEnabled: true,
       emailResetEnabled: false,
+      monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
     });
   } finally {
     await ctx.cleanup();
@@ -300,7 +301,7 @@ test('admin bootstrap, non-admin 403, PATCH tier/disabled, and disabled user 403
       headers: { Cookie: adminCookie },
     });
     assert.equal(adminHtml.status, 200);
-    assert.match(await adminHtml.text(), /设为 Pro \+30天/);
+    assert.match(await adminHtml.text(), /设为专业\+30天/);
 
     // Admin lists users
     const listRes = await fetch(`${ctx.baseUrl}/user-api/admin/users`, {
@@ -445,6 +446,7 @@ test('admin membership toggle persists across restarts and updates /config and /
       membershipEnabled: true,
       registrationEnabled: true,
       emailResetEnabled: false,
+      monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
     });
     const usersAfterEnable = await fetch(`${base1}/user-api/admin/users`, {
       headers: { Cookie: adminCookie },
@@ -470,6 +472,7 @@ test('admin membership toggle persists across restarts and updates /config and /
       membershipEnabled: true,
       registrationEnabled: true,
       emailResetEnabled: false,
+      monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
     });
 
     // Toggle back to false
@@ -492,6 +495,7 @@ test('admin membership toggle persists across restarts and updates /config and /
       membershipEnabled: false,
       registrationEnabled: true,
       emailResetEnabled: false,
+      monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
     });
   } finally {
     if (app1) await app1.close();
@@ -1595,5 +1599,899 @@ test('announcements Resend test/broadcast email push, HTML escaping, partial fai
     if (app1) await app1.close();
     if (app2) await app2.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+
+test('legacy prod DB migration from CHECK (tier IN (free, pro)) preserves users & sync blobs and enables 4 tiers + credits', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { hashPassword } = await import('../src/crypto.js');
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'legacy-prod', 'users.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+  const now = Date.now();
+  const existingUserId = 'legacy-user-001';
+  const legacyDb = new DatabaseSync(dbPath);
+  legacyDb.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      email TEXT,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+      tier TEXT NOT NULL DEFAULT 'free' CHECK (tier IN ('free', 'pro')),
+      tier_expires_at INTEGER,
+      disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1)),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_users_email_unique
+      ON users(email)
+      WHERE email IS NOT NULL AND email != '';
+    CREATE TABLE user_sync_blobs (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      payload_json TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      bytes INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+  legacyDb
+    .prepare(
+      `INSERT INTO users (id, username, email, password_hash, role, tier, tier_expires_at, disabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'user', 'pro', NULL, 0, ?, ?)`,
+    )
+    .run(existingUserId, 'legacy_pro', 'legacy@example.com', hashPassword('LegacyPass123!'), now, now);
+  const blobJson = JSON.stringify({ favorites: [{ id: 'keep-1', title: '保留收藏' }] });
+  legacyDb
+    .prepare(
+      `INSERT INTO user_sync_blobs (user_id, payload_json, version, bytes, updated_at)
+       VALUES (?, ?, 7, ?, ?)`,
+    )
+    .run(existingUserId, blobJson, Buffer.byteLength(blobJson, 'utf8'), now);
+  legacyDb.close();
+
+  const env = {
+    USER_SYNC_HOST: '127.0.0.1',
+    USER_SYNC_PORT: '0',
+    USER_SYNC_DB_PATH: dbPath,
+    ADMIN_USERNAME: 'root_admin',
+    ADMIN_PASSWORD: 'AdminPassword123!',
+    RATE_LIMIT_MAX: '50',
+    RATE_LIMIT_WINDOW_MS: '60000',
+  };
+
+  let app1 = createApp(loadConfig(env));
+  let app2 = null;
+  try {
+    const addr1 = await app1.listen();
+    const base1 = `http://${addr1.host}:${addr1.port}`;
+
+    // Verify table SQL upgraded and foreign keys remain completely valid
+    const schemaRow = app1.db.raw
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'")
+      .get();
+    assert.ok(schemaRow.sql.includes("'standard'"));
+    assert.ok(schemaRow.sql.includes("'internal'"));
+    assert.deepEqual(app1.db.raw.prepare('PRAGMA foreign_key_check').all(), []);
+
+    // Migrated user logs in, receives monthly pro credits, and keeps exact sync blob
+    const userLogin = await fetch(`${base1}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'legacy_pro', password: 'LegacyPass123!' }),
+    });
+    assert.equal(userLogin.status, 200);
+    const userCookie = extractCookieHeader(userLogin);
+    const userLoginBody = await userLogin.json();
+    assert.equal(userLoginBody.user.id, existingUserId);
+    assert.equal(userLoginBody.user.email, 'legacy@example.com');
+    assert.equal(userLoginBody.user.tier, 'pro');
+    assert.equal(userLoginBody.user.effectiveTier, 'pro');
+    assert.equal(userLoginBody.user.creditBalance, 500);
+
+    const syncRes = await fetch(`${base1}/user-api/sync`, {
+      headers: { Cookie: userCookie },
+    });
+    assert.equal(syncRes.status, 200);
+    const syncBody = await syncRes.json();
+    assert.equal(syncBody.version, 7);
+    assert.deepEqual(syncBody.data, { favorites: [{ id: 'keep-1', title: '保留收藏' }] });
+
+    // Admin can now assign standard and internal tiers without CHECK constraint failure
+    const adminLogin = await fetch(`${base1}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    const toStd = await fetch(`${base1}/user-api/admin/users/${existingUserId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'standard', tierExpiresAt: Date.now() + 86_400_000 }),
+    });
+    assert.equal(toStd.status, 200);
+    assert.equal((await toStd.json()).user.tier, 'standard');
+
+    const toInternal = await fetch(`${base1}/user-api/admin/users/${existingUserId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'internal', tierExpiresAt: null }),
+    });
+    assert.equal(toInternal.status, 200);
+    const internalBody = await toInternal.json();
+    assert.equal(internalBody.user.tier, 'internal');
+    assert.equal(internalBody.user.creditBalance, 1000);
+
+    // Reopen migrated DB cleanly (migration is idempotent)
+    await app1.close();
+    app1 = null;
+    app2 = createApp(loadConfig(env));
+    const addr2 = await app2.listen();
+    const base2 = `http://${addr2.host}:${addr2.port}`;
+
+    const syncAfterRestart = await fetch(`${base2}/user-api/sync`, {
+      headers: { Cookie: userCookie },
+    });
+    assert.equal(syncAfterRestart.status, 200);
+    assert.equal((await syncAfterRestart.json()).version, 7);
+  } finally {
+    if (app1) await app1.close();
+    if (app2) await app2.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('4-tier monthly credits config, idempotent monthly grants, mid-month upgrade diff top-up, and manual adjust', async () => {
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'credits', 'users.db');
+  const env = {
+    USER_SYNC_HOST: '127.0.0.1',
+    USER_SYNC_PORT: '0',
+    USER_SYNC_DB_PATH: dbPath,
+    ADMIN_USERNAME: 'root_admin',
+    ADMIN_PASSWORD: 'AdminPassword123!',
+    RATE_LIMIT_MAX: '100',
+    RATE_LIMIT_WINDOW_MS: '60000',
+  };
+
+  let app1 = createApp(loadConfig(env));
+  let app2 = null;
+  try {
+    const addr1 = await app1.listen();
+    const base1 = `http://${addr1.host}:${addr1.port}`;
+
+    const adminLogin = await fetch(`${base1}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    assert.equal(adminLogin.status, 200);
+    const adminCookie = extractCookieHeader(adminLogin);
+    const adminLoginBody = await adminLogin.json();
+    // Admin has effectiveTier 'internal' and receives internal monthly credits (1000)
+    assert.equal(adminLoginBody.user.effectiveTier, 'internal');
+    assert.equal(adminLoginBody.user.creditBalance, 1000);
+
+    // Invalid monthlyCredits patches rejected -> 400
+    for (const badCredits of [
+      { standard: -1 },
+      { pro: 1.5 },
+      { internal: 1_000_001 },
+      { ultra: 999 },
+      {},
+    ]) {
+      const badRes = await fetch(`${base1}/user-api/admin/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({ monthlyCredits: badCredits }),
+      });
+      assert.equal(badRes.status, 400, `expected 400 for ${JSON.stringify(badCredits)}`);
+    }
+
+    // Update monthly credits and verify persistence across restart
+    const updateCredits = await fetch(`${base1}/user-api/admin/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ monthlyCredits: { standard: 120, pro: 600 } }),
+    });
+    assert.equal(updateCredits.status, 200);
+    assert.deepEqual((await updateCredits.json()).monthlyCredits, {
+      free: 0,
+      standard: 120,
+      pro: 600,
+      internal: 1000,
+    });
+
+    await app1.close();
+    app1 = null;
+    app2 = createApp(loadConfig(env));
+    const addr2 = await app2.listen();
+    const base2 = `http://${addr2.host}:${addr2.port}`;
+
+    const cfgAfterRestart = await (await fetch(`${base2}/user-api/config`)).json();
+    assert.deepEqual(cfgAfterRestart.monthlyCredits, {
+      free: 0,
+      standard: 120,
+      pro: 600,
+      internal: 1000,
+    });
+
+    // Register normal user (free -> 0 credits)
+    const regRes = await fetch(`${base2}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'credit_user', password: 'Password123!' }),
+    });
+    assert.equal(regRes.status, 201);
+    const userCookie = extractCookieHeader(regRes);
+    const { user } = await regRes.json();
+    assert.equal(user.creditBalance, 0);
+    assert.equal(user.effectiveTier, 'free');
+
+    // Upgrade free -> standard (+30d): grants 120 immediately
+    const upStd = await fetch(`${base2}/user-api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'standard', tierExpiresAt: Date.now() + 30 * 86_400_000 }),
+    });
+    assert.equal(upStd.status, 200);
+    assert.equal((await upStd.json()).user.creditBalance, 120);
+
+    // Repeated /me and /credits in the same month are idempotent (still 120)
+    await fetch(`${base2}/user-api/me`, { headers: { Cookie: userCookie } });
+    const cred1 = await (await fetch(`${base2}/user-api/credits`, { headers: { Cookie: userCookie } })).json();
+    assert.equal(cred1.balance, 120);
+    assert.equal(cred1.effectiveTier, 'standard');
+    assert.equal(cred1.monthlyAllowance, 120);
+    assert.equal(cred1.grantedThisMonth, 120);
+    assert.equal(cred1.ledger.length, 1);
+
+    // Mid-month upgrade standard -> pro: tops up diff (600 - 120 = +480)
+    const upPro = await fetch(`${base2}/user-api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'pro', tierExpiresAt: Date.now() + 30 * 86_400_000 }),
+    });
+    assert.equal(upPro.status, 200);
+    assert.equal((await upPro.json()).user.creditBalance, 600);
+
+    // Mid-month upgrade pro -> internal: tops up diff (1000 - 600 = +400)
+    const upInt = await fetch(`${base2}/user-api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'internal', tierExpiresAt: null }),
+    });
+    assert.equal(upInt.status, 200);
+    assert.equal((await upInt.json()).user.creditBalance, 1000);
+
+    // Downgrade internal -> standard: NEVER deducts credits, re-upgrade does NOT double grant
+    const downStd = await fetch(`${base2}/user-api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'standard', tierExpiresAt: Date.now() + 30 * 86_400_000 }),
+    });
+    assert.equal(downStd.status, 200);
+    assert.equal((await downStd.json()).user.creditBalance, 1000);
+
+    const reUpInt = await fetch(`${base2}/user-api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'internal', tierExpiresAt: null }),
+    });
+    assert.equal(reUpInt.status, 200);
+    assert.equal((await reUpInt.json()).user.creditBalance, 1000);
+
+    // Simulate next month rollover -> grants fresh 1000 credits
+    app2.db.raw
+      .prepare("UPDATE users SET last_credit_grant_month = '2020-01' WHERE id = ?")
+      .run(user.id);
+    const nextMonthCredits = await (
+      await fetch(`${base2}/user-api/credits`, { headers: { Cookie: userCookie } })
+    ).json();
+    assert.equal(nextMonthCredits.balance, 2000);
+    assert.equal(nextMonthCredits.ledger[0].reason, 'monthly_grant');
+    assert.equal(nextMonthCredits.ledger[0].delta, 1000);
+
+    // Admin manual credit adjust: non-admin 403, +50, -200, reject negative -> 400
+    const nonAdminAdj = await fetch(`${base2}/user-api/admin/users/${user.id}/credits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ delta: 50 }),
+    });
+    assert.equal(nonAdminAdj.status, 403);
+
+    const zeroAdj = await fetch(`${base2}/user-api/admin/users/${user.id}/credits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ delta: 0 }),
+    });
+    assert.equal(zeroAdj.status, 400);
+
+    const addAdj = await fetch(`${base2}/user-api/admin/users/${user.id}/credits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ delta: 50, note: '活动补偿' }),
+    });
+    assert.equal(addAdj.status, 200);
+    assert.equal((await addAdj.json()).creditBalance, 2050);
+
+    const subAdj = await fetch(`${base2}/user-api/admin/users/${user.id}/credits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ delta: -200, note: '手动核减' }),
+    });
+    assert.equal(subAdj.status, 200);
+    assert.equal((await subAdj.json()).creditBalance, 1850);
+
+    const negAdj = await fetch(`${base2}/user-api/admin/users/${user.id}/credits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ delta: -9999 }),
+    });
+    assert.equal(negAdj.status, 400);
+
+    // Expired tier user falls back to free effectiveTier
+    const regExpired = await fetch(`${base2}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'expired_user', password: 'Password123!' }),
+    });
+    const expiredCookie = extractCookieHeader(regExpired);
+    const { user: expUser } = await regExpired.json();
+    await fetch(`${base2}/user-api/admin/users/${expUser.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'pro', tierExpiresAt: Date.now() - 60_000 }),
+    });
+    const expMe = await (await fetch(`${base2}/user-api/me`, { headers: { Cookie: expiredCookie } })).json();
+    assert.equal(expMe.user.tier, 'pro');
+    assert.equal(expMe.user.effectiveTier, 'free');
+    assert.equal(expMe.user.creditBalance, 0);
+  } finally {
+    if (app1) await app1.close();
+    if (app2) await app2.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('platform models CRUD, key masking, test endpoint, tier gate 403, 402 credits, non-stream & SSE stream proxy, and auto-refund on 500', async () => {
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'platform-models', 'users.db');
+  const upstreamCalls = [];
+  let nextUpstreamMode = 'ok-json';
+
+  const mockFetch = async (url, init) => {
+    const authHeader = init?.headers?.Authorization || '';
+    const body = JSON.parse(String(init?.body || '{}'));
+    upstreamCalls.push({ url, authHeader, body });
+
+    if (nextUpstreamMode === 'fail-500') {
+      return new Response(
+        JSON.stringify({
+          error: { message: 'Upstream overloaded with key sk-platform-secret-123456789' },
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    if (nextUpstreamMode === 'sse') {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode('data: {"id":"cmpl-1","choices":[{"delta":{"content":"你好"}}]}\n\n'),
+          );
+          controller.enqueue(
+            encoder.encode('data: {"id":"cmpl-1","choices":[{"delta":{"content":"世界"}}]}\n\n'),
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
+      });
+    }
+
+    return new Response(
+      JSON.stringify({
+        id: 'chatcmpl-test',
+        object: 'chat.completion',
+        model: body.model,
+        choices: [{ index: 0, message: { role: 'assistant', content: 'Hello from upstream!' } }],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  };
+
+  const app = createApp(
+    loadConfig({
+      USER_SYNC_HOST: '127.0.0.1',
+      USER_SYNC_PORT: '0',
+      USER_SYNC_DB_PATH: dbPath,
+      ADMIN_USERNAME: 'root_admin',
+      ADMIN_PASSWORD: 'AdminPassword123!',
+      RATE_LIMIT_MAX: '100',
+      RATE_LIMIT_WINDOW_MS: '60000',
+    }),
+    { fetchImpl: mockFetch },
+  );
+
+  try {
+    const addr = await app.listen();
+    const baseUrl = `http://${addr.host}:${addr.port}`;
+
+    // Register normal user and login as admin
+    const regRes = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'std_member', password: 'Password123!' }),
+    });
+    const userCookie = extractCookieHeader(regRes);
+    const { user: stdUser } = await regRes.json();
+
+    const adminLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    // Upgrade std_member to standard (+100 credits)
+    await fetch(`${baseUrl}/user-api/admin/users/${stdUser.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'standard', tierExpiresAt: Date.now() + 30 * 86_400_000 }),
+    });
+
+    // Non-admin blocked from admin platform-models routes -> 403
+    const nonAdminCreate = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ name: 'x' }),
+    });
+    assert.equal(nonAdminCreate.status, 403);
+
+    // Reject bad URL and prototype pollution in defaultParams
+    const badProto = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: '{"name":"Bad","baseUrl":"https://api.example.com/v1","apiKey":"sk-1","upstreamModel":"m","defaultParams":{"__proto__":{"x":1}}}',
+    });
+    assert.equal(badProto.status, 400);
+
+    const badUrl = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        name: 'BadUrl',
+        baseUrl: 'javascript:alert(1)',
+        apiKey: 'sk-1',
+        upstreamModel: 'm',
+      }),
+    });
+    assert.equal(badUrl.status, 400);
+
+    // Create 3 models: standard model, pro model (auto slug), disabled model
+    const createStd = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        id: 'platform-deepseek-v3',
+        name: 'DeepSeek V3 平台版',
+        providerLabel: 'DeepSeek 平台',
+        baseUrl: 'https://api.deepseek.example/v1/',
+        apiKey: 'sk-platform-secret-123456789',
+        upstreamModel: 'deepseek-chat',
+        creditCost: 10,
+        minTier: 'standard',
+        defaultParams: { temperature: 0.6, enable_thinking: false },
+        applyUrl: 'https://platform.deepseek.com/?ref=goprmpt',
+        description: '中文优化主力',
+        sortOrder: 1,
+        enabled: true,
+      }),
+    });
+    assert.equal(createStd.status, 201);
+    const { model: stdModel } = await createStd.json();
+    assert.equal(stdModel.id, 'platform-deepseek-v3');
+    assert.equal(stdModel.apiKeyHint, 'sk-p••••6789');
+    assert.equal(stdModel.hasApiKey, true);
+    assert.equal('apiKey' in stdModel, false);
+    assert.equal(JSON.stringify(stdModel).includes('sk-platform-secret-123456789'), false);
+
+    const createPro = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        name: 'Qwen3 Max 专业版',
+        baseUrl: 'https://dashscope.example/compatible-mode/v1',
+        apiKey: 'sk-pro-secret-99998888',
+        upstreamModel: 'qwen3-max',
+        creditCost: 25,
+        minTier: 'pro',
+        sortOrder: 2,
+      }),
+    });
+    assert.equal(createPro.status, 201);
+    const { model: proModel } = await createPro.json();
+    assert.match(proModel.id, /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$/);
+
+    const createDisabled = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        id: 'disabled-model',
+        name: '已停用模型',
+        baseUrl: 'https://disabled.example/v1',
+        apiKey: 'sk-disabled-123456',
+        upstreamModel: 'x',
+        enabled: false,
+      }),
+    });
+    assert.equal(createDisabled.status, 201);
+
+    // PATCH with empty apiKey keeps existing stored key intact
+    const patchKeepKey = await fetch(`${baseUrl}/user-api/admin/platform-models/${stdModel.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ description: '已更新说明', apiKey: '' }),
+    });
+    assert.equal(patchKeepKey.status, 200);
+    const patchedModel = (await patchKeepKey.json()).model;
+    assert.equal(patchedModel.description, '已更新说明');
+    assert.equal(patchedModel.apiKeyHint, 'sk-p••••6789');
+
+    // Admin list never returns plaintext key
+    const adminList = await (
+      await fetch(`${baseUrl}/user-api/admin/platform-models`, { headers: { Cookie: adminCookie } })
+    ).json();
+    assert.equal(adminList.models.length, 3);
+    assert.equal(JSON.stringify(adminList).includes('sk-platform-secret-123456789'), false);
+
+    // Connectivity test endpoint
+    upstreamCalls.length = 0;
+    const testRes = await fetch(`${baseUrl}/user-api/admin/platform-models/${stdModel.id}/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: '{}',
+    });
+    assert.equal(testRes.status, 200);
+    const testBody = await testRes.json();
+    assert.equal(testBody.ok, true);
+    assert.equal(testBody.upstreamModel, 'deepseek-chat');
+    assert.equal(testBody.replyPreview, 'Hello from upstream!');
+    assert.equal(upstreamCalls.length, 1);
+    assert.equal(upstreamCalls[0].url, 'https://api.deepseek.example/v1/chat/completions');
+    assert.equal(upstreamCalls[0].authHeader, 'Bearer sk-platform-secret-123456789');
+    assert.equal(upstreamCalls[0].body.enable_thinking, false);
+    assert.equal(upstreamCalls[0].body.max_tokens, 16);
+
+    // Public /platform-models strips secrets & baseUrl and excludes disabled
+    const anonModels = await (await fetch(`${baseUrl}/user-api/platform-models`)).json();
+    assert.equal(anonModels.models.length, 2);
+    assert.equal('apiKey' in anonModels.models[0], false);
+    assert.equal('apiKeyHint' in anonModels.models[0], false);
+    assert.equal('baseUrl' in anonModels.models[0], false);
+    assert.equal(anonModels.models[0].accessible, false);
+    assert.equal(anonModels.models[0].accessReason, 'login_required');
+
+    const stdPublicModels = await (
+      await fetch(`${baseUrl}/user-api/platform-models`, { headers: { Cookie: userCookie } })
+    ).json();
+    const pubStd = stdPublicModels.models.find((m) => m.id === stdModel.id);
+    const pubPro = stdPublicModels.models.find((m) => m.id === proModel.id);
+    assert.equal(pubStd.accessible, true);
+    assert.equal(pubStd.accessReason, null);
+    assert.equal(pubPro.accessible, false);
+    assert.equal(pubPro.accessReason, 'tier_required');
+
+    // OpenAI /ai/v1/models lists ONLY accessible enabled models
+    const aiModelsStd = await (
+      await fetch(`${baseUrl}/user-api/ai/v1/models`, { headers: { Cookie: userCookie } })
+    ).json();
+    assert.equal(aiModelsStd.object, 'list');
+    assert.deepEqual(
+      aiModelsStd.data.map((m) => m.id),
+      [stdModel.id],
+    );
+
+    const aiModelsAdmin = await (
+      await fetch(`${baseUrl}/user-api/ai/v1/models`, { headers: { Cookie: adminCookie } })
+    ).json();
+    assert.equal(aiModelsAdmin.data.length, 2);
+
+    // Tier gate 403 when standard user calls pro model
+    const tierGateRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: proModel.id,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    });
+    assert.equal(tierGateRes.status, 403);
+    assert.match((await tierGateRes.json()).error, /专业会员/);
+
+    // Disabled model -> 404
+    const disabledCall = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ model: 'disabled-model', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    assert.equal(disabledCall.status, 404);
+
+    // Non-streaming proxy merges defaultParams, forces upstream model, deducts 10 credits & returns headers
+    upstreamCalls.length = 0;
+    const extOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const chatRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: userCookie,
+        Origin: extOrigin,
+      },
+      body: JSON.stringify({
+        model: stdModel.id,
+        temperature: 0.9,
+        messages: [{ role: 'user', content: '优化提示词' }],
+      }),
+    });
+    assert.equal(chatRes.status, 200);
+    assert.equal(chatRes.headers.get('x-goprmpt-credits-remaining'), '90');
+    assert.equal(chatRes.headers.get('x-goprmpt-credits-cost'), '10');
+    assert.match(
+      chatRes.headers.get('access-control-expose-headers') || '',
+      /X-GoPrmpt-Credits-Remaining/,
+    );
+    assert.match(chatRes.headers.get('access-control-allow-methods') || '', /DELETE/);
+    const chatBody = await chatRes.json();
+    assert.equal(chatBody.choices[0].message.content, 'Hello from upstream!');
+    assert.equal(upstreamCalls.length, 1);
+    assert.equal(upstreamCalls[0].body.model, 'deepseek-chat');
+    assert.equal(upstreamCalls[0].body.temperature, 0.9);
+    assert.equal(upstreamCalls[0].body.enable_thinking, false);
+
+    // SSE streaming proxy streams chunks and deducts 10 credits (90 -> 80)
+    nextUpstreamMode = 'sse';
+    const sseRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: stdModel.id,
+        stream: true,
+        messages: [{ role: 'user', content: '流式测试' }],
+      }),
+    });
+    assert.equal(sseRes.status, 200);
+    assert.match(sseRes.headers.get('content-type') || '', /text\/event-stream/);
+    assert.equal(sseRes.headers.get('x-goprmpt-credits-remaining'), '80');
+    assert.equal(sseRes.headers.get('x-goprmpt-credits-cost'), '10');
+    const sseText = await sseRes.text();
+    assert.ok(sseText.includes('你好'));
+    assert.ok(sseText.includes('世界'));
+    assert.ok(sseText.includes('[DONE]'));
+
+    // Upstream 500 error automatically refunds 10 credits (remains 80) and scrubs secret
+    nextUpstreamMode = 'fail-500';
+    const failRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: stdModel.id,
+        messages: [{ role: 'user', content: '触发故障' }],
+      }),
+    });
+    assert.equal(failRes.status, 500);
+    const failBody = await failRes.json();
+    assert.equal(failBody.error.includes('sk-platform-secret-123456789'), false);
+
+    const creditsAfterRefund = await (
+      await fetch(`${baseUrl}/user-api/credits`, { headers: { Cookie: userCookie } })
+    ).json();
+    assert.equal(creditsAfterRefund.balance, 80);
+    assert.equal(creditsAfterRefund.ledger[0].reason, 'usage_refund');
+    assert.equal(creditsAfterRefund.ledger[0].delta, 10);
+    assert.equal(creditsAfterRefund.ledger[1].reason, 'usage_debit');
+    assert.equal(creditsAfterRefund.ledger[1].delta, -10);
+
+    // Insufficient credits -> 402 and upstream is NOT called
+    await fetch(`${baseUrl}/user-api/admin/users/${stdUser.id}/credits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ delta: -75, note: '扣减至 5 积分测试' }),
+    });
+    nextUpstreamMode = 'ok-json';
+    upstreamCalls.length = 0;
+    const lowCreditRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: stdModel.id,
+        messages: [{ role: 'user', content: '余额不足' }],
+      }),
+    });
+    assert.equal(lowCreditRes.status, 402);
+    const lowCreditBody = await lowCreditRes.json();
+    assert.equal(lowCreditBody.balance, 5);
+    assert.equal(lowCreditBody.required, 10);
+    assert.equal(upstreamCalls.length, 0);
+
+    // Delete platform model -> 200, second delete -> 404
+    const delModel = await fetch(`${baseUrl}/user-api/admin/platform-models/${proModel.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(delModel.status, 200);
+    const delModelAgain = await fetch(`${baseUrl}/user-api/admin/platform-models/${proModel.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(delModelAgain.status, 404);
+  } finally {
+    await app.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('domestic model presets GET/PATCH, promo links with query params, XSS rejection, and upgraded admin HTML controls', async () => {
+  const ctx = await startTestApp();
+  try {
+    // Public /model-presets works without auth and returns exact 10 providers in order
+    const initPublic = await fetch(`${ctx.baseUrl}/user-api/model-presets`);
+    assert.equal(initPublic.status, 200);
+    const { presets: initPresets } = await initPublic.json();
+    assert.deepEqual(
+      initPresets.map((p) => p.providerId),
+      [
+        'deepseek',
+        'dashscope',
+        'siliconflow',
+        'zhipu',
+        'modelscope',
+        'minimax',
+        'xiaomi-mimo-token-plan',
+        'seedream',
+        'ollama',
+        'openai-compatible',
+      ],
+    );
+    assert.equal(initPresets[0].applyUrl, 'https://platform.deepseek.com/api_keys');
+    assert.equal(initPresets[0].customApplyUrl, null);
+    assert.equal(initPresets[8].applyUrl, null);
+
+    // Non-admin blocked from admin preset endpoints -> 403
+    const userReg = await fetch(`${ctx.baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'preset_user', password: 'Password123!' }),
+    });
+    const userCookie = extractCookieHeader(userReg);
+    const nonAdminPresetGet = await fetch(`${ctx.baseUrl}/user-api/admin/model-presets`, {
+      headers: { Cookie: userCookie },
+    });
+    assert.equal(nonAdminPresetGet.status, 403);
+
+    // Login as admin
+    const adminLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    // Unknown providerId -> 404
+    const unknownPatch = await fetch(`${ctx.baseUrl}/user-api/admin/model-presets/nonexistent`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ enabled: false }),
+    });
+    assert.equal(unknownPatch.status, 404);
+
+    // Reject javascript: / data: URLs and invalid defaultParams -> 400
+    for (const badBody of [
+      JSON.stringify({ applyUrl: 'javascript:alert(1)' }),
+      JSON.stringify({ customApplyUrl: 'data:text/html,<script>1</script>' }),
+      '{"defaultParams":{"__proto__":{"bad":1}}}',
+      JSON.stringify({}),
+    ]) {
+      const badRes = await fetch(`${ctx.baseUrl}/user-api/admin/model-presets/deepseek`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: badBody,
+      });
+      assert.equal(badRes.status, 400);
+    }
+
+    // Update deepseek with affiliate/promo link (with query params), label, defaultModelId & defaultParams
+    const promoUrl = 'https://platform.deepseek.com/sign_up?ref=goprmpt_vip&channel=web';
+    const patch1 = await fetch(`${ctx.baseUrl}/user-api/admin/model-presets/deepseek`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        applyUrl: promoUrl,
+        applyLabel: '领取免费额度',
+        defaultModelId: 'deepseek-reasoner',
+        defaultParams: { temperature: 0.5, max_tokens: 4096, enable_thinking: true },
+      }),
+    });
+    assert.equal(patch1.status, 200);
+    const { preset: updated1 } = await patch1.json();
+    assert.equal(updated1.applyUrl, promoUrl);
+    assert.equal(updated1.customApplyUrl, promoUrl);
+    assert.equal(updated1.defaultApplyUrl, 'https://platform.deepseek.com/api_keys');
+    assert.equal(updated1.applyLabel, '领取免费额度');
+    assert.equal(updated1.defaultModelId, 'deepseek-reasoner');
+    assert.deepEqual(updated1.defaultParams, {
+      temperature: 0.5,
+      max_tokens: 4096,
+      enable_thinking: true,
+    });
+    assert.equal(updated1.enabled, true);
+
+    // Partial PATCH preserves previously saved fields
+    const patch2 = await fetch(`${ctx.baseUrl}/user-api/admin/model-presets/deepseek`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ enabled: false }),
+    });
+    assert.equal(patch2.status, 200);
+    const { preset: updated2 } = await patch2.json();
+    assert.equal(updated2.enabled, false);
+    assert.equal(updated2.applyUrl, promoUrl);
+    assert.equal(updated2.defaultModelId, 'deepseek-reasoner');
+    assert.deepEqual(updated2.defaultParams, {
+      temperature: 0.5,
+      max_tokens: 4096,
+      enable_thinking: true,
+    });
+
+    // Clearing custom applyUrl falls back cleanly to defaultApplyUrl
+    const patchResetUrl = await fetch(`${ctx.baseUrl}/user-api/admin/model-presets/deepseek`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ applyUrl: '', enabled: true }),
+    });
+    assert.equal(patchResetUrl.status, 200);
+    const { preset: resetPreset } = await patchResetUrl.json();
+    assert.equal(resetPreset.customApplyUrl, null);
+    assert.equal(resetPreset.applyUrl, 'https://platform.deepseek.com/api_keys');
+    assert.equal(resetPreset.enabled, true);
+
+    // Public /model-presets matches admin state
+    const pubAfter = await (await fetch(`${ctx.baseUrl}/user-api/model-presets`)).json();
+    const adminAfter = await (
+      await fetch(`${ctx.baseUrl}/user-api/admin/model-presets`, { headers: { Cookie: adminCookie } })
+    ).json();
+    assert.deepEqual(pubAfter.presets, adminAfter.presets);
+
+    // Verify upgraded admin console HTML renders all new cards, 4-tier controls, zero em dashes, and valid JS
+    const adminHtmlRes = await fetch(`${ctx.baseUrl}/user-api/admin`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(adminHtmlRes.status, 200);
+    const html = await adminHtmlRes.text();
+    assert.match(html, /id="platformModelsCard"/);
+    assert.match(html, /id="modelPresetsCard"/);
+    assert.match(html, /id="creditsFreeInput"/);
+    assert.match(html, /id="creditsStandardInput"/);
+    assert.match(html, /id="creditsProInput"/);
+    assert.match(html, /id="creditsInternalInput"/);
+    assert.match(html, /保存积分设置/);
+    assert.match(html, /设为标准\+30天/);
+    assert.match(html, /设为专业\+30天/);
+    assert.match(html, /设为内部\(永久\)/);
+    assert.match(html, /调积分/);
+    assert.equal(html.includes('—'), false, 'admin UI copy should not contain em dashes');
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    assert.ok(scriptMatch);
+    assert.doesNotThrow(() => new Function(scriptMatch[1]));
+  } finally {
+    await ctx.cleanup();
   }
 });

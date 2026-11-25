@@ -16,16 +16,33 @@
       :testing="isTestingConnectionFor(model.id)"
       :test-label="t('common.test')"
       :menu-options="mobileActions(model)"
-      @edit="emit('edit', model.id)"
+      @edit="handleMobileEdit(model)"
       @test="emit('test', model.id)"
       @action="handleMobileAction($event, model)"
     >
-      <div v-if="hasMobileCapabilities(model)" class="mobile-text-model-capabilities">
+      <div v-if="hasMobileCapabilities(model) || isPlatformModel(model) || getApplyLink(model).url" class="mobile-text-model-capabilities">
+        <span v-if="isPlatformModel(model)" class="mobile-platform-badge">{{ isZh ? '网站提供' : 'Platform' }}</span>
+        <span v-if="getPlatformMeta(model)">
+          {{ isZh ? `每次 ${getPlatformMeta(model)!.creditCost} 积分` : `${getPlatformMeta(model)!.creditCost} credits` }}
+        </span>
+        <span v-if="getPlatformMeta(model)">
+          {{ formatTierLabel(getPlatformMeta(model)!.minTier, isZh) }}
+        </span>
         <span v-if="model.modelMeta?.capabilities?.supportsTools">{{ t('modelManager.capabilities.tools') }}</span>
         <span v-if="model.modelMeta?.capabilities?.supportsReasoning">{{ t('modelManager.capabilities.reasoning') }}</span>
         <span v-if="model.providerMeta?.corsRestricted && !isElectronEnv" class="mobile-text-model-restriction">
           {{ t('modelManager.corsRestrictedTag') }}
         </span>
+        <a
+          v-if="getApplyLink(model).url"
+          class="mobile-apply-link"
+          :href="getApplyLink(model).url!"
+          target="_blank"
+          rel="noopener noreferrer"
+          @click.stop
+        >
+          {{ getApplyLink(model).label }} ↗
+        </a>
       </div>
     </MobileModelRow>
     <NEmpty v-if="!filteredModels.length" :description="t('common.noContent')" size="small" />
@@ -44,6 +61,36 @@
           <NSpace vertical :size="4" class="model-card-heading">
             <NSpace align="center" :size="8">
               <NText strong>{{ modelDisplayName(model) }}</NText>
+              <NTag
+                v-if="isPlatformModel(model)"
+                type="primary"
+                size="small"
+                round
+                :bordered="false"
+                data-testid="platform-model-badge"
+              >
+                {{ isZh ? '网站提供' : 'Platform' }}
+              </NTag>
+              <NTag
+                v-if="getPlatformMeta(model)"
+                type="info"
+                size="small"
+                round
+                :bordered="false"
+                data-testid="platform-model-credit-cost"
+              >
+                {{ isZh ? `每次 ${getPlatformMeta(model)!.creditCost} 积分` : `${getPlatformMeta(model)!.creditCost} credits/call` }}
+              </NTag>
+              <NTag
+                v-if="getPlatformMeta(model)"
+                :type="tierTagType(getPlatformMeta(model)!.minTier)"
+                size="small"
+                round
+                :bordered="false"
+                data-testid="platform-model-tier-badge"
+              >
+                {{ formatTierLabel(getPlatformMeta(model)!.minTier, isZh) }}
+              </NTag>
               <NTag v-if="!model.enabled" type="warning" size="small" round :bordered="false">
                 {{ t('modelManager.disabled') }}
               </NTag>
@@ -91,6 +138,24 @@
       <template #header-extra>
         <NSpace @click.stop :size="4" class="model-card-actions">
           <NButton
+            v-if="getApplyLink(model).url"
+            text
+            size="small"
+            type="primary"
+            tag="a"
+            :href="getApplyLink(model).url!"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="model-apply-link-btn"
+            data-testid="text-model-card-apply-link"
+          >
+            <template #icon>
+              <ExternalLinkIcon />
+            </template>
+            <span class="hidden md:inline">{{ getApplyLink(model).label }}</span>
+          </NButton>
+
+          <NButton
             @click="emit('test', model.id)"
             size="small"
             quaternary
@@ -104,6 +169,7 @@
           </NButton>
 
           <NButton
+            v-if="!isPlatformModel(model)"
             @click="emit('edit', model.id)"
             size="small"
             quaternary
@@ -115,6 +181,7 @@
           </NButton>
 
           <NButton
+            v-if="!isPlatformModel(model)"
             @click="emit('clone', model.id)"
             size="small"
             quaternary
@@ -139,7 +206,7 @@
           </NButton>
 
           <NButton
-            v-if="!isDefaultModel(model.id)"
+            v-if="!isDefaultModel(model.id) && !isPlatformModel(model)"
             @click="emit('delete', model.id)"
             size="small"
             type="error"
@@ -161,11 +228,19 @@ import { Link as UiLink, SquarePen as UiSquarePen, Copy as UiCopy, PowerOff as U
 import { computed, ref, type PropType } from 'vue'
 
 import { useI18n } from 'vue-i18n'
+import { i18n } from '../plugins/i18n'
 import { NButton, NCard, NTag, NText, NSpace, NInput, NEmpty, type DropdownOption } from 'naive-ui'
 import MobileModelRow from './common/MobileModelRow.vue'
+import ExternalLinkIcon from './icons/ExternalLinkIcon.vue'
 import { useWorkspaceLayout } from '../composables/ui/useWorkspaceLayout'
 import { isRunningInElectron, type TextModelConfig } from '@prompt-optimizer/core'
 import { getProviderDisplayName, getTextModelConfigDisplayName } from '../utils/provider-display'
+import { isPlatformModelId, resolveProviderApplyLink } from '../utils/domestic-models'
+import {
+  formatTierLabel,
+  tierTagType,
+  usePlatformModelCatalog,
+} from '../composables/model/usePlatformModelCatalog'
 
 const { models, isTestingConnectionFor, isDefaultModel } = defineProps({
   models: {
@@ -185,6 +260,8 @@ const { models, isTestingConnectionFor, isDefaultModel } = defineProps({
 const emit = defineEmits(['test', 'edit', 'clone', 'enable', 'disable', 'delete'])
 
 const { t } = useI18n()
+const isZh = computed(() => String(i18n.global.locale.value || '').toLowerCase().startsWith('zh'))
+const catalog = usePlatformModelCatalog()
 
 const { isCompact } = useWorkspaceLayout()
 const search = ref('')
@@ -195,20 +272,58 @@ const filteredModels = computed(() => {
     .some(value => value?.toLocaleLowerCase().includes(query)))
 })
 const isElectronEnv = isRunningInElectron()
-const mobileActions = (model: TextModelConfig): DropdownOption[] => [
-  { label: t('modelManager.cloneModel'), key: 'clone' },
-  { label: model.enabled ? t('common.disable') : t('common.enable'), key: model.enabled ? 'disable' : 'enable' },
-  ...(!isDefaultModel(model.id) ? [{ label: t('common.delete'), key: 'delete' }] : []),
-]
+const isPlatformModel = (model: TextModelConfig) => isPlatformModelId(model.id)
+const getPlatformMeta = (model: TextModelConfig) =>
+  isPlatformModel(model) ? (catalog.platformMetaByConfigId.value.get(model.id) || null) : null
+
+const getApplyLink = (model: TextModelConfig): { url: string | null; label: string } => {
+  if (isPlatformModel(model)) {
+    const meta = getPlatformMeta(model)
+    return {
+      url: meta?.applyUrl || null,
+      label: isZh.value ? '申请 API Key' : 'Get API Key',
+    }
+  }
+  const providerId = model.providerId ?? model.providerMeta?.id
+  return resolveProviderApplyLink(
+    providerId,
+    model.providerMeta?.apiKeyUrl,
+    catalog.presetsByProviderId.value,
+  )
+}
+
+const handleMobileEdit = (model: TextModelConfig) => {
+  if (isPlatformModel(model)) return
+  emit('edit', model.id)
+}
+
+const mobileActions = (model: TextModelConfig): DropdownOption[] => {
+  if (isPlatformModel(model)) {
+    return [
+      { label: model.enabled ? t('common.disable') : t('common.enable'), key: model.enabled ? 'disable' : 'enable' },
+    ]
+  }
+  return [
+    { label: t('modelManager.cloneModel'), key: 'clone' },
+    { label: model.enabled ? t('common.disable') : t('common.enable'), key: model.enabled ? 'disable' : 'enable' },
+    ...(!isDefaultModel(model.id) ? [{ label: t('common.delete'), key: 'delete' }] : []),
+  ]
+}
 const handleMobileAction = (action: string, model: TextModelConfig) => {
-  if (action === 'clone' || action === 'enable' || action === 'disable') emit(action, model.id)
-  else if (action === 'delete' && !isDefaultModel(model.id)) emit('delete', model.id)
+  if (action === 'enable' || action === 'disable') emit(action, model.id)
+  else if (action === 'clone' && !isPlatformModel(model)) emit('clone', model.id)
+  else if (action === 'delete' && !isDefaultModel(model.id) && !isPlatformModel(model)) emit('delete', model.id)
 }
 const hasMobileCapabilities = (model: TextModelConfig) =>
   model.modelMeta?.capabilities?.supportsTools || model.modelMeta?.capabilities?.supportsReasoning ||
   (model.providerMeta?.corsRestricted && !isElectronEnv)
 const modelDisplayName = (model: TextModelConfig) => getTextModelConfigDisplayName(model, t)
-const providerDisplayName = (model: TextModelConfig) => getProviderDisplayName(model.providerMeta, t)
+const providerDisplayName = (model: TextModelConfig) => {
+  if (isPlatformModel(model)) {
+    return getPlatformMeta(model)?.providerLabel || model.providerMeta?.name || (isZh.value ? '平台模型' : 'Platform')
+  }
+  return getProviderDisplayName(model.providerMeta, t)
+}
 </script>
 
 <style scoped>
@@ -259,5 +374,25 @@ const providerDisplayName = (model: TextModelConfig) => getProviderDisplayName(m
 .model-card-actions {
   align-items: center;
   flex-wrap: nowrap;
+}
+
+.model-apply-link-btn {
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.mobile-platform-badge {
+  color: var(--gp-accent, #0f766e);
+  font-weight: 600;
+}
+
+.mobile-apply-link {
+  color: var(--gp-accent, #0f766e);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.mobile-apply-link:hover {
+  text-decoration: underline;
 }
 </style>

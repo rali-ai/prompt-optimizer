@@ -358,6 +358,8 @@ import type { TemplateManagerTemplateType } from '../../composables/prompt/useTe
 // Data Transformation
 import { DataTransformer } from '../../utils/data-transformer'
 import { getProviderDisplayName, getTextModelConfigDisplayName } from '../../utils/provider-display'
+import { isPlatformModelId } from '../../utils/domestic-models'
+import { MODELS_SYNCED_EVENT } from '../../composables/model/usePlatformModelCatalog'
 import {
   DATA_BACKUP_STATUS_EVENT,
   isDataBackupReminderDue,
@@ -1975,7 +1977,10 @@ const refreshTextModels = async () => {
         }
         const enabledModels = await manager.getEnabledModels();
         textModelOptions.value = DataTransformer.modelsToSelectOptions(enabledModels, {
-            getProviderName: (model) => getProviderDisplayName(model.providerMeta, t),
+            getProviderName: (model) =>
+                isPlatformModelId(model.id)
+                    ? (model.providerMeta?.name || '平台模型')
+                    : getProviderDisplayName(model.providerMeta, t),
             getModelName: (model) => getTextModelConfigDisplayName(model, t)
         });
 
@@ -2409,9 +2414,11 @@ const refreshDataBackupReminder = () => {
   dataBackupReminderDue.value = isDataBackupReminderDue()
 }
 const handleSessionConflict = () => { toast.warning(t('workspace.sessionConflict')); };
+const handlePlatformModelsSynced = () => { void handleTextModelsUpdated(); };
 
 onMounted(() => {
   window.addEventListener(SESSION_CONFLICT_EVENT, handleSessionConflict);
+  window.addEventListener(MODELS_SYNCED_EVENT, handlePlatformModelsSynced);
   // Route-level lazy loading can break after a new deployment when this tab is still running an old main bundle.
   // Prompt user to refresh instead of auto-reloading.
   if (typeof window !== 'undefined') {
@@ -2507,6 +2514,7 @@ onMounted(() => {
 // 应用卸载前清理并保存所有会话
 onBeforeUnmount(async () => {
   window.removeEventListener(SESSION_CONFLICT_EVENT, handleSessionConflict);
+  window.removeEventListener(MODELS_SYNCED_EVENT, handlePlatformModelsSynced);
   isAppUnmounted = true;
 
   // 🔧 Codex 修复：设置卸载标志，阻止后续 microtask 执行恢复

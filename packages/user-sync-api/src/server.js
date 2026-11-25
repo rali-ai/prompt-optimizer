@@ -32,8 +32,28 @@ import {
   parseCreateAnnouncementInput,
   parseUpdateAnnouncementInput,
 } from './announcements.js';
+import {
+  getEffectiveTier,
+  getTierMeta,
+  isValidTier,
+  parseCreditAdjustInput,
+  parseMonthlyCreditsPatch,
+  tierMeetsRequirement,
+} from './membership.js';
+import {
+  DOMESTIC_PRESET_MAP,
+  buildUpstreamChatPayload,
+  parseCreatePlatformModelInput,
+  parseUpdateModelPresetInput,
+  parseUpdatePlatformModelInput,
+  safeParseParamsJson,
+  serializeAdminPlatformModel,
+  serializePublicPlatformModel,
+} from './platform-models.js';
 
 const MAX_AUTH_BODY_BYTES = 16 * 1024;
+const MAX_ADMIN_BODY_BYTES = 64 * 1024;
+const MAX_AI_PROXY_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_SYNC_BODY_BYTES = MAX_SYNC_BYTES + 256 * 1024;
 const EXTENSION_ORIGIN_REGEX = /^(chrome|moz)-extension:\/\/[a-zA-Z0-9._-]+$/;
 const PUBLIC_ANNOUNCEMENT_ALLOWED_ORIGINS = new Set([
@@ -58,8 +78,12 @@ function applyExtensionCors(req, res) {
   if (!allowedOrigin) return false;
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Client-Type');
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    'X-GoPrmpt-Credits-Remaining, X-GoPrmpt-Credits-Cost',
+  );
   res.setHeader('Access-Control-Max-Age', '86400');
   return true;
 }
@@ -231,6 +255,54 @@ function timingSafeHexEqual(a, b) {
   return crypto.timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
 }
 
+function scrubSecretText(text, secret) {
+  const str = String(text ?? '');
+  if (!secret) return str;
+  return str.split(secret).join('[REDACTED]');
+}
+
+async function extractUpstreamErrorDetail(upstreamRes, apiKey) {
+  let rawText = '';
+  try {
+    rawText = await upstreamRes.text();
+  } catch {
+    return `HTTP ${upstreamRes.status}`;
+  }
+  let detail = '';
+  if (rawText) {
+    try {
+      const parsed = JSON.parse(rawText);
+      if (typeof parsed?.error?.message === 'string' && parsed.error.message.trim()) {
+        detail = parsed.error.message.trim();
+      } else if (typeof parsed?.error === 'string' && parsed.error.trim()) {
+        detail = parsed.error.trim();
+      } else if (typeof parsed?.message === 'string' && parsed.message.trim()) {
+        detail = parsed.message.trim();
+      }
+    } catch {
+      detail = rawText.trim().slice(0, 240);
+    }
+  }
+  const safe = scrubSecretText(detail || `HTTP ${upstreamRes.status}`, apiKey);
+  return safe.slice(0, 300);
+}
+
+function extractChatReplyPreview(json) {
+  const choice = json?.choices?.[0];
+  const content = choice?.message?.content ?? choice?.text ?? choice?.message?.reasoning_content ?? '';
+  if (typeof content === 'string') {
+    return content.trim().slice(0, 160);
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+      .join('')
+      .trim()
+      .slice(0, 160);
+  }
+  return '';
+}
+
 export function createApp(config, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const db = openDatabase(config.dbPath);
@@ -333,6 +405,7 @@ export function createApp(config, options = {}) {
     const mail = resolveMailConfig();
     return {
       membershipEnabled: isMembershipEnabled(),
+      monthlyCredits: db.getMonthlyCredits(),
       emailResetEnabled: mail.enabled,
       resendConfigured: mail.enabled,
       resendKeyHint: maskApiKey(mail.apiKey),
@@ -368,7 +441,211 @@ export function createApp(config, options = {}) {
         membershipEnabled: isMembershipEnabled(),
         registrationEnabled: true,
         emailResetEnabled: mail.enabled,
+        monthlyCredits: db.getMonthlyCredits(),
       });
+    }
+
+    if (method === 'GET' && pathname === '/user-api/model-presets') {
+      return sendJson(res, 200, { presets: db.listModelPresets() });
+    }
+
+    if (method === 'GET' && pathname === '/user-api/platform-models') {
+      const userRow = authenticate(req);
+      const now = Date.now();
+      const rows = db.listPlatformModelsRaw({ onlyEnabled: true });
+      return sendJson(res, 200, {
+        models: rows.map((row) => serializePublicPlatformModel(row, userRow, now)),
+      });
+    }
+
+    if (method === 'GET' && pathname === '/user-api/credits') {
+      const userRow = requireActiveUser(req, res);
+      if (!userRow) return;
+      const now = Date.now();
+      const granted = db.ensureMonthlyCreditGrant(userRow.id, now);
+      const freshUser = granted?.user || userRow;
+      const effectiveTier = getEffectiveTier(freshUser, now);
+      const monthlyCredits = granted?.monthlyCredits || db.getMonthlyCredits();
+      const currentMonth = granted?.currentMonth;
+      const grantedThisMonth =
+        freshUser.last_credit_grant_month === currentMonth
+          ? Number(freshUser.last_credit_grant_amount || 0)
+          : 0;
+      const ledger = db.listUserCreditLedger(freshUser.id, 20);
+      return sendJson(res, 200, {
+        balance: Number(freshUser.credit_balance || 0),
+        tier: freshUser.tier,
+        effectiveTier,
+        tierExpiresAt: freshUser.tier_expires_at ?? null,
+        monthlyAllowance: Number(monthlyCredits[effectiveTier] || 0),
+        currentMonth,
+        grantedThisMonth,
+        monthlyCredits,
+        ledger,
+      });
+    }
+
+    if (method === 'GET' && pathname === '/user-api/ai/v1/models') {
+      const userRow = requireActiveUser(req, res);
+      if (!userRow) return;
+      const now = Date.now();
+      const accessible = db
+        .listPlatformModelsRaw({ onlyEnabled: true })
+        .filter((row) => tierMeetsRequirement(userRow, row.min_tier, now));
+      return sendJson(res, 200, {
+        object: 'list',
+        data: accessible.map((row) => ({
+          id: row.id,
+          object: 'model',
+          created: Math.floor(Number(row.created_at || 0) / 1000),
+          owned_by: row.provider_label,
+        })),
+      });
+    }
+
+    if (method === 'POST' && pathname === '/user-api/ai/v1/chat/completions') {
+      const userRow = requireActiveUser(req, res);
+      if (!userRow) return;
+      const body = await readJsonBody(req, MAX_AI_PROXY_BODY_BYTES);
+      const modelId = typeof body.model === 'string' ? body.model.trim() : '';
+      if (!modelId) {
+        return sendJson(res, 400, { error: '请指定平台模型 ID' });
+      }
+      const modelRow = db.findPlatformModelRawById(modelId);
+      if (!modelRow || !modelRow.enabled) {
+        return sendJson(res, 404, { error: '平台模型不存在或已停用' });
+      }
+      if (!tierMeetsRequirement(userRow, modelRow.min_tier)) {
+        const reqMeta = getTierMeta(modelRow.min_tier);
+        return sendJson(res, 403, {
+          error: `该模型需要「${reqMeta.label}」及以上会员才能使用`,
+          requiredTier: modelRow.min_tier,
+          effectiveTier: getEffectiveTier(userRow),
+        });
+      }
+
+      const creditCost = Number(modelRow.credit_cost || 0);
+      const debit = db.debitUserCreditsAtomic(userRow.id, creditCost, {
+        modelId: modelRow.id,
+        note: `调用 ${modelRow.name}`,
+      });
+      if (!debit.ok) {
+        if (debit.reason === 'disabled') {
+          return sendJson(res, 403, { error: '账号已被停用' });
+        }
+        return sendJson(res, 402, {
+          error: `网站积分不足：本次调用需要 ${debit.required} 积分，当前剩余 ${debit.balance} 积分`,
+          balance: debit.balance,
+          required: debit.required,
+        });
+      }
+
+      let refunded = false;
+      const refundIfNeeded = (reasonNote) => {
+        if (refunded || debit.cost <= 0) return;
+        refunded = true;
+        try {
+          db.refundUserCredits(userRow.id, debit.cost, {
+            modelId: modelRow.id,
+            note: reasonNote || `调用 ${modelRow.name} 失败自动退回`,
+          });
+        } catch (refundErr) {
+          console.error('[user-sync-api] credit refund failed:', refundErr);
+        }
+      };
+
+      const upstreamUrl = `${modelRow.base_url.replace(/\/+$/, '')}/chat/completions`;
+      const upstreamPayload = buildUpstreamChatPayload(modelRow, body);
+      let upstreamRes;
+      try {
+        upstreamRes = await fetchImpl(upstreamUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${modelRow.api_key}`,
+          },
+          body: JSON.stringify(upstreamPayload),
+        });
+      } catch (err) {
+        refundIfNeeded(`调用 ${modelRow.name} 上游连接失败自动退回`);
+        const msg = scrubSecretText(
+          err instanceof Error ? err.message : String(err),
+          modelRow.api_key,
+        );
+        return sendJson(res, 502, { error: `上游模型服务连接失败：${msg}` });
+      }
+
+      if (!upstreamRes.ok) {
+        refundIfNeeded(`调用 ${modelRow.name} 上游返回 ${upstreamRes.status} 自动退回`);
+        const detail = await extractUpstreamErrorDetail(upstreamRes, modelRow.api_key);
+        const status =
+          upstreamRes.status >= 400 && upstreamRes.status <= 599 ? upstreamRes.status : 502;
+        return sendJson(res, status, { error: `上游模型调用失败：${detail}` });
+      }
+
+      const creditHeaders = {
+        'X-GoPrmpt-Credits-Remaining': String(debit.balanceAfter),
+        'X-GoPrmpt-Credits-Cost': String(debit.cost),
+      };
+      const upstreamContentType = upstreamRes.headers.get('content-type') || '';
+      const isStreaming =
+        body.stream === true || upstreamContentType.toLowerCase().includes('text/event-stream');
+
+      if (isStreaming) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'X-Accel-Buffering': 'no',
+          ...creditHeaders,
+        });
+        if (upstreamRes.body && typeof upstreamRes.body.getReader === 'function') {
+          const reader = upstreamRes.body.getReader();
+          const onClose = () => {
+            reader.cancel().catch(() => {});
+          };
+          req.on('close', onClose);
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (value && value.length > 0 && !res.writableEnded) {
+                res.write(Buffer.from(value));
+              }
+            }
+          } catch (streamErr) {
+            console.error('[user-sync-api] stream proxy interrupted:', streamErr?.message || streamErr);
+          } finally {
+            req.off('close', onClose);
+            if (!res.writableEnded) {
+              res.end();
+            }
+          }
+          return;
+        }
+        const text = await upstreamRes.text();
+        res.end(text);
+        return;
+      }
+
+      let text;
+      try {
+        text = await upstreamRes.text();
+      } catch (readErr) {
+        refundIfNeeded(`调用 ${modelRow.name} 读取响应失败自动退回`);
+        const msg = scrubSecretText(
+          readErr instanceof Error ? readErr.message : String(readErr),
+          modelRow.api_key,
+        );
+        return sendJson(res, 502, { error: `上游模型响应读取失败：${msg}` });
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Length': Buffer.byteLength(text, 'utf8'),
+        ...creditHeaders,
+      });
+      res.end(text);
+      return;
     }
 
     if (method === 'POST' && pathname === '/user-api/register') {
@@ -402,6 +679,9 @@ export function createApp(config, options = {}) {
         throw err;
       }
 
+      const granted = db.ensureMonthlyCreditGrant(userRow.id);
+      userRow = granted?.user || userRow;
+
       const { token, cookie } = issueSession(req, userRow);
       const payload = { user: serializeUser(userRow) };
       if (isExtensionClient(req)) payload.token = token;
@@ -417,7 +697,7 @@ export function createApp(config, options = {}) {
         return sendJson(res, 400, { error: '请输入用户名和密码' });
       }
 
-      const userRow = identifier.includes('@')
+      let userRow = identifier.includes('@')
         ? db.findUserByEmail(identifier)
         : db.findUserByUsername(identifier);
       if (!userRow || !verifyPassword(password, userRow.password_hash)) {
@@ -426,6 +706,9 @@ export function createApp(config, options = {}) {
       if (userRow.disabled) {
         return sendJson(res, 403, { error: '账号已被停用' });
       }
+
+      const granted = db.ensureMonthlyCreditGrant(userRow.id);
+      userRow = granted?.user || userRow;
 
       const { token, cookie } = issueSession(req, userRow);
       const payload = { user: serializeUser(userRow) };
@@ -548,7 +831,9 @@ export function createApp(config, options = {}) {
     if (method === 'GET' && pathname === '/user-api/me') {
       const userRow = requireActiveUser(req, res);
       if (!userRow) return;
-      return sendJson(res, 200, { user: serializeUser(userRow) });
+      const granted = db.ensureMonthlyCreditGrant(userRow.id);
+      const freshUser = granted?.user || userRow;
+      return sendJson(res, 200, { user: serializeUser(freshUser) });
     }
 
     if (method === 'PATCH' && pathname === '/user-api/me/profile') {
@@ -635,7 +920,10 @@ export function createApp(config, options = {}) {
       });
     }
 
-    if ((method === 'GET' || method === 'HEAD') && (pathname === '/user-api/admin' || pathname === '/user-api/admin/')) {
+    if (
+      (method === 'GET' || method === 'HEAD') &&
+      (pathname === '/user-api/admin' || pathname === '/user-api/admin/')
+    ) {
       const userRow = authenticate(req);
       const authenticated = Boolean(userRow && !userRow.disabled);
       const isAdmin = Boolean(authenticated && userRow.role === 'admin');
@@ -645,6 +933,7 @@ export function createApp(config, options = {}) {
         isAdmin,
         username: userRow?.username || '',
         membershipEnabled: settings.membershipEnabled,
+        monthlyCredits: settings.monthlyCredits,
         emailResetEnabled: settings.emailResetEnabled,
         resendKeyHint: settings.resendKeyHint,
         mailFrom: settings.mailFrom,
@@ -669,6 +958,12 @@ export function createApp(config, options = {}) {
           throw new PayloadError('membershipEnabled 必须为布尔值', 400);
         }
         db.setMembershipEnabled(body.membershipEnabled);
+        touched = true;
+      }
+
+      if (body.monthlyCredits !== undefined) {
+        const creditsPatch = parseMonthlyCreditsPatch(body.monthlyCredits);
+        db.setMonthlyCredits(creditsPatch);
         touched = true;
       }
 
@@ -748,7 +1043,7 @@ export function createApp(config, options = {}) {
     if (method === 'POST' && adminResetPwdMatch) {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
-      const targetId = decodeURIComponent(adminResetPwdMatch[1]);
+      const targetId = decodePathParam(adminResetPwdMatch[1]);
       if (targetId === adminRow.id) {
         return sendJson(res, 400, { error: '请使用「修改管理员密码」更改当前管理员密码' });
       }
@@ -773,17 +1068,39 @@ export function createApp(config, options = {}) {
       });
     }
 
+    const adminUserCreditsMatch = pathname.match(/^\/user-api\/admin\/users\/([^/]+)\/credits$/);
+    if (method === 'POST' && adminUserCreditsMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const targetId = decodePathParam(adminUserCreditsMatch[1]);
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      const { delta, note } = parseCreditAdjustInput(body);
+      const result = db.adjustUserCredits(targetId, delta, note);
+      if (!result.found) {
+        return sendJson(res, 404, { error: '用户不存在' });
+      }
+      if (result.insufficient) {
+        return sendJson(res, 400, {
+          error: `积分余额不能为负数（当前余额 ${result.balance}，调整值 ${delta}）`,
+        });
+      }
+      return sendJson(res, 200, {
+        user: serializeUser(result.user),
+        creditBalance: result.creditBalance,
+      });
+    }
+
     const adminUserMatch = pathname.match(/^\/user-api\/admin\/users\/([^/]+)$/);
     if (method === 'PATCH' && adminUserMatch) {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
-      const targetId = decodeURIComponent(adminUserMatch[1]);
+      const targetId = decodePathParam(adminUserMatch[1]);
       const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
 
       const patch = {};
       if (body.tier !== undefined) {
-        if (body.tier !== 'free' && body.tier !== 'pro') {
-          throw new PayloadError('tier 仅支持 free 或 pro', 400);
+        if (!isValidTier(body.tier)) {
+          throw new PayloadError('tier 仅支持 free、standard、pro 或 internal', 400);
         }
         patch.tier = body.tier;
       }
@@ -807,7 +1124,134 @@ export function createApp(config, options = {}) {
       if (!updated) {
         return sendJson(res, 404, { error: '用户不存在' });
       }
-      return sendJson(res, 200, { user: serializeUser(updated) });
+      let freshUser = updated;
+      if (
+        !updated.disabled &&
+        (patch.tier !== undefined || patch.tierExpiresAt !== undefined || patch.disabled === false)
+      ) {
+        const granted = db.ensureMonthlyCreditGrant(updated.id);
+        if (granted?.user) freshUser = granted.user;
+      }
+      return sendJson(res, 200, { user: serializeUser(freshUser) });
+    }
+
+    if (method === 'GET' && pathname === '/user-api/admin/platform-models') {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const models = db.listPlatformModelsRaw().map(serializeAdminPlatformModel);
+      return sendJson(res, 200, { models });
+    }
+
+    if (method === 'POST' && pathname === '/user-api/admin/platform-models') {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const body = await readJsonBody(req, MAX_ADMIN_BODY_BYTES);
+      const input = parseCreatePlatformModelInput(body);
+      const model = db.createPlatformModel(input);
+      return sendJson(res, 201, { model });
+    }
+
+    const adminPlatformModelTestMatch = pathname.match(
+      /^\/user-api\/admin\/platform-models\/([^/]+)\/test$/,
+    );
+    if (method === 'POST' && adminPlatformModelTestMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const id = decodePathParam(adminPlatformModelTestMatch[1]);
+      const row = db.findPlatformModelRawById(id);
+      if (!row) {
+        return sendJson(res, 404, { error: '平台模型不存在' });
+      }
+
+      const defaultParams = safeParseParamsJson(row.default_params_json);
+      const testPayload = {
+        ...defaultParams,
+        model: row.upstream_model,
+        messages: [{ role: 'user', content: 'Hi' }],
+        max_tokens: 16,
+        stream: false,
+      };
+      const endpoint = `${row.base_url.replace(/\/+$/, '')}/chat/completions`;
+      const startedAt = Date.now();
+      let upstreamRes;
+      try {
+        upstreamRes = await fetchImpl(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${row.api_key}`,
+          },
+          body: JSON.stringify(testPayload),
+        });
+      } catch (err) {
+        const msg = scrubSecretText(
+          err instanceof Error ? err.message : String(err),
+          row.api_key,
+        );
+        return sendJson(res, 502, { error: `连通性测试失败：${msg}` });
+      }
+
+      if (!upstreamRes.ok) {
+        const detail = await extractUpstreamErrorDetail(upstreamRes, row.api_key);
+        return sendJson(res, 502, {
+          error: `上游返回 HTTP ${upstreamRes.status}：${detail}`,
+        });
+      }
+
+      const latencyMs = Math.max(0, Date.now() - startedAt);
+      const json = await upstreamRes.json().catch(() => null);
+      const replyPreview = extractChatReplyPreview(json);
+      return sendJson(res, 200, {
+        ok: true,
+        latencyMs,
+        replyPreview,
+        upstreamModel: row.upstream_model,
+      });
+    }
+
+    const adminPlatformModelMatch = pathname.match(/^\/user-api\/admin\/platform-models\/([^/]+)$/);
+    if (method === 'PATCH' && adminPlatformModelMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const id = decodePathParam(adminPlatformModelMatch[1]);
+      const body = await readJsonBody(req, MAX_ADMIN_BODY_BYTES);
+      const patch = parseUpdatePlatformModelInput(body);
+      const updated = db.updatePlatformModel(id, patch);
+      if (!updated) {
+        return sendJson(res, 404, { error: '平台模型不存在' });
+      }
+      return sendJson(res, 200, { model: updated });
+    }
+
+    if (method === 'DELETE' && adminPlatformModelMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const id = decodePathParam(adminPlatformModelMatch[1]);
+      const deleted = db.deletePlatformModel(id);
+      if (!deleted) {
+        return sendJson(res, 404, { error: '平台模型不存在' });
+      }
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (method === 'GET' && pathname === '/user-api/admin/model-presets') {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      return sendJson(res, 200, { presets: db.listModelPresets() });
+    }
+
+    const adminModelPresetMatch = pathname.match(/^\/user-api\/admin\/model-presets\/([^/]+)$/);
+    if (method === 'PATCH' && adminModelPresetMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const providerId = decodePathParam(adminModelPresetMatch[1]);
+      if (!Object.prototype.hasOwnProperty.call(DOMESTIC_PRESET_MAP, providerId)) {
+        return sendJson(res, 404, { error: '未知的国内预设模型厂商' });
+      }
+      const body = await readJsonBody(req, MAX_ADMIN_BODY_BYTES);
+      const patch = parseUpdateModelPresetInput(body);
+      const preset = db.upsertModelPreset(providerId, patch);
+      return sendJson(res, 200, { preset });
     }
 
     if (method === 'GET' && pathname === '/user-api/admin/announcements') {
@@ -947,7 +1391,10 @@ export function createApp(config, options = {}) {
     applyExtensionCors(req, res);
     handleRequest(req, res).catch((err) => {
       if (err instanceof PayloadError) {
-        return sendJson(res, err.statusCode, { error: err.message });
+        if (!res.headersSent) {
+          return sendJson(res, err.statusCode, { error: err.message });
+        }
+        return;
       }
       console.error('[user-sync-api] Unhandled error:', err);
       if (!res.headersSent) {

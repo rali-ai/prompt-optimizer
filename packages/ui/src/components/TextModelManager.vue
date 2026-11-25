@@ -1,5 +1,19 @@
 <template>
   <div class="text-model-manager">
+    <div
+      v-if="platformModels.length > 0"
+      class="platform-models-strip"
+      data-testid="platform-models-info-strip"
+    >
+      <div class="platform-models-strip__main">
+        <span class="platform-models-strip__badge">{{ isZh ? '网站平台模型' : 'Platform Models' }}</span>
+        <span class="platform-models-strip__summary">{{ platformStripSummary }}</span>
+      </div>
+      <div class="platform-models-strip__note">
+        {{ platformStripNote }}
+      </div>
+    </div>
+
     <LocalServiceDiscovery :active="active && modelsReady" :models="manager.models.value"
       :disabled="preparingLocalService || showEditModal" @select="handleLocalService" />
     <TextModelList
@@ -26,10 +40,13 @@
 import { onMounted, onBeforeUnmount, provide, ref, h, watch, computed } from 'vue'
 
 import { useI18n } from 'vue-i18n'
+import { i18n } from '../plugins/i18n'
 import { isRunningInElectron } from '@prompt-optimizer/core'
 import LocalServiceDiscovery from './LocalServiceDiscovery.vue'
 import { isChromeBuiltInPlaceholder, type DiscoveredLocalService } from '../utils/local-model-discovery'
 import { useTextModelManager } from '../composables/model/useTextModelManager'
+import { MODELS_SYNCED_EVENT, usePlatformModelCatalog } from '../composables/model/usePlatformModelCatalog'
+import { filterDomesticTextModels, isPlatformModelId } from '../utils/domestic-models'
 import TextModelList from './TextModelList.vue'
 import TextModelEditModal from './TextModelEditModal.vue'
 import { useDialog } from 'naive-ui'
@@ -44,8 +61,42 @@ const toast = useToast()
 const dialog = useDialog()
 const confirmDialog = useConfirmDialog()
 const manager = useTextModelManager()
+const catalog = usePlatformModelCatalog()
 provide('textModelManager', manager)
-const visibleModels = computed(() => manager.models.value.filter(model => !isChromeBuiltInPlaceholder(model)))
+
+const isZh = computed(() => String(i18n.global.locale.value || '').toLowerCase().startsWith('zh'))
+const platformModels = catalog.platformModels
+const accessiblePlatformCount = computed(
+  () => platformModels.value.filter(model => model.accessible).length
+)
+const platformStripSummary = computed(() => {
+  const total = platformModels.value.length
+  const accessible = accessiblePlatformCount.value
+  const credits = catalog.credits.value
+  if (credits !== null || accessible > 0) {
+    const balancePart = credits !== null
+      ? (isZh.value ? ` · 可用积分 ${credits.balance}` : ` · ${credits.balance} credits`)
+      : ''
+    return isZh.value
+      ? `当前可用 ${accessible} / ${total} 个平台积分模型${balancePart}`
+      : `${accessible} / ${total} hosted models available${balancePart}`
+  }
+  return isZh.value
+    ? `共 ${total} 个平台积分模型（登录会员账号即可直接调用）`
+    : `${total} hosted platform models (sign in as a member to use credits)`
+})
+const platformStripNote = computed(() =>
+  isZh.value
+    ? '免费用户与会员均可随时在下方添加或配置自己的国产模型 API Key（仅保存在浏览器本地）。'
+    : 'Both guests and members can also add their own domestic model API keys below (stored locally).'
+)
+
+const visibleModels = computed(() =>
+  filterDomesticTextModels(
+    manager.models.value.filter(model => !isChromeBuiltInPlaceholder(model)),
+    catalog.presetsByProviderId.value
+  )
+)
 
 const showEditModal = ref(false)
 const modelsReady = ref(false)
@@ -57,9 +108,16 @@ watch(() => props.active, active => {
     manager.cancelLocalModelRequest()
   }
 })
+const handleModelsSynced = async () => {
+  await manager.loadModels()
+  emit('modelsUpdated', visibleModels.value[0]?.id)
+}
 onBeforeUnmount(() => {
   localDraftGeneration++
   manager.cancelLocalModelRequest()
+  if (typeof window !== 'undefined') {
+    window.removeEventListener(MODELS_SYNCED_EVENT, handleModelsSynced)
+  }
 })
 const handleLocalService = async (service: DiscoveredLocalService) => {
   if (preparingLocalService.value || showEditModal.value || !props.active) return
@@ -120,6 +178,7 @@ const handleTestConnection = async (id: string) => {
 }
 
 const handleEditModel = async (id: string) => {
+  if (isPlatformModelId(id)) return
   // 如果已经在编辑同一个模型且模态框已经打开，直接返回
   if (editingModelId.value === id && showEditModal.value === true) {
     return
@@ -146,6 +205,7 @@ const updateEditModalVisibility = (value: boolean) => {
 }
 
 const handleCloneModel = async (id: string) => {
+  if (isPlatformModelId(id)) return
   try {
     await manager.prepareForClone(id)
     showEditModal.value = true
@@ -166,6 +226,7 @@ const handleDisableModel = async (id: string) => {
 }
 
 const handleDeleteModel = async (id: string) => {
+  if (isPlatformModelId(id)) return
   const confirmed = await confirmDialog.warning({
     title: t('common.warning'),
     content: t('modelManager.deleteConfirm'),
@@ -175,7 +236,7 @@ const handleDeleteModel = async (id: string) => {
   if (!confirmed) return
 
   await manager.deleteModel(id)
-  const firstId = manager.models.value[0]?.id
+  const firstId = visibleModels.value[0]?.id
   emit('modelsUpdated', firstId)
 }
 
@@ -192,10 +253,17 @@ defineExpose({
 })
 
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener(MODELS_SYNCED_EVENT, handleModelsSynced)
+  }
+  await Promise.all([
+    catalog.loadModelPresets(),
+    catalog.loadPlatformModels(),
+  ])
   await manager.loadProviders()
   await manager.loadModels()
   modelsReady.value = true
-  const firstId = manager.models.value[0]?.id
+  const firstId = visibleModels.value[0]?.id
   if (firstId) {
     emit('modelsUpdated', firstId)
   }
@@ -205,5 +273,44 @@ onMounted(async () => {
 <style scoped>
 .text-model-manager {
   width: 100%;
+}
+
+.platform-models-strip {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--gp-border-strong, rgba(15, 118, 110, 0.22));
+  background: var(--gp-accent-soft, rgba(15, 118, 110, 0.07));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.platform-models-strip__main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.platform-models-strip__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--gp-accent, #0f766e);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.platform-models-strip__summary {
+  font-weight: 600;
+}
+
+.platform-models-strip__note {
+  font-size: 12px;
+  opacity: 0.78;
 }
 </style>

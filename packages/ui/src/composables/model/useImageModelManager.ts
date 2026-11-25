@@ -14,6 +14,12 @@ import type {
 } from '@prompt-optimizer/core'
 import { useModelAdvancedParameters } from './useModelAdvancedParameters'
 import { computeConnectionConfig, normalizeProviderChangeOptions } from './useConnectionConfig'
+import {
+  filterDomesticImageConfigs,
+  filterDomesticProviders,
+  mergePresetDefaultParams,
+} from '../../utils/domestic-models'
+import { usePlatformModelCatalog } from './usePlatformModelCatalog'
 
 type EditableImageModelConfig = Omit<ImageModelConfig, 'provider' | 'model'> & {
   provider?: ImageProvider
@@ -33,9 +39,13 @@ export function useImageModelManager() {
   const registry = inject<IImageAdapterRegistry>('imageRegistry')!
   const imageModelManager = inject<IImageModelManager>('imageModelManager')!
   const imageService = inject<IImageService>('imageService')!
+  const catalog = usePlatformModelCatalog()
 
   // 状态管理
-  const providers = ref<ImageProvider[]>([])
+  const allProviders = ref<ImageProvider[]>([])
+  const providers = computed<ImageProvider[]>(() =>
+    filterDomesticProviders(allProviders.value, catalog.presetsByProviderId.value)
+  )
   const models = ref<ImageModel[]>([])
   const dynamicModels = ref<ImageModel[]>([])
   const configs = ref<ImageModelConfig[]>([])
@@ -87,7 +97,7 @@ export function useImageModelManager() {
   const isLoadingModels = computed(() => isLoadingDynamicModels.value)
 
   const selectedProvider = computed(() =>
-    providers.value.find(p => p.id === selectedProviderId.value)
+    allProviders.value.find(p => p.id === selectedProviderId.value)
   )
 
   const selectedModel = computed(() =>
@@ -164,11 +174,30 @@ export function useImageModelManager() {
     return true
   })
 
+  const applyDefaultsWithPreset = (mergeWithExisting = false) => {
+    const currentBefore = mergeWithExisting ? { ...(configForm.value.paramOverrides || {}) } : {}
+    applyDefaultsFromModel(mergeWithExisting)
+    const mergedWithPreset = mergePresetDefaultParams(
+      selectedProviderId.value,
+      configForm.value.paramOverrides,
+      catalog.presetsByProviderId.value,
+    )
+    if (mergeWithExisting) {
+      for (const key of Object.keys(currentBefore)) {
+        if (currentBefore[key] !== undefined) {
+          mergedWithPreset[key] = currentBefore[key]
+        }
+      }
+    }
+    configForm.value.paramOverrides = mergedWithPreset
+  }
+
   // 初始化数据加载
   const loadProviders = async () => {
     isLoadingProviders.value = true
     try {
-      providers.value = registry.getAllProviders()
+      await catalog.loadModelPresets()
+      allProviders.value = registry.getAllProviders()
     } catch (error) {
       console.error('Failed to load providers:', error)
       toast.error(t('image.provider.loadFailed'))
@@ -179,9 +208,11 @@ export function useImageModelManager() {
 
   const loadConfigs = async () => {
     try {
+      await catalog.loadModelPresets()
       const allConfigs = await imageModelManager.getAllConfigs()
+      const domesticConfigs = filterDomesticImageConfigs(allConfigs, catalog.presetsByProviderId.value)
       // 排序：启用的模型在前，然后按显示名称排序
-      configs.value = allConfigs.sort((a: ImageModelConfig, b: ImageModelConfig) => {
+      configs.value = domesticConfigs.sort((a: ImageModelConfig, b: ImageModelConfig) => {
         // 第一级：按启用状态排序（启用的在前）
         if (a.enabled !== b.enabled) {
           return a.enabled ? -1 : 1
@@ -236,7 +267,7 @@ export function useImageModelManager() {
     }
 
     // 使用共享函数处理连接配置
-    const providerMeta = providers.value.find(p => p.id === providerId)
+    const providerMeta = allProviders.value.find(p => p.id === providerId)
     configForm.value.connectionConfig = computeConnectionConfig(
       configForm.value.connectionConfig,
       providerMeta,
@@ -248,14 +279,18 @@ export function useImageModelManager() {
       const staticModels = registry.getStaticModels(providerId)
       models.value = staticModels
 
-      // 只有在需要自动选择且当前没有选中模型时才自动选择第一个模型
+      // 只有在需要自动选择且当前没有选中模型时才自动选择第一个模型（优先后台预设 defaultModelId）
       if (normalized.autoSelectFirstModel && staticModels.length > 0) {
-        const firstModel = staticModels[0]
+        const preset = catalog.presetsByProviderId.value.get(providerId.trim().toLowerCase())
+        const presetModel = preset?.defaultModelId
+          ? staticModels.find(model => model.id === preset.defaultModelId)
+          : undefined
+        const firstModel = presetModel ?? staticModels[0]
         selectedModelId.value = firstModel.id
         configForm.value.modelId = firstModel.id
-        // 切换提供商后自动应用第一个模型的默认参数
+        // 切换提供商后自动应用第一个模型的默认参数（并合入后台预设参数）
         if (firstModel.id && providerId) {
-          applyDefaultsFromModel(false)
+          applyDefaultsWithPreset(false)
         }
 
         modelLoadingStatus.value = {
@@ -271,6 +306,12 @@ export function useImageModelManager() {
           count: staticModels.length
         }
       } else {
+        if (normalized.autoSelectFirstModel && normalized.resetOverrides) {
+          const presetParams = mergePresetDefaultParams(providerId, {}, catalog.presetsByProviderId.value)
+          if (Object.keys(presetParams).length > 0) {
+            configForm.value.paramOverrides = presetParams
+          }
+        }
         modelLoadingStatus.value = {
           type: 'info',
           messageKey: 'image.model.noStaticModels'
@@ -588,9 +629,9 @@ export function useImageModelManager() {
 
     if (modelId && selectedProviderId.value) {
       // 编辑模式（configForm.id 存在）：合并参数（保留用户已有配置）
-      // 创建模式：替换参数（使用新模型的默认值）
+      // 创建模式：替换参数（使用新模型的默认值并合入后台预设参数）
       const isEditing = !!configForm.value.id
-      applyDefaultsFromModel(isEditing)
+      applyDefaultsWithPreset(isEditing)
     }
   }
 
@@ -604,7 +645,7 @@ export function useImageModelManager() {
     isSaving.value = true
 
     try {
-      const cachedProvider = providers.value.find(p => p.id === selectedProviderId.value)
+      const cachedProvider = allProviders.value.find(p => p.id === selectedProviderId.value)
 
       if (!cachedProvider) {
         throw new Error(`Provider not found: ${selectedProviderId.value}`)

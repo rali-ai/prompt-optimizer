@@ -8,7 +8,11 @@ import {
   confirmPasswordReset,
   getActiveAnnouncements,
   getConfig,
+  getCredits,
   getMe,
+  getModelPresets,
+  getPlatformModels,
+  getStoredExtensionToken,
   isExtensionRuntime,
   login,
   logout,
@@ -17,6 +21,7 @@ import {
   register,
   requestPasswordReset,
   resolveDefaultSyncBaseUrl,
+  resolvePlatformAiBaseUrl,
   safeAnnouncementUrl,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
@@ -440,4 +445,220 @@ test('getActiveAnnouncements works in extension runtime with goprmpt.net baseUrl
       globalThis.window = prevWindow
     }
   }
+})
+
+test('resolvePlatformAiBaseUrl and getStoredExtensionToken handle web and extension runtimes', async () => {
+  const prevWindow = globalThis.window
+  const storage = new Map()
+
+  try {
+    // Web runtime with same-origin relative baseUrl
+    globalThis.window = {
+      location: { protocol: 'https:', origin: 'https://goprmpt.net' },
+      localStorage: {
+        getItem: (k) => (storage.has(k) ? storage.get(k) : null),
+        setItem: (k, v) => storage.set(k, String(v)),
+        removeItem: (k) => storage.delete(k),
+      },
+    }
+    assert.equal(getStoredExtensionToken(), '')
+    assert.equal(resolvePlatformAiBaseUrl(), 'https://goprmpt.net/user-api/ai/v1')
+    assert.equal(resolvePlatformAiBaseUrl('/user-api/'), 'https://goprmpt.net/user-api/ai/v1')
+    assert.equal(
+      resolvePlatformAiBaseUrl('https://custom.example.com/user-api/'),
+      'https://custom.example.com/user-api/ai/v1',
+    )
+
+    // Extension runtime with stored token
+    globalThis.window = {
+      location: { protocol: 'chrome-extension:', origin: 'chrome-extension://abcdef' },
+      localStorage: {
+        getItem: (k) => (storage.has(k) ? storage.get(k) : null),
+        setItem: (k, v) => storage.set(k, String(v)),
+        removeItem: (k) => storage.delete(k),
+      },
+    }
+    assert.equal(resolvePlatformAiBaseUrl(), 'https://goprmpt.net/user-api/ai/v1')
+    assert.equal(getStoredExtensionToken(), '')
+
+    await login('extuser', 'Password123!', EXTENSION_SYNC_BASE_URL, async () =>
+      jsonResponse({
+        user: {
+          id: 'u1',
+          username: 'extuser',
+          role: 'user',
+          tier: 'standard',
+          tierExpiresAt: null,
+          disabled: false,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        token: 'ext_bearer_123',
+      }),
+    )
+    assert.equal(getStoredExtensionToken(), 'ext_bearer_123')
+  } finally {
+    if (prevWindow === undefined) {
+      delete globalThis.window
+    } else {
+      globalThis.window = prevWindow
+    }
+  }
+})
+
+test('getCredits normalizes response, clamps numbers, and skips malformed ledger rows', async () => {
+  const seen = []
+  const fetchMock = async (url, init) => {
+    seen.push({ url, method: init?.method })
+    return jsonResponse({
+      balance: 245,
+      tier: 'pro',
+      effectiveTier: 'pro',
+      tierExpiresAt: 1900000000000,
+      monthlyAllowance: 500,
+      currentMonth: '2026-11',
+      grantedThisMonth: 500,
+      monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
+      ledger: [
+        {
+          id: 'l1',
+          delta: 500,
+          balanceAfter: 500,
+          reason: 'monthly_grant',
+          modelId: null,
+          note: '2026-11 月度赠送',
+          createdAt: 1700000001000,
+        },
+        {
+          id: 'l2',
+          delta: -5,
+          balanceAfter: 495,
+          reason: 'model_usage',
+          modelId: 'deepseek-chat',
+          note: null,
+          createdAt: 1700000002000,
+        },
+        { id: '', delta: 10 },
+        null,
+      ],
+    })
+  }
+
+  const res = await getCredits('/user-api/', fetchMock)
+  assert.deepEqual(seen, [{ url: '/user-api/credits', method: 'GET' }])
+  assert.equal(res.balance, 245)
+  assert.equal(res.tier, 'pro')
+  assert.equal(res.effectiveTier, 'pro')
+  assert.equal(res.monthlyAllowance, 500)
+  assert.equal(res.grantedThisMonth, 500)
+  assert.deepEqual(res.monthlyCredits, { free: 0, standard: 100, pro: 500, internal: 1000 })
+  assert.equal(res.ledger.length, 2)
+  assert.equal(res.ledger[1].modelId, 'deepseek-chat')
+  assert.equal(res.ledger[1].delta, -5)
+})
+
+test('getPlatformModels normalizes fields, strips unsafe applyUrl, and sorts by sortOrder', async () => {
+  const fetchMock = async () =>
+    jsonResponse({
+      models: [
+        {
+          id: 'glm-4.5',
+          name: '智谱 GLM-4.5',
+          providerLabel: '智谱 AI',
+          creditCost: 2,
+          minTier: 'standard',
+          defaultParams: { temperature: 0.6 },
+          applyUrl: 'javascript:alert(1)',
+          description: '平台托管',
+          sortOrder: 20,
+          accessible: true,
+          accessReason: null,
+        },
+        {
+          id: 'deepseek-v3',
+          name: 'DeepSeek V3',
+          providerLabel: 'DeepSeek',
+          creditCost: 1,
+          minTier: 'free',
+          defaultParams: { temperature: 0.7 },
+          applyUrl: 'https://platform.deepseek.com/api_keys',
+          description: null,
+          sortOrder: 10,
+          accessible: false,
+          accessReason: '请先登录',
+        },
+        { id: '', name: 'missing-id' },
+      ],
+    })
+
+  const models = await getPlatformModels('/user-api', fetchMock)
+  assert.equal(models.length, 2)
+  assert.equal(models[0].id, 'deepseek-v3')
+  assert.equal(models[0].applyUrl, 'https://platform.deepseek.com/api_keys')
+  assert.equal(models[0].accessible, false)
+  assert.equal(models[0].accessReason, '请先登录')
+  assert.equal(models[1].id, 'glm-4.5')
+  assert.equal(models[1].applyUrl, null)
+  assert.equal(models[1].accessible, true)
+  assert.deepEqual(models[1].defaultParams, { temperature: 0.6 })
+})
+
+test('getModelPresets normalizes domestic presets and rejects non-http apply URLs', async () => {
+  const fetchMock = async () =>
+    jsonResponse({
+      presets: [
+        {
+          providerId: 'deepseek',
+          name: 'DeepSeek',
+          category: 'text',
+          applyUrl: 'https://promo.example.com/deepseek',
+          customApplyUrl: 'https://promo.example.com/deepseek',
+          defaultApplyUrl: 'https://platform.deepseek.com/api_keys',
+          applyLabel: '领 10 元优惠 Key',
+          defaultModelId: 'deepseek-chat',
+          defaultParams: { temperature: 0.5, max_tokens: 4096 },
+          enabled: true,
+          updatedAt: 1700000000000,
+        },
+        {
+          providerId: 'dashscope',
+          name: '通义千问',
+          category: 'both',
+          applyUrl: 'data:text/html,evil',
+          customApplyUrl: 'javascript:void(0)',
+          defaultApplyUrl: 'https://bailian.console.aliyun.com/',
+          applyLabel: '',
+          defaultModelId: '',
+          defaultParams: 'invalid',
+          enabled: false,
+          updatedAt: null,
+        },
+        { providerId: '' },
+      ],
+    })
+
+  const presets = await getModelPresets('/user-api', fetchMock)
+  assert.equal(presets.length, 2)
+  assert.deepEqual(presets[0], {
+    providerId: 'deepseek',
+    name: 'DeepSeek',
+    category: 'text',
+    applyUrl: 'https://promo.example.com/deepseek',
+    customApplyUrl: 'https://promo.example.com/deepseek',
+    defaultApplyUrl: 'https://platform.deepseek.com/api_keys',
+    applyLabel: '领 10 元优惠 Key',
+    defaultModelId: 'deepseek-chat',
+    defaultParams: { temperature: 0.5, max_tokens: 4096 },
+    enabled: true,
+    updatedAt: 1700000000000,
+  })
+  assert.equal(presets[1].providerId, 'dashscope')
+  assert.equal(presets[1].category, 'both')
+  assert.equal(presets[1].applyUrl, null)
+  assert.equal(presets[1].customApplyUrl, null)
+  assert.equal(presets[1].defaultApplyUrl, 'https://bailian.console.aliyun.com/')
+  assert.equal(presets[1].applyLabel, '申请 API Key')
+  assert.equal(presets[1].defaultModelId, null)
+  assert.deepEqual(presets[1].defaultParams, {})
+  assert.equal(presets[1].enabled, false)
 })

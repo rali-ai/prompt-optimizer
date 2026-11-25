@@ -68,23 +68,25 @@
           <!-- 动态连接配置字段 -->
           <NFormItem v-for="field in connectionFields" :key="field.name" :label="t(field.labelKey)">
             <template v-if="field.name === 'apiKey'" #label>
-              <NSpace align="center" :size="4">
+              <NSpace align="center" :size="6">
                 <span>{{ t(field.labelKey) }}</span>
                 <NButton
-                  v-if="currentProviderApiKeyUrl"
+                  v-if="currentProviderApiKeyLink.url"
                   text
                   size="tiny"
                   type="primary"
                   tag="a"
-                  :href="currentProviderApiKeyUrl"
+                  :href="currentProviderApiKeyLink.url"
                   target="_blank"
                   rel="noopener noreferrer"
                   style="padding: 0 4px;"
-                  :title="t('modelManager.getApiKey')"
+                  data-testid="image-model-apply-link"
+                  :title="currentProviderApiKeyLink.label"
                 >
                   <template #icon>
                     <ExternalLinkIcon />
                   </template>
+                  {{ currentProviderApiKeyLink.label }}
                 </NButton>
               </NSpace>
             </template>
@@ -299,7 +301,9 @@ import {
   NDivider, NH4, NForm, NFormItem, useDialog
 } from 'naive-ui'
 import { useImageModelManager } from '../composables/model/useImageModelManager'
+import { usePlatformModelCatalog } from '../composables/model/usePlatformModelCatalog'
 import { useToast } from '../composables/ui/useToast'
+import { resolveProviderApplyLink } from '../utils/domestic-models'
 import { useConfirmDialog } from '../composables/ui/useConfirmDialog'
 import { useWorkspaceLayout } from '../composables/ui/useWorkspaceLayout'
 import { useCompactSelectMenu } from '../composables/ui/useSelectMenuViewport'
@@ -418,10 +422,15 @@ const updateOutputFormat = (value: string) => {
   updateParamOverrides({ ...configForm.value.paramOverrides, output_format: value })
 }
 
-// 获取当前选择的 Provider 的 API Key URL
-const currentProviderApiKeyUrl = computed(() => {
-  return selectedProvider.value?.apiKeyUrl || null
-})
+// 获取当前选择的 Provider 的 API Key 申请/推广链接（优先使用后台预设配置）
+const platformCatalog = usePlatformModelCatalog()
+const currentProviderApiKeyLink = computed(() =>
+  resolveProviderApplyLink(
+    configForm.value.providerId,
+    selectedProvider.value?.apiKeyUrl,
+    platformCatalog.presetsByProviderId.value,
+  )
+)
 
 const handleTestConnection = async () => {
   if (isTestingConnection.value) return
