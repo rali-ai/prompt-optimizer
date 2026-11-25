@@ -964,6 +964,7 @@ export function createApp(config, options = {}) {
       if (body.monthlyCredits !== undefined) {
         const creditsPatch = parseMonthlyCreditsPatch(body.monthlyCredits);
         db.setMonthlyCredits(creditsPatch);
+        db.ensureMonthlyCreditGrantsForAllActive();
         touched = true;
       }
 
@@ -1033,6 +1034,7 @@ export function createApp(config, options = {}) {
     if (method === 'GET' && pathname === '/user-api/admin/users') {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
+      db.ensureMonthlyCreditGrantsForAllActive();
       return sendJson(res, 200, {
         ...buildAdminSettingsPayload(),
         users: db.listUsersWithSync(),

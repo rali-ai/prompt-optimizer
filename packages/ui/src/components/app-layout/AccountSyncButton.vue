@@ -775,6 +775,7 @@ function formatLedgerReason(reason: string): string {
   const labelsZh: Record<string, string> = {
     monthly_grant: '月度赠送',
     tier_upgrade_grant: '升级补差',
+    usage_debit: '模型调用',
     model_usage: '模型调用',
     usage_refund: '调用退还',
     admin_adjust: '后台调整',
@@ -782,6 +783,7 @@ function formatLedgerReason(reason: string): string {
   const labelsEn: Record<string, string> = {
     monthly_grant: 'Monthly grant',
     tier_upgrade_grant: 'Upgrade grant',
+    usage_debit: 'Model usage',
     model_usage: 'Model usage',
     usage_refund: 'Usage refund',
     admin_adjust: 'Admin adjust',

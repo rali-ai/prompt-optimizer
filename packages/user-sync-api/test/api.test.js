@@ -2487,10 +2487,30 @@ test('domestic model presets GET/PATCH, promo links with query params, XSS rejec
     assert.match(html, /设为专业\+30天/);
     assert.match(html, /设为内部\(永久\)/);
     assert.match(html, /调积分/);
+    assert.equal(html.includes('普通用户'), false, 'admin user table should not render conflicting 普通用户 badge next to membership tier');
     assert.equal(html.includes('—'), false, 'admin UI copy should not contain em dashes');
     const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
     assert.ok(scriptMatch);
     assert.doesNotThrow(() => new Function(scriptMatch[1]));
+
+    // Verify GET /user-api/admin/users ensures active members have received current-month credits
+    const legacyProRow = ctx.app.db.createUser({
+      username: 'preexisting_pro',
+      passwordHash: ctx.app.db.findUserByUsername('root_admin').password_hash,
+      role: 'user',
+    });
+    ctx.app.db.updateUserAdmin(legacyProRow.id, {
+      tier: 'pro',
+      tierExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    });
+    const listUsersRes = await fetch(`${ctx.baseUrl}/user-api/admin/users`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(listUsersRes.status, 200);
+    const { users: listedUsers } = await listUsersRes.json();
+    const listedLegacyPro = listedUsers.find((u) => u.username === 'preexisting_pro');
+    assert.equal(listedLegacyPro.tier, 'pro');
+    assert.equal(listedLegacyPro.creditBalance, 500);
   } finally {
     await ctx.cleanup();
   }

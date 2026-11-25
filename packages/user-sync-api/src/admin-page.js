@@ -560,7 +560,6 @@ export function renderAdminHtml({
               <tr>
                 <th>用户名</th>
                 <th>邮箱</th>
-                <th>角色</th>
                 <th>会员等级</th>
                 <th>可用积分</th>
                 <th>到期时间</th>
@@ -571,7 +570,7 @@ export function renderAdminHtml({
               </tr>
             </thead>
             <tbody id="userRows">
-              <tr><td colspan="10" class="muted">正在加载用户列表...</td></tr>
+              <tr><td colspan="9" class="muted">正在加载用户列表...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1236,7 +1235,7 @@ export function renderAdminHtml({
         });
 
         if (!filtered.length) {
-          rowsEl.innerHTML = '<tr><td colspan="10" class="muted">没有符合条件的用户</td></tr>';
+          rowsEl.innerHTML = '<tr><td colspan="9" class="muted">没有符合条件的用户</td></tr>';
           return;
         }
 
@@ -1245,9 +1244,9 @@ export function renderAdminHtml({
           const emailCell = u.email
             ? '<span>' + esc(u.email) + '</span>'
             : '<span class="muted">未绑定</span>';
-          const roleBadge = u.role === 'admin'
-            ? '<span class="badge badge-admin">管理员</span>'
-            : '<span class="badge badge-neutral">普通用户</span>';
+          const adminTag = u.role === 'admin'
+            ? ' <span class="badge badge-admin">管理员</span>'
+            : '';
           const tierBadge = renderTierBadge(u.tier);
           const effectiveHint = u.effectiveTier && u.effectiveTier !== u.tier
             ? '<div class="sub">当前生效：' + esc(getTierInfo(u.effectiveTier).label) + '</div>'
@@ -1285,9 +1284,8 @@ export function renderAdminHtml({
             '</span>';
 
           return '<tr>' +
-            '<td><strong>' + esc(u.username) + '</strong><div class="sub">' + esc(u.id) + '</div></td>' +
+            '<td><strong>' + esc(u.username) + '</strong>' + adminTag + '<div class="sub">' + esc(u.id) + '</div></td>' +
             '<td>' + emailCell + '</td>' +
-            '<td>' + roleBadge + '</td>' +
             '<td>' + tierBadge + effectiveHint + '</td>' +
             '<td>' + creditCell + '</td>' +
             '<td>' + fmtDate(u.tierExpiresAt) + '</td>' +
@@ -1309,7 +1307,7 @@ export function renderAdminHtml({
       }
 
       async function loadUsers() {
-        rowsEl.innerHTML = '<tr><td colspan="10" class="muted">正在加载...</td></tr>';
+        rowsEl.innerHTML = '<tr><td colspan="9" class="muted">正在加载...</td></tr>';
         try {
           const res = await fetch('/user-api/admin/users', { credentials: 'same-origin' });
           const body = await res.json();
@@ -1390,6 +1388,7 @@ export function renderAdminHtml({
           }
           renderMonthlyCreditsInputs(body.monthlyCredits);
           showNotice('四档会员月度积分额度已保存并生效。');
+          await loadUsers();
         } catch (err) {
           showNotice('网络异常：' + err.message, true);
         } finally {

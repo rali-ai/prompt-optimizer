@@ -718,6 +718,24 @@ export function openDatabase(dbPath) {
       }
     },
 
+    ensureMonthlyCreditGrantsForAllActive(now = Date.now()) {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const activeRows = db.prepare('SELECT id FROM users WHERE disabled = 0').all();
+        for (const row of activeRows) {
+          ensureMonthlyCreditGrantInTx(row.id, now);
+        }
+        db.exec('COMMIT');
+      } catch (err) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          // ignore
+        }
+        throw err;
+      }
+    },
+
     debitUserCreditsAtomic(userId, cost, { modelId = null, note = null, now = Date.now() } = {}) {
       db.exec('BEGIN IMMEDIATE');
       try {
