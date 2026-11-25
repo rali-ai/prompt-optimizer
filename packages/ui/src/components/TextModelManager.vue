@@ -1,6 +1,53 @@
 <template>
   <div class="text-model-manager">
     <div
+      v-if="showSiliconFlowSpotlight"
+      class="siliconflow-spotlight"
+      data-testid="siliconflow-spotlight"
+    >
+      <div class="siliconflow-spotlight__content">
+        <div class="siliconflow-spotlight__title-row">
+          <span class="siliconflow-spotlight__badge">{{ isZh ? '主推模型' : 'Featured' }}</span>
+          <strong class="siliconflow-spotlight__title">
+            {{ isZh ? '硅基流动 SiliconFlow' : 'SiliconFlow' }}
+          </strong>
+        </div>
+        <div class="siliconflow-spotlight__desc">
+          {{
+            isZh
+              ? '国内直连稳定、一站聚合 DeepSeek / 通义千问 / GLM 等主流国产模型，支持免费注册领额度。'
+              : 'Fast domestic access aggregating DeepSeek, Qwen, GLM and more with free starter credits on sign-up.'
+          }}
+        </div>
+      </div>
+      <div class="siliconflow-spotlight__actions">
+        <NButton
+          v-if="siliconflowApplyLink.url"
+          type="primary"
+          size="small"
+          tag="a"
+          :href="siliconflowApplyLink.url"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="siliconflow-spotlight-apply"
+        >
+          <template #icon>
+            <ExternalLinkIcon />
+          </template>
+          {{ siliconflowApplyLink.label }}
+        </NButton>
+        <NButton
+          secondary
+          size="small"
+          data-testid="siliconflow-spotlight-configure"
+          @click="handleConfigureSiliconFlow"
+        >
+          {{ isZh ? '去配置硅基流动' : 'Configure SiliconFlow' }}
+        </NButton>
+      </div>
+    </div>
+
+    <div
       v-if="platformModels.length > 0"
       class="platform-models-strip"
       data-testid="platform-models-info-strip"
@@ -46,10 +93,17 @@ import LocalServiceDiscovery from './LocalServiceDiscovery.vue'
 import { isChromeBuiltInPlaceholder, type DiscoveredLocalService } from '../utils/local-model-discovery'
 import { useTextModelManager } from '../composables/model/useTextModelManager'
 import { MODELS_SYNCED_EVENT, usePlatformModelCatalog } from '../composables/model/usePlatformModelCatalog'
-import { filterDomesticTextModels, isPlatformModelId } from '../utils/domestic-models'
+import {
+  FEATURED_PROVIDER_ID,
+  filterDomesticTextModels,
+  isFeaturedProvider,
+  isPlatformModelId,
+  resolveProviderApplyLink,
+} from '../utils/domestic-models'
 import TextModelList from './TextModelList.vue'
 import TextModelEditModal from './TextModelEditModal.vue'
-import { useDialog } from 'naive-ui'
+import ExternalLinkIcon from './icons/ExternalLinkIcon.vue'
+import { NButton, useDialog } from 'naive-ui'
 import { useToast } from '../composables/ui/useToast'
 import { useConfirmDialog } from '../composables/ui/useConfirmDialog'
 import { getProviderDisplayName } from '../utils/provider-display'
@@ -65,6 +119,17 @@ const catalog = usePlatformModelCatalog()
 provide('textModelManager', manager)
 
 const isZh = computed(() => String(i18n.global.locale.value || '').toLowerCase().startsWith('zh'))
+const showSiliconFlowSpotlight = computed(() => {
+  const preset = catalog.presetsByProviderId.value.get(FEATURED_PROVIDER_ID)
+  return preset?.enabled !== false && isFeaturedProvider(FEATURED_PROVIDER_ID, catalog.presetsByProviderId.value)
+})
+const siliconflowApplyLink = computed(() =>
+  resolveProviderApplyLink(
+    FEATURED_PROVIDER_ID,
+    'https://cloud.siliconflow.cn/account/ak',
+    catalog.presetsByProviderId.value,
+  )
+)
 const platformModels = catalog.platformModels
 const accessiblePlatformCount = computed(
   () => platformModels.value.filter(model => model.accessible).length
@@ -87,8 +152,8 @@ const platformStripSummary = computed(() => {
 })
 const platformStripNote = computed(() =>
   isZh.value
-    ? '免费用户与会员均可随时在下方添加或配置自己的国产模型 API Key（仅保存在浏览器本地）。'
-    : 'Both guests and members can also add their own domestic model API keys below (stored locally).'
+    ? '平台模型池支持额度耗尽自动切替至其他有额度的可用模型；免费用户与会员也可随时在下方添加自己的国产模型 API Key（仅存本地）。'
+    : 'Platform models automatically fail over to another available model when upstream quota runs out. Both guests and members can also add local domestic API keys below.'
 )
 
 const visibleModels = computed(() =>
@@ -240,10 +305,25 @@ const handleDeleteModel = async (id: string) => {
   emit('modelsUpdated', firstId)
 }
 
-const openAddModal = async () => {
-  await manager.prepareForCreate()
+const openAddModal = async (initialProviderId?: string) => {
+  await manager.prepareForCreate(initialProviderId)
   editingModelId.value = null
   showEditModal.value = true
+}
+
+const handleConfigureSiliconFlow = async () => {
+  const existing =
+    visibleModels.value.find((m) => m.id === FEATURED_PROVIDER_ID) ??
+    visibleModels.value.find(
+      (m) =>
+        !isPlatformModelId(m.id) &&
+        String(m.providerId ?? m.providerMeta?.id ?? '').trim().toLowerCase() === FEATURED_PROVIDER_ID,
+    )
+  if (existing) {
+    await handleEditModel(existing.id)
+    return
+  }
+  await openAddModal(FEATURED_PROVIDER_ID)
 }
 
 defineExpose({
@@ -273,6 +353,64 @@ onMounted(async () => {
 <style scoped>
 .text-model-manager {
   width: 100%;
+}
+
+.siliconflow-spotlight {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(217, 107, 67, 0.30);
+  background: linear-gradient(135deg, rgba(217, 107, 67, 0.085) 0%, rgba(15, 118, 110, 0.065) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.siliconflow-spotlight__content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.siliconflow-spotlight__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.siliconflow-spotlight__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--gp-copper, #d96b43);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.siliconflow-spotlight__title {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.siliconflow-spotlight__desc {
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.82;
+}
+
+.siliconflow-spotlight__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .platform-models-strip {

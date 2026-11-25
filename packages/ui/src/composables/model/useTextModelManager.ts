@@ -32,6 +32,8 @@ import {
   filterDomesticProviders,
   isPlatformModelId,
   mergePresetDefaultParams,
+  sortDomesticProviders,
+  sortDomesticTextModels,
 } from '../../utils/domestic-models'
 import { usePlatformModelCatalog } from './usePlatformModelCatalog'
 
@@ -109,7 +111,10 @@ export function useTextModelManager() {
 
   const allProviders = ref<TextProvider[]>([])
   const providers = computed<TextProvider[]>(() =>
-    filterDomesticProviders(allProviders.value, catalog.presetsByProviderId.value)
+    sortDomesticProviders(
+      filterDomesticProviders(allProviders.value, catalog.presetsByProviderId.value),
+      catalog.presetsByProviderId.value,
+    )
   )
   const providersLoaded = ref(false)
   const isLoadingProviders = ref(false)
@@ -481,32 +486,14 @@ export function useTextModelManager() {
     loadingModels.value = true
     try {
       const all = await modelManager.getAllModels()
-      const platformMetaMap = catalog.platformMetaByConfigId.value
-      models.value = all
-        .map((model: TextModelConfig) => ({ ...model }))
-        .sort((a: TextModelConfig, b: TextModelConfig) => {
-          if (a.enabled !== b.enabled) {
-            return a.enabled ? -1 : 1
-          }
-          const aPlatform = isPlatformModelId(a.id)
-          const bPlatform = isPlatformModelId(b.id)
-          if (aPlatform !== bPlatform) {
-            return aPlatform ? -1 : 1
-          }
-          if (aPlatform && bPlatform) {
-            const aOrder = platformMetaMap.get(a.id)?.sortOrder ?? 0
-            const bOrder = platformMetaMap.get(b.id)?.sortOrder ?? 0
-            if (aOrder !== bOrder) {
-              return aOrder - bOrder
-            }
-          }
-          const aDefault = isDefaultModel(a.id)
-          const bDefault = isDefaultModel(b.id)
-          if (aDefault !== bDefault) {
-            return aDefault ? -1 : 1
-          }
-          return a.name.localeCompare(b.name)
-        })
+      models.value = sortDomesticTextModels(
+        all.map((model: TextModelConfig) => ({ ...model })),
+        catalog.presetsByProviderId.value,
+        {
+          isDefaultModel,
+          platformMetaByConfigId: catalog.platformMetaByConfigId.value,
+        },
+      )
     } catch (error) {
       console.error('Failed to load models:', error)
       toast.error(t('modelManager.loadFailed'))
@@ -700,13 +687,18 @@ export function useTextModelManager() {
     }
   }
 
-  const prepareForCreate = async () => {
+  const prepareForCreate = async (initialProviderId?: string) => {
     resetFormState()
     await ensureProvidersLoaded()
     formReady.value = false
 
-    if (providers.value.length > 0) {
-      setProvider(providers.value[0].id, {
+    const sortedProviders = sortDomesticProviders(providers.value, catalog.presetsByProviderId.value)
+    if (sortedProviders.length > 0) {
+      const requested = initialProviderId
+        ? sortedProviders.find((p) => p.id === initialProviderId)
+        : undefined
+      const defaultProviderId = requested?.id ?? sortedProviders[0].id
+      setProvider(defaultProviderId, {
         autoSelectFirstModel: true,
         resetOverrides: true
       })

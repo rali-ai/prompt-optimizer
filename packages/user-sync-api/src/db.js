@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { hashPassword } from './crypto.js';
-import { serializeAnnouncement } from './announcements.js';
+import { serializeAnnouncement, serializeAnnouncementComment } from './announcements.js';
 import {
   DEFAULT_MONTHLY_CREDITS,
   MAX_MONTHLY_CREDITS,
@@ -154,6 +154,28 @@ function migrateUsersTableIfNeeded(db) {
   `);
 }
 
+function migratePlatformModelsTableIfNeeded(db) {
+  const cols = db.prepare('PRAGMA table_info(platform_models)').all();
+  const colNames = new Set(cols.map((col) => col.name));
+  if (!colNames.has('auto_fallback')) {
+    db.exec(
+      'ALTER TABLE platform_models ADD COLUMN auto_fallback INTEGER NOT NULL DEFAULT 1 CHECK (auto_fallback IN (0, 1))',
+    );
+  }
+  if (!colNames.has('fallback_model_id')) {
+    db.exec('ALTER TABLE platform_models ADD COLUMN fallback_model_id TEXT');
+  }
+  if (!colNames.has('cooldown_until')) {
+    db.exec('ALTER TABLE platform_models ADD COLUMN cooldown_until INTEGER');
+  }
+  if (!colNames.has('last_error_reason')) {
+    db.exec('ALTER TABLE platform_models ADD COLUMN last_error_reason TEXT');
+  }
+  if (!colNames.has('last_error_at')) {
+    db.exec('ALTER TABLE platform_models ADD COLUMN last_error_at INTEGER');
+  }
+}
+
 export function openDatabase(dbPath) {
   const dir = path.dirname(dbPath);
   fs.mkdirSync(dir, { recursive: true });
@@ -265,6 +287,11 @@ export function openDatabase(dbPath) {
       description TEXT,
       sort_order INTEGER NOT NULL DEFAULT 0,
       enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+      auto_fallback INTEGER NOT NULL DEFAULT 1 CHECK (auto_fallback IN (0, 1)),
+      fallback_model_id TEXT,
+      cooldown_until INTEGER,
+      last_error_reason TEXT,
+      last_error_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -280,7 +307,19 @@ export function openDatabase(dbPath) {
       enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS announcement_comments (
+      id TEXT PRIMARY KEY,
+      announcement_id TEXT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_announcement_comments_ann_created
+      ON announcement_comments(announcement_id, created_at DESC);
   `);
+
+  migratePlatformModelsTableIfNeeded(db);
 
   const stmtFindByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
   const stmtFindByEmail = db.prepare('SELECT * FROM users WHERE email = ?');
@@ -380,6 +419,11 @@ export function openDatabase(dbPath) {
     INSERT INTO credit_ledger (id, user_id, delta, balance_after, reason, model_id, note, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
+  const stmtUpdateCreditLedgerNote = db.prepare(`
+    UPDATE credit_ledger
+    SET note = ?
+    WHERE id = ?
+  `);
   const stmtListUserCreditLedger = db.prepare(`
     SELECT * FROM credit_ledger
     WHERE user_id = ?
@@ -387,16 +431,73 @@ export function openDatabase(dbPath) {
     LIMIT ?
   `);
   const stmtListActiveAnnouncements = db.prepare(`
-    SELECT * FROM announcements
+    SELECT
+      announcements.*,
+      (SELECT COUNT(*) FROM announcement_comments c WHERE c.announcement_id = announcements.id) AS comment_count
+    FROM announcements
     WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > ?)
     ORDER BY is_pinned DESC, updated_at DESC, rowid DESC
     LIMIT ?
   `);
   const stmtListAllAnnouncements = db.prepare(`
-    SELECT * FROM announcements
+    SELECT
+      announcements.*,
+      (SELECT COUNT(*) FROM announcement_comments c WHERE c.announcement_id = announcements.id) AS comment_count
+    FROM announcements
     ORDER BY is_pinned DESC, updated_at DESC, rowid DESC
   `);
-  const stmtFindAnnouncementById = db.prepare('SELECT * FROM announcements WHERE id = ?');
+  const stmtFindAnnouncementById = db.prepare(`
+    SELECT
+      announcements.*,
+      (SELECT COUNT(*) FROM announcement_comments c WHERE c.announcement_id = announcements.id) AS comment_count
+    FROM announcements
+    WHERE id = ?
+  `);
+  const stmtListAnnouncementComments = db.prepare(`
+    SELECT
+      c.id,
+      c.announcement_id,
+      c.user_id,
+      c.content,
+      c.created_at,
+      u.username,
+      u.role,
+      u.tier,
+      u.tier_expires_at
+    FROM announcement_comments c
+    JOIN users u ON u.id = c.user_id
+    WHERE c.announcement_id = ?
+    ORDER BY c.created_at DESC, c.rowid DESC
+    LIMIT ?
+  `);
+  const stmtFindAnnouncementCommentWithUser = db.prepare(`
+    SELECT
+      c.id,
+      c.announcement_id,
+      c.user_id,
+      c.content,
+      c.created_at,
+      u.username,
+      u.role,
+      u.tier,
+      u.tier_expires_at
+    FROM announcement_comments c
+    JOIN users u ON u.id = c.user_id
+    WHERE c.id = ?
+  `);
+  const stmtCountAnnouncementComments = db.prepare(
+    'SELECT COUNT(*) AS count FROM announcement_comments WHERE announcement_id = ?',
+  );
+  const stmtInsertAnnouncementComment = db.prepare(`
+    INSERT INTO announcement_comments (id, announcement_id, user_id, content, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const stmtFindAnnouncementCommentById = db.prepare(
+    'SELECT id, announcement_id, user_id, content, created_at FROM announcement_comments WHERE id = ?',
+  );
+  const stmtDeleteAnnouncementComment = db.prepare(
+    'DELETE FROM announcement_comments WHERE id = ?',
+  );
   const stmtInsertAnnouncement = db.prepare(`
     INSERT INTO announcements (
       id, title, content, type, link_url, link_text,
@@ -425,27 +526,38 @@ export function openDatabase(dbPath) {
   `);
   const stmtListAllPlatformModels = db.prepare(`
     SELECT * FROM platform_models
-    ORDER BY sort_order ASC, created_at DESC
+    ORDER BY sort_order ASC, created_at ASC
   `);
   const stmtListEnabledPlatformModels = db.prepare(`
     SELECT * FROM platform_models
     WHERE enabled = 1
-    ORDER BY sort_order ASC, created_at DESC
+    ORDER BY sort_order ASC, created_at ASC
   `);
   const stmtFindPlatformModelById = db.prepare('SELECT * FROM platform_models WHERE id = ?');
   const stmtInsertPlatformModel = db.prepare(`
     INSERT INTO platform_models (
       id, name, provider_label, base_url, api_key, upstream_model,
       credit_cost, min_tier, default_params_json, apply_url, description,
-      sort_order, enabled, created_at, updated_at
+      sort_order, enabled, auto_fallback, fallback_model_id, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const stmtUpdatePlatformModel = db.prepare(`
     UPDATE platform_models
     SET name = ?, provider_label = ?, base_url = ?, api_key = ?, upstream_model = ?,
         credit_cost = ?, min_tier = ?, default_params_json = ?, apply_url = ?,
-        description = ?, sort_order = ?, enabled = ?, updated_at = ?
+        description = ?, sort_order = ?, enabled = ?, auto_fallback = ?,
+        fallback_model_id = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  const stmtRecordPlatformModelFailure = db.prepare(`
+    UPDATE platform_models
+    SET cooldown_until = ?, last_error_reason = ?, last_error_at = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  const stmtClearPlatformModelCooldown = db.prepare(`
+    UPDATE platform_models
+    SET cooldown_until = NULL, last_error_reason = NULL, last_error_at = NULL, updated_at = ?
     WHERE id = ?
   `);
   const stmtDeletePlatformModel = db.prepare('DELETE FROM platform_models WHERE id = ?');
@@ -757,9 +869,10 @@ export function openDatabase(dbPath) {
             return { ok: false, reason: 'insufficient_credits', balance, required: safeCost };
           }
           const nextBalance = balance - safeCost;
+          const ledgerId = crypto.randomUUID();
           stmtUpdateUserCreditBalance.run(nextBalance, now, userId);
           stmtInsertCreditLedger.run(
-            crypto.randomUUID(),
+            ledgerId,
             userId,
             -safeCost,
             nextBalance,
@@ -769,10 +882,10 @@ export function openDatabase(dbPath) {
             now,
           );
           db.exec('COMMIT');
-          return { ok: true, balanceAfter: nextBalance, cost: safeCost };
+          return { ok: true, balanceAfter: nextBalance, cost: safeCost, ledgerId };
         }
         db.exec('COMMIT');
-        return { ok: true, balanceAfter: balance, cost: 0 };
+        return { ok: true, balanceAfter: balance, cost: 0, ledgerId: null };
       } catch (err) {
         try {
           db.exec('ROLLBACK');
@@ -781,6 +894,14 @@ export function openDatabase(dbPath) {
         }
         throw err;
       }
+    },
+
+    updateCreditLedgerNote(ledgerId, note) {
+      if (!ledgerId) return false;
+      const safeNote =
+        typeof note === 'string' && note.trim() ? note.trim().slice(0, 300) : null;
+      const result = stmtUpdateCreditLedgerNote.run(safeNote, ledgerId);
+      return Number(result?.changes || 0) > 0;
     },
 
     refundUserCredits(userId, cost, { modelId = null, note = null, now = Date.now() } = {}) {
@@ -998,6 +1119,35 @@ export function openDatabase(dbPath) {
       return Number(result?.changes || 0) > 0;
     },
 
+    listAnnouncementComments(announcementId, limit = 50, now = Date.now()) {
+      const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 50;
+      return stmtListAnnouncementComments
+        .all(announcementId, safeLimit)
+        .map((row) => serializeAnnouncementComment(row, now));
+    },
+
+    countAnnouncementComments(announcementId) {
+      const row = stmtCountAnnouncementComments.get(announcementId);
+      return Number(row?.count ?? 0);
+    },
+
+    createAnnouncementComment({ announcementId, userId, content }) {
+      const now = Date.now();
+      const id = crypto.randomUUID();
+      stmtInsertAnnouncementComment.run(id, announcementId, userId, content, now);
+      return serializeAnnouncementComment(stmtFindAnnouncementCommentWithUser.get(id), now);
+    },
+
+    findAnnouncementCommentById(commentId) {
+      if (!commentId) return null;
+      return stmtFindAnnouncementCommentById.get(commentId) || null;
+    },
+
+    deleteAnnouncementComment(commentId) {
+      const result = stmtDeleteAnnouncementComment.run(commentId);
+      return Number(result?.changes || 0) > 0;
+    },
+
     recordAnnouncementEmailed(id, count) {
       const existing = stmtFindAnnouncementById.get(id);
       if (!existing) return null;
@@ -1014,8 +1164,9 @@ export function openDatabase(dbPath) {
       }));
     },
 
-    listPlatformModelsRaw({ onlyEnabled = false } = {}) {
-      return onlyEnabled ? stmtListEnabledPlatformModels.all() : stmtListAllPlatformModels.all();
+    listPlatformModelsRaw({ enabledOnly = false, onlyEnabled = false } = {}) {
+      const filterEnabled = Boolean(enabledOnly || onlyEnabled);
+      return filterEnabled ? stmtListEnabledPlatformModels.all() : stmtListAllPlatformModels.all();
     },
 
     findPlatformModelRawById(id) {
@@ -1033,6 +1184,9 @@ export function openDatabase(dbPath) {
         const suffix = crypto.randomBytes(3).toString('hex');
         finalId = `${finalId.slice(0, 56)}-${suffix}`;
       }
+      if (input.fallbackModelId && input.fallbackModelId === finalId) {
+        throw new PayloadError('优先备用模型不能指向当前模型自身', 400);
+      }
 
       stmtInsertPlatformModel.run(
         finalId,
@@ -1048,10 +1202,12 @@ export function openDatabase(dbPath) {
         input.description ?? null,
         input.sortOrder ?? 0,
         input.enabled === false ? 0 : 1,
+        input.autoFallback === false ? 0 : 1,
+        input.fallbackModelId ?? null,
         now,
         now,
       );
-      return serializeAdminPlatformModel(stmtFindPlatformModelById.get(finalId));
+      return serializeAdminPlatformModel(stmtFindPlatformModelById.get(finalId), now);
     },
 
     updatePlatformModel(id, patch) {
@@ -1078,6 +1234,16 @@ export function openDatabase(dbPath) {
       const nextSortOrder = patch.sortOrder !== undefined ? patch.sortOrder : existing.sort_order;
       const nextEnabled =
         patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : existing.enabled;
+      const nextAutoFallback =
+        patch.autoFallback !== undefined
+          ? patch.autoFallback
+            ? 1
+            : 0
+          : existing.auto_fallback === undefined
+            ? 1
+            : existing.auto_fallback;
+      const nextFallbackModelId =
+        patch.fallbackModelId !== undefined ? patch.fallbackModelId : existing.fallback_model_id;
       const now = Date.now();
 
       stmtUpdatePlatformModel.run(
@@ -1093,10 +1259,29 @@ export function openDatabase(dbPath) {
         nextDescription,
         nextSortOrder,
         nextEnabled,
+        nextAutoFallback,
+        nextFallbackModelId,
         now,
         id,
       );
-      return serializeAdminPlatformModel(stmtFindPlatformModelById.get(id));
+      return serializeAdminPlatformModel(stmtFindPlatformModelById.get(id), now);
+    },
+
+    recordPlatformModelFailure(id, { cooldownUntil = null, reason = null, now = Date.now() } = {}) {
+      const existing = stmtFindPlatformModelById.get(id);
+      if (!existing) return null;
+      const safeCooldownUntil = Number.isFinite(cooldownUntil) ? Math.floor(cooldownUntil) : null;
+      const safeReason =
+        typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 300) : null;
+      stmtRecordPlatformModelFailure.run(safeCooldownUntil, safeReason, now, now, id);
+      return stmtFindPlatformModelById.get(id) || null;
+    },
+
+    clearPlatformModelCooldown(id, now = Date.now()) {
+      const existing = stmtFindPlatformModelById.get(id);
+      if (!existing) return null;
+      stmtClearPlatformModelCooldown.run(now, id);
+      return stmtFindPlatformModelById.get(id) || null;
     },
 
     deletePlatformModel(id) {

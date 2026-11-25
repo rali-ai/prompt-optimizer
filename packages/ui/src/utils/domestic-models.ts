@@ -12,8 +12,29 @@ export const OVERSEAS_PROVIDER_IDS: ReadonlySet<string> = new Set([
 ])
 
 export const PLATFORM_MODEL_ID_PREFIX = 'platform:'
+export const FEATURED_PROVIDER_ID = 'siliconflow'
 
 const DEFAULT_APPLY_LABEL = '申请 API Key'
+const FEATURED_APPLY_LABEL = '主推 · 申请领免费额度'
+
+const BUILTIN_TEXT_MODEL_IDS: ReadonlySet<string> = new Set([
+  'openai',
+  'gemini',
+  'anthropic',
+  'deepseek',
+  'siliconflow',
+  'zhipu',
+  'dashscope',
+  'openrouter',
+  'modelscope',
+  'ollama',
+  'minimax',
+  'cloudflare',
+  'grok',
+  'xiaomi-mimo-token-plan',
+  'chrome-built-in',
+  'custom',
+])
 
 function normalizeProviderId(providerId?: string | null): string {
   return typeof providerId === 'string' ? providerId.trim().toLowerCase() : ''
@@ -118,6 +139,110 @@ export function filterDomesticImageConfigs(
   })
 }
 
+export function isFeaturedProvider(
+  providerId?: string | null,
+  presets?: ReadonlyMap<string, DomesticModelPreset>,
+): boolean {
+  const normalized = normalizeProviderId(providerId)
+  if (!normalized) return false
+  const preset = lookupPreset(normalized, presets)
+  if (preset?.featured === true) return true
+  if (preset?.featured === false) return false
+  return normalized === FEATURED_PROVIDER_ID
+}
+
+export function sortDomesticProviders<T extends { id: string }>(
+  providers: readonly T[],
+  presets?: ReadonlyMap<string, DomesticModelPreset>,
+): T[] {
+  return providers
+    .map((provider, index) => ({
+      provider,
+      index,
+      featured: isFeaturedProvider(provider.id, presets),
+      isPrimaryFeatured: normalizeProviderId(provider.id) === FEATURED_PROVIDER_ID,
+    }))
+    .sort((a, b) => {
+      if (a.featured !== b.featured) return a.featured ? -1 : 1
+      if (a.featured && b.featured && a.isPrimaryFeatured !== b.isPrimaryFeatured) {
+        return a.isPrimaryFeatured ? -1 : 1
+      }
+      return a.index - b.index
+    })
+    .map((entry) => entry.provider)
+}
+
+export interface SortDomesticTextModelsOptions {
+  isDefaultModel?: (id: string) => boolean
+  platformMetaByConfigId?: ReadonlyMap<string, PublicPlatformModel>
+}
+
+export function sortDomesticTextModels(
+  models: readonly TextModelConfig[],
+  presets?: ReadonlyMap<string, DomesticModelPreset>,
+  options?: SortDomesticTextModelsOptions,
+): TextModelConfig[] {
+  const checkDefault =
+    options?.isDefaultModel ?? ((id: string) => BUILTIN_TEXT_MODEL_IDS.has(id) || isPlatformModelId(id))
+  const platformMetaMap = options?.platformMetaByConfigId
+
+  return [...models].sort((a, b) => {
+    if (a.enabled !== b.enabled) {
+      return a.enabled ? -1 : 1
+    }
+
+    const aPlatform = isPlatformModelId(a.id)
+    const bPlatform = isPlatformModelId(b.id)
+    const aFeatured = !aPlatform && isFeaturedProvider(a.providerId ?? a.providerMeta?.id, presets)
+    const bFeatured = !bPlatform && isFeaturedProvider(b.providerId ?? b.providerMeta?.id, presets)
+
+    if (a.enabled) {
+      if (aPlatform !== bPlatform) {
+        return aPlatform ? -1 : 1
+      }
+      if (aPlatform && bPlatform) {
+        const aOrder = platformMetaMap?.get(a.id)?.sortOrder ?? 0
+        const bOrder = platformMetaMap?.get(b.id)?.sortOrder ?? 0
+        if (aOrder !== bOrder) {
+          return aOrder - bOrder
+        }
+      }
+      if (aFeatured !== bFeatured) {
+        return aFeatured ? -1 : 1
+      }
+    } else {
+      if (aFeatured !== bFeatured) {
+        return aFeatured ? -1 : 1
+      }
+    }
+
+    const aDefault = checkDefault(a.id)
+    const bDefault = checkDefault(b.id)
+    if (aDefault !== bDefault) {
+      return aDefault ? -1 : 1
+    }
+
+    return (a.name || a.id).localeCompare(b.name || b.id)
+  })
+}
+
+export function sortDomesticImageConfigs(
+  configs: readonly ImageModelConfig[],
+  presets?: ReadonlyMap<string, DomesticModelPreset>,
+): ImageModelConfig[] {
+  return [...configs].sort((a, b) => {
+    if (a.enabled !== b.enabled) {
+      return a.enabled ? -1 : 1
+    }
+    const aFeatured = isFeaturedProvider(a.providerId ?? a.provider?.id, presets)
+    const bFeatured = isFeaturedProvider(b.providerId ?? b.provider?.id, presets)
+    if (aFeatured !== bFeatured) {
+      return aFeatured ? -1 : 1
+    }
+    return (a.name || a.id).localeCompare(b.name || b.id)
+  })
+}
+
 export function resolveProviderApplyLink(
   providerId: string | undefined | null,
   fallbackUrl: string | undefined | null,
@@ -125,10 +250,14 @@ export function resolveProviderApplyLink(
 ): { url: string | null; label: string } {
   const preset = lookupPreset(providerId, presets)
   const url = sanitizeHttpUrl(preset?.applyUrl) ?? sanitizeHttpUrl(fallbackUrl)
+  const defaultLabel =
+    normalizeProviderId(providerId) === FEATURED_PROVIDER_ID
+      ? FEATURED_APPLY_LABEL
+      : DEFAULT_APPLY_LABEL
   const label =
     typeof preset?.applyLabel === 'string' && preset.applyLabel.trim()
       ? preset.applyLabel.trim()
-      : DEFAULT_APPLY_LABEL
+      : defaultLabel
   return { url, label }
 }
 

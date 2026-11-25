@@ -4,7 +4,7 @@
     - 免登录可直接使用；云同步仅保存收藏、历史、模板和变量，模型 API Key 仅留在浏览器本地（BYOK）。
     - 扩展、桌面版或纯静态部署无 /user-api/ 时自动静默隐藏。
   -->
-  <div v-if="available" class="account-sync-inline" :class="{ 'account-sync-inline--open': showModal }">
+  <div v-if="available" ref="rootEl" class="account-sync-inline" :class="{ 'account-sync-inline--open': showModal }">
     <NButton
       quaternary
       size="small"
@@ -696,6 +696,7 @@ const currentUser = ref<SyncUser | null>(null)
 const lastSyncVersion = ref(0)
 const lastSyncUpdatedAt = ref<number | null>(null)
 
+const rootEl = ref<HTMLElement | null>(null)
 const showModal = ref(false)
 const showSecurity = ref(false)
 const showCreditLedger = ref(false)
@@ -853,7 +854,28 @@ async function refreshSyncMeta() {
   }
 }
 
+function dispatchAuthChanged(user: SyncUser | null) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('goprmpt:auth-changed', { detail: { user } }))
+}
+
+function handleOpenAccountPanel(event: Event) {
+  if (!available.value) return
+  const detail = (event as CustomEvent<{ tab?: 'login' | 'register' }> | undefined)?.detail
+  if (detail?.tab === 'login' || detail?.tab === 'register') {
+    activeTab.value = detail.tab
+  }
+  showForgotReset.value = false
+  if (!showModal.value) {
+    openPanel()
+  }
+  rootEl.value?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
+}
+
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('goprmpt:open-account-panel', handleOpenAccountPanel)
+  }
   try {
     const cfg = await getConfig(props.baseUrl)
     available.value = true
@@ -862,6 +884,7 @@ onMounted(async () => {
     monthlyCreditsConfig.value = cfg.monthlyCredits || null
     const user = await getMe(props.baseUrl)
     currentUser.value = user
+    dispatchAuthChanged(currentUser.value)
     if (user) {
       await Promise.all([refreshSyncMeta(), refreshCreditsAndPlatformModels(true)])
     } else {
@@ -874,6 +897,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('goprmpt:open-account-panel', handleOpenAccountPanel)
+  }
   if (resetCooldownTimer) {
     clearInterval(resetCooldownTimer)
     resetCooldownTimer = null
@@ -966,28 +992,34 @@ async function handleConfirmReset() {
   }
 }
 
+function openPanel() {
+  notice.value = null
+  form.password = ''
+  form.confirmPassword = ''
+  securityForm.email = currentUser.value?.email || ''
+  getConfig(props.baseUrl)
+    .then((cfg) => {
+      membershipEnabled.value = Boolean(cfg.membershipEnabled)
+      emailResetEnabled.value = Boolean(cfg.emailResetEnabled)
+      if (cfg.monthlyCredits) {
+        monthlyCreditsConfig.value = cfg.monthlyCredits
+      }
+    })
+    .catch(() => {
+      // ignore transient refresh errors
+    })
+  if (currentUser.value) {
+    void refreshCreditsAndPlatformModels(true)
+  }
+  showModal.value = true
+}
+
 function togglePanel() {
   if (!showModal.value) {
-    notice.value = null
-    form.password = ''
-    form.confirmPassword = ''
-    securityForm.email = currentUser.value?.email || ''
-    getConfig(props.baseUrl)
-      .then((cfg) => {
-        membershipEnabled.value = Boolean(cfg.membershipEnabled)
-        emailResetEnabled.value = Boolean(cfg.emailResetEnabled)
-        if (cfg.monthlyCredits) {
-          monthlyCreditsConfig.value = cfg.monthlyCredits
-        }
-      })
-      .catch(() => {
-        // ignore transient refresh errors
-      })
-    if (currentUser.value) {
-      void refreshCreditsAndPlatformModels(true)
-    }
+    openPanel()
+    return
   }
-  showModal.value = !showModal.value
+  showModal.value = false
 }
 
 function toggleSecurity() {
@@ -1019,6 +1051,7 @@ async function handleLogin() {
   notice.value = null
   try {
     currentUser.value = await login(form.username.trim(), form.password, props.baseUrl)
+    dispatchAuthChanged(currentUser.value)
     form.password = ''
     securityForm.email = currentUser.value?.email || ''
     await Promise.all([refreshSyncMeta(), refreshCreditsAndPlatformModels(true)])
@@ -1055,6 +1088,7 @@ async function handleRegister() {
       fetch,
       form.email.trim() || undefined,
     )
+    dispatchAuthChanged(currentUser.value)
     form.email = ''
     form.password = ''
     form.confirmPassword = ''
@@ -1218,6 +1252,7 @@ async function handleLogout() {
   try {
     await logout(props.baseUrl)
     currentUser.value = null
+    dispatchAuthChanged(null)
     showSecurity.value = false
     showCreditLedger.value = false
     securityForm.email = ''

@@ -18,6 +18,8 @@ import {
   filterDomesticImageConfigs,
   filterDomesticProviders,
   mergePresetDefaultParams,
+  sortDomesticImageConfigs,
+  sortDomesticProviders,
 } from '../../utils/domestic-models'
 import { usePlatformModelCatalog } from './usePlatformModelCatalog'
 
@@ -44,7 +46,10 @@ export function useImageModelManager() {
   // 状态管理
   const allProviders = ref<ImageProvider[]>([])
   const providers = computed<ImageProvider[]>(() =>
-    filterDomesticProviders(allProviders.value, catalog.presetsByProviderId.value)
+    sortDomesticProviders(
+      filterDomesticProviders(allProviders.value, catalog.presetsByProviderId.value),
+      catalog.presetsByProviderId.value,
+    )
   )
   const models = ref<ImageModel[]>([])
   const dynamicModels = ref<ImageModel[]>([])
@@ -211,15 +216,7 @@ export function useImageModelManager() {
       await catalog.loadModelPresets()
       const allConfigs = await imageModelManager.getAllConfigs()
       const domesticConfigs = filterDomesticImageConfigs(allConfigs, catalog.presetsByProviderId.value)
-      // 排序：启用的模型在前，然后按显示名称排序
-      configs.value = domesticConfigs.sort((a: ImageModelConfig, b: ImageModelConfig) => {
-        // 第一级：按启用状态排序（启用的在前）
-        if (a.enabled !== b.enabled) {
-          return a.enabled ? -1 : 1
-        }
-        // 第二级：按名称字母顺序排序
-        return a.name.localeCompare(b.name)
-      })
+      configs.value = sortDomesticImageConfigs(domesticConfigs, catalog.presetsByProviderId.value)
     } catch (error) {
       console.error('Failed to load configs:', error)
       toast.error(t('image.config.loadFailed'))

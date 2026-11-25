@@ -19,14 +19,14 @@
           type="button"
           class="gp-ann-body-trigger"
           :aria-expanded="bannerExpanded"
-          :title="currentBanner.content ? (isEn ? 'Click to expand details' : '点击展开完整内容') : currentBanner.title"
+          :title="isEn ? 'Click to expand details & comments' : '点击展开详情与评论'"
           @click="toggleBannerExpand"
         >
           <strong class="gp-ann-bar__title">{{ currentBanner.title }}</strong>
           <span v-if="currentBanner.content" class="gp-ann-bar__excerpt">
             {{ currentBanner.content }}
           </span>
-          <NIcon v-if="currentBanner.content" :size="13" class="gp-ann-bar__chevron">
+          <NIcon :size="13" class="gp-ann-bar__chevron">
             <ChevronUp v-if="bannerExpanded" :stroke-width="2" />
             <ChevronDown v-else :stroke-width="2" />
           </NIcon>
@@ -44,6 +44,18 @@
           <span>{{ currentBanner.linkText || (isEn ? 'Details' : '查看详情') }}</span>
           <NIcon :size="12"><ExternalLink :stroke-width="2" /></NIcon>
         </a>
+
+        <button
+          type="button"
+          class="gp-ann-comment-btn"
+          :class="{ 'gp-ann-comment-btn--active': bannerExpanded }"
+          :aria-expanded="bannerExpanded"
+          data-testid="announcement-banner-comments-btn"
+          @click="toggleBannerComments"
+        >
+          <NIcon :size="12"><MessageSquare :stroke-width="2" /></NIcon>
+          <span>{{ formatCommentBtnLabel(currentBanner.commentCount) }}</span>
+        </button>
 
         <button
           v-if="announcements.length > 1"
@@ -69,10 +81,10 @@
       </div>
     </div>
 
-    <!-- Inline expanded full content for the active banner -->
-    <div v-if="bannerExpanded && currentBanner.content" class="gp-ann-expanded">
-      <p class="gp-ann-expanded__text">{{ currentBanner.content }}</p>
-      <div class="gp-ann-expanded__meta">
+    <!-- Inline expanded full content and comments for the active banner -->
+    <div v-if="bannerExpanded" class="gp-ann-expanded" data-testid="announcement-banner-expanded">
+      <p v-if="currentBanner.content" class="gp-ann-expanded__text">{{ currentBanner.content }}</p>
+      <div v-if="formatDate(currentBanner) || bannerSafeUrl" class="gp-ann-expanded__meta">
         <span v-if="formatDate(currentBanner)" class="gp-ann-date">{{ formatDate(currentBanner) }}</span>
         <a
           v-if="bannerSafeUrl"
@@ -85,6 +97,21 @@
           <NIcon :size="12"><ExternalLink :stroke-width="2" /></NIcon>
         </a>
       </div>
+      <AnnouncementComments
+        :announcement-id="currentBanner.id"
+        :comment-count="currentBanner.commentCount"
+        :comments="commentsFor(currentBanner.id)"
+        :loading="isCommentsLoading(currentBanner.id)"
+        :load-error="commentsErrorFor(currentBanner.id)"
+        :current-auth-user="currentAuthUser"
+        :is-en="isEn"
+        :collapsible="false"
+        :expanded="true"
+        :on-submit-comment="handleSubmitComment"
+        :on-delete-comment="handleDeleteComment"
+        @refresh="refreshCommentsFor(currentBanner.id)"
+        @open-auth="handleOpenAccountPanel"
+      />
     </div>
 
     <!-- Anchored list popover opened via "全部 (N)" in banner -->
@@ -140,6 +167,23 @@
               <NIcon :size="12"><ExternalLink :stroke-width="2" /></NIcon>
             </a>
           </div>
+          <AnnouncementComments
+            :announcement-id="item.id"
+            :comment-count="item.commentCount"
+            :comments="commentsFor(item.id)"
+            :loading="isCommentsLoading(item.id)"
+            :load-error="commentsErrorFor(item.id)"
+            :current-auth-user="currentAuthUser"
+            :is-en="isEn"
+            :collapsible="true"
+            :expanded="isCardCommentsOpen(item.id)"
+            :compact="true"
+            :on-submit-comment="handleSubmitComment"
+            :on-delete-comment="handleDeleteComment"
+            @toggle="toggleCardComments(item.id)"
+            @refresh="refreshCommentsFor(item.id)"
+            @open-auth="handleOpenAccountPanel"
+          />
         </li>
       </ul>
     </div>
@@ -226,6 +270,23 @@
               <NIcon :size="12"><ExternalLink :stroke-width="2" /></NIcon>
             </a>
           </div>
+          <AnnouncementComments
+            :announcement-id="item.id"
+            :comment-count="item.commentCount"
+            :comments="commentsFor(item.id)"
+            :loading="isCommentsLoading(item.id)"
+            :load-error="commentsErrorFor(item.id)"
+            :current-auth-user="currentAuthUser"
+            :is-en="isEn"
+            :collapsible="true"
+            :expanded="isCardCommentsOpen(item.id)"
+            :compact="true"
+            :on-submit-comment="handleSubmitComment"
+            :on-delete-comment="handleDeleteComment"
+            @toggle="toggleCardComments(item.id)"
+            @refresh="refreshCommentsFor(item.id)"
+            @open-auth="handleOpenAccountPanel"
+          />
         </li>
       </ul>
     </div>
@@ -236,11 +297,17 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   announcementDismissKey,
+  createAnnouncementComment,
+  deleteAnnouncementComment,
   getActiveAnnouncements,
+  getAnnouncementComments,
+  getMe,
   resolveDefaultSyncBaseUrl,
   safeAnnouncementUrl,
   type ActiveAnnouncement,
+  type AnnouncementComment,
   type AnnouncementType,
+  type SyncUser,
 } from '../utils/user-sync-client'
 
 const DISMISSED_STORAGE_KEY = 'goprmpt_dismissed_announcements'
@@ -249,9 +316,31 @@ const MAX_STORED_DISMISSED_KEYS = 100
 const sharedAnnouncements = ref<ActiveAnnouncement[]>([])
 const sharedDismissed = ref<Set<string>>(new Set())
 const activeDropdownSource = ref<'bell' | 'banner' | null>(null)
+const sharedCommentsById = ref<Record<string, AnnouncementComment[]>>({})
+const sharedCommentsLoaded = ref<Set<string>>(new Set())
+const sharedCommentsLoading = ref<Record<string, boolean>>({})
+const sharedCommentsError = ref<Record<string, string | null>>({})
+const sharedAuthUser = ref<SyncUser | null>(null)
+const sharedAuthResolved = ref(false)
 
 let dismissedHydrated = false
 let fetchInFlight: Promise<void> | null = null
+let authFetchInFlight: Promise<void> | null = null
+
+export function resetAnnouncementBarState(): void {
+  sharedAnnouncements.value = []
+  sharedDismissed.value = new Set()
+  activeDropdownSource.value = null
+  sharedCommentsById.value = {}
+  sharedCommentsLoaded.value = new Set()
+  sharedCommentsLoading.value = {}
+  sharedCommentsError.value = {}
+  sharedAuthUser.value = null
+  sharedAuthResolved.value = false
+  dismissedHydrated = false
+  fetchInFlight = null
+  authFetchInFlight = null
+}
 
 function hydrateDismissed(): void {
   if (dismissedHydrated) return
@@ -314,12 +403,68 @@ function ensureAnnouncementsLoaded(): Promise<void> {
 
   return fetchInFlight
 }
+
+function ensureAuthUserLoaded(): Promise<void> {
+  if (sharedAuthResolved.value) return Promise.resolve()
+  if (authFetchInFlight) return authFetchInFlight
+  if (typeof fetch !== 'function') {
+    sharedAuthResolved.value = true
+    return Promise.resolve()
+  }
+
+  authFetchInFlight = (async () => {
+    try {
+      const user = await getMe(resolveDefaultSyncBaseUrl())
+      sharedAuthUser.value = user
+    } catch {
+      sharedAuthUser.value = null
+    } finally {
+      sharedAuthResolved.value = true
+      authFetchInFlight = null
+    }
+  })()
+
+  return authFetchInFlight
+}
+
+function syncAnnouncementCommentCount(announcementId: string, commentCount: number): void {
+  const nextCount = Math.max(0, Math.floor(commentCount))
+  sharedAnnouncements.value = sharedAnnouncements.value.map((item) =>
+    item.id === announcementId ? { ...item, commentCount: nextCount } : item,
+  )
+}
+
+async function fetchCommentsForAnnouncement(announcementId: string, force = false): Promise<void> {
+  if (!announcementId) return
+  if (!force && sharedCommentsLoaded.value.has(announcementId)) return
+  if (sharedCommentsLoading.value[announcementId]) return
+
+  sharedCommentsLoading.value = { ...sharedCommentsLoading.value, [announcementId]: true }
+  sharedCommentsError.value = { ...sharedCommentsError.value, [announcementId]: null }
+
+  try {
+    const res = await getAnnouncementComments(announcementId, resolveDefaultSyncBaseUrl())
+    sharedCommentsById.value = { ...sharedCommentsById.value, [announcementId]: res.comments }
+    const nextLoaded = new Set(sharedCommentsLoaded.value)
+    nextLoaded.add(announcementId)
+    sharedCommentsLoaded.value = nextLoaded
+    syncAnnouncementCommentCount(announcementId, res.commentCount)
+  } catch (err) {
+    sharedCommentsError.value = {
+      ...sharedCommentsError.value,
+      [announcementId]: err instanceof Error && err.message ? err.message : '评论加载失败',
+    }
+  } finally {
+    sharedCommentsLoading.value = { ...sharedCommentsLoading.value, [announcementId]: false }
+  }
+}
 </script>
 
 <script setup lang="ts">
 import { NIcon } from 'naive-ui'
-import { Bell, ChevronDown, ChevronUp, ExternalLink, X } from '@lucide/vue'
+import { Bell, ChevronDown, ChevronUp, ExternalLink, MessageSquare, X } from '@lucide/vue'
 import { i18n } from '../plugins/i18n'
+import AnnouncementComments from './AnnouncementComments.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -332,12 +477,14 @@ const props = withDefaults(
 
 const rootEl = ref<HTMLElement | null>(null)
 const bannerExpanded = ref(false)
+const openCardCommentIds = ref<Set<string>>(new Set())
 
 const locale = computed(() => i18n.global.locale.value)
 const isEn = computed(() => String(locale.value || '').toLowerCase().startsWith('en'))
 
 const announcements = computed(() => sharedAnnouncements.value)
 const hasAnnouncements = computed(() => announcements.value.length > 0)
+const currentAuthUser = computed(() => sharedAuthUser.value)
 
 function isDismissed(item: ActiveAnnouncement): boolean {
   return sharedDismissed.value.has(announcementDismissKey(item))
@@ -368,6 +515,14 @@ function typeLabel(type: AnnouncementType): string {
   return isEn.value ? 'Notice' : '通知'
 }
 
+function formatCommentBtnLabel(count: number): string {
+  const n = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+  if (isEn.value) {
+    return n > 0 ? `Comments (${n})` : 'Comments'
+  }
+  return n > 0 ? `评论 (${n})` : '评论'
+}
+
 function formatDate(item: ActiveAnnouncement): string {
   const ts = item.updatedAt || item.createdAt
   if (!ts || !Number.isFinite(ts) || ts <= 0) return ''
@@ -379,13 +534,99 @@ function formatDate(item: ActiveAnnouncement): string {
   return `${year}-${month}-${day}`
 }
 
+function commentsFor(announcementId: string): AnnouncementComment[] {
+  return sharedCommentsById.value[announcementId] ?? []
+}
+
+function isCommentsLoading(announcementId: string): boolean {
+  return Boolean(sharedCommentsLoading.value[announcementId])
+}
+
+function commentsErrorFor(announcementId: string): string | null {
+  return sharedCommentsError.value[announcementId] ?? null
+}
+
+function openCommentsFor(announcementId: string): void {
+  void ensureAuthUserLoaded()
+  void fetchCommentsForAnnouncement(announcementId, false)
+}
+
+function refreshCommentsFor(announcementId: string): void {
+  void ensureAuthUserLoaded()
+  void fetchCommentsForAnnouncement(announcementId, true)
+}
+
+function isCardCommentsOpen(announcementId: string): boolean {
+  return openCardCommentIds.value.has(announcementId)
+}
+
+function toggleCardComments(announcementId: string): void {
+  const next = new Set(openCardCommentIds.value)
+  if (next.has(announcementId)) {
+    next.delete(announcementId)
+  } else {
+    next.add(announcementId)
+    openCommentsFor(announcementId)
+  }
+  openCardCommentIds.value = next
+}
+
 function toggleBannerExpand(): void {
-  if (!currentBanner.value?.content) return
+  if (!currentBanner.value) return
   bannerExpanded.value = !bannerExpanded.value
+  if (bannerExpanded.value) {
+    openCommentsFor(currentBanner.value.id)
+  }
+}
+
+function toggleBannerComments(): void {
+  if (!currentBanner.value) return
+  if (bannerExpanded.value) {
+    bannerExpanded.value = false
+    return
+  }
+  bannerExpanded.value = true
+  openCommentsFor(currentBanner.value.id)
 }
 
 function toggleDropdown(): void {
   activeDropdownSource.value = isDropdownOpen.value ? null : props.mode
+}
+
+async function handleSubmitComment(announcementId: string, content: string): Promise<void> {
+  const res = await createAnnouncementComment(announcementId, content, resolveDefaultSyncBaseUrl())
+  const existing = sharedCommentsById.value[announcementId] ?? []
+  sharedCommentsById.value = {
+    ...sharedCommentsById.value,
+    [announcementId]: [res.comment, ...existing.filter((item) => item.id !== res.comment.id)],
+  }
+  const nextLoaded = new Set(sharedCommentsLoaded.value)
+  nextLoaded.add(announcementId)
+  sharedCommentsLoaded.value = nextLoaded
+  syncAnnouncementCommentCount(announcementId, res.commentCount)
+}
+
+async function handleDeleteComment(announcementId: string, commentId: string): Promise<void> {
+  const res = await deleteAnnouncementComment(announcementId, commentId, resolveDefaultSyncBaseUrl())
+  const existing = sharedCommentsById.value[announcementId] ?? []
+  sharedCommentsById.value = {
+    ...sharedCommentsById.value,
+    [announcementId]: existing.filter((item) => item.id !== commentId),
+  }
+  syncAnnouncementCommentCount(announcementId, res.commentCount)
+}
+
+function handleOpenAccountPanel(): void {
+  activeDropdownSource.value = null
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('goprmpt:open-account-panel', { detail: { tab: 'register' } }))
+  }
+}
+
+function handleAuthChanged(event: Event): void {
+  const detail = (event as CustomEvent<{ user?: SyncUser | null }> | undefined)?.detail
+  sharedAuthUser.value = detail?.user ?? null
+  sharedAuthResolved.value = true
 }
 
 function dismissItem(item: ActiveAnnouncement): void {
@@ -438,6 +679,9 @@ function handleDocumentKeydown(event: KeyboardEvent): void {
 
 onMounted(() => {
   void ensureAnnouncementsLoaded()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('goprmpt:auth-changed', handleAuthChanged)
+  }
   if (typeof document !== 'undefined') {
     document.addEventListener('pointerdown', handleDocumentPointerDown)
     document.addEventListener('keydown', handleDocumentKeydown)
@@ -445,6 +689,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('goprmpt:auth-changed', handleAuthChanged)
+  }
   if (typeof document !== 'undefined') {
     document.removeEventListener('pointerdown', handleDocumentPointerDown)
     document.removeEventListener('keydown', handleDocumentKeydown)
@@ -646,6 +893,29 @@ html.dark .gp-ann-body-trigger:hover,
   border-color: var(--gp-accent, #0F766E);
 }
 
+.gp-ann-comment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--gp-border, rgba(24, 24, 27, 0.12));
+  background: var(--gp-surface, #FFFFFF);
+  color: var(--gp-muted, #52525B);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.gp-ann-comment-btn:hover,
+.gp-ann-comment-btn--active {
+  color: var(--gp-accent, #0F766E);
+  border-color: var(--gp-border-strong, rgba(15, 118, 110, 0.36));
+  background: var(--gp-accent-soft, rgba(15, 118, 110, 0.08));
+}
+
 .gp-ann-all-btn {
   display: inline-flex;
   align-items: center;
@@ -750,8 +1020,8 @@ html.dark .gp-ann-dismiss-btn:hover,
   top: calc(100% + 8px);
   right: 0;
   z-index: 60;
-  width: min(380px, calc(100vw - 24px));
-  max-height: min(440px, 70vh);
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(560px, 78vh);
   display: flex;
   flex-direction: column;
   border-radius: 14px;

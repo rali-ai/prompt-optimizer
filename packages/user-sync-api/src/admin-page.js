@@ -177,7 +177,7 @@ export function renderAdminHtml({
           <div>
             <div class="switch-eyebrow">平台模型代理与积分计费</div>
             <h2>平台模型池 · 网站积分扣费</h2>
-            <p class="muted">由服务端安全托管上游 API Key 并代理 OpenAI 兼容接口，按会员等级开放并按次扣减网站积分，调用失败自动退回积分。</p>
+            <p class="muted">由服务端安全托管上游 API Key 并代理 OpenAI 兼容接口，按会员等级开放并按次扣减网站积分；上游额度用尽或异常时可自动切替至其他有额度的可用模型，全部失败自动退回积分。</p>
           </div>
           <div class="announcements-head-actions">
             <span id="activePlatformModelsBadge" class="badge badge-ok">已启用 0 个</span>
@@ -193,25 +193,25 @@ export function renderAdminHtml({
           <form id="platformModelForm" class="announcement-form">
             <div class="grid-3">
               <label>模型显示名称（必填）
-                <input id="pmName" type="text" maxlength="80" placeholder="例如：DeepSeek V3 平台直连" required />
+                <input id="pmName" type="text" maxlength="80" placeholder="例如：硅基流动 DeepSeek-V3" required />
               </label>
               <label>模型 ID / Slug（选填，留空自动生成）
-                <input id="pmId" type="text" maxlength="64" placeholder="例如：platform-deepseek-v3" />
+                <input id="pmId" type="text" maxlength="64" placeholder="例如：siliconflow-deepseek-v3" />
               </label>
               <label>厂商 / 来源标签
-                <input id="pmProviderLabel" type="text" maxlength="60" value="平台模型" placeholder="例如：DeepSeek 官方" />
+                <input id="pmProviderLabel" type="text" maxlength="60" value="平台模型" placeholder="例如：硅基流动 SiliconFlow" />
               </label>
             </div>
 
             <div class="grid-3">
               <label>上游 Base URL（必填，http/https）
-                <input id="pmBaseUrl" type="url" maxlength="500" placeholder="https://api.deepseek.com/v1" required />
+                <input id="pmBaseUrl" type="url" maxlength="500" placeholder="https://api.siliconflow.cn/v1" required />
               </label>
               <label>上游 API Key
                 <input id="pmApiKey" type="password" autocomplete="off" maxlength="512" placeholder="输入上游 API Key" />
               </label>
               <label>上游模型名称（必填）
-                <input id="pmUpstreamModel" type="text" maxlength="128" placeholder="例如：deepseek-chat" required />
+                <input id="pmUpstreamModel" type="text" maxlength="128" placeholder="例如：deepseek-ai/DeepSeek-V3" required />
               </label>
             </div>
 
@@ -247,11 +247,22 @@ export function renderAdminHtml({
               </label>
               <div class="stack-fields">
                 <label>推广 / Key 申请链接（选填，支持带推广参数）
-                  <input id="pmApplyUrl" type="url" maxlength="500" placeholder="https://platform.deepseek.com/?ref=..." />
+                  <input id="pmApplyUrl" type="url" maxlength="500" placeholder="https://cloud.siliconflow.cn/i/..." />
                 </label>
                 <label>模型简介说明（选填）
                   <input id="pmDescription" type="text" maxlength="300" placeholder="例如：高性价比中文提示词优化主力模型" />
                 </label>
+              </div>
+            </div>
+
+            <div class="grid-2">
+              <label>优先备用模型（选填，额度用尽或异常时优先切替）
+                <select id="pmFallbackModelId">
+                  <option value="">自动按排序选择其他有额度模型</option>
+                </select>
+              </label>
+              <div class="sub" style="align-self:center;line-height:1.6;">
+                仅在符合用户当前会员等级且已启用的模型中切替；计费严格按请求模型积分扣减一次，全部候选失败才退回积分。
               </div>
             </div>
 
@@ -260,6 +271,10 @@ export function renderAdminHtml({
                 <label class="check-label">
                   <input id="pmEnabled" type="checkbox" checked />
                   <span>启用该平台模型</span>
+                </label>
+                <label class="check-label">
+                  <input id="pmAutoFallback" type="checkbox" checked />
+                  <span>额度不足或异常时自动切替</span>
                 </label>
               </div>
               <div class="actions">
@@ -294,7 +309,7 @@ export function renderAdminHtml({
           <div>
             <div class="switch-eyebrow">国内预设模型配置</div>
             <h2>国内预设模型参数与申请推广链接</h2>
-            <p class="muted">统一配置 10 个内置国内模型厂商的 API Key 申请/推广链接、默认模型与推理参数，支持任意 http/https 推广链接与参数。</p>
+            <p class="muted">统一配置 10 个内置国内模型厂商的 API Key 申请/推广链接、默认模型与推理参数，支持任意 http/https 推广链接与参数。填写主推的硅基流动 SiliconFlow 推广/邀请链接后，将同步更新工作台推荐横幅与模型列表申请按钮。</p>
           </div>
           <span id="enabledPresetsBadge" class="badge badge-ok">已启用 10 / 10</span>
         </div>
@@ -313,7 +328,7 @@ export function renderAdminHtml({
                 <input id="mpApplyLabel" type="text" maxlength="40" placeholder="例如：注册领取免费额度" />
               </label>
               <label>默认模型 ID（选填）
-                <input id="mpDefaultModelId" type="text" maxlength="128" placeholder="例如：deepseek-chat" />
+                <input id="mpDefaultModelId" type="text" maxlength="128" placeholder="例如：deepseek-ai/DeepSeek-V3" />
               </label>
             </div>
 
@@ -510,6 +525,22 @@ export function renderAdminHtml({
             </tbody>
           </table>
         </div>
+
+        <div id="announcementCommentsPanel" class="announcement-form-wrap ann-comments-panel" style="display:none">
+          <div class="card-head" style="margin-bottom:12px;">
+            <div>
+              <strong id="annCommentsTitle">公告评论管理</strong>
+              <p id="annCommentsSubtitle" class="muted">查看注册会员发表的评论，支持一键删除违规或无效评论。</p>
+            </div>
+            <div class="actions">
+              <button id="refreshAnnCommentsBtn" class="btn btn-sm" type="button">刷新评论</button>
+              <button id="closeAnnCommentsBtn" class="btn btn-sm" type="button">收起</button>
+            </div>
+          </div>
+          <div id="annCommentsList" class="ann-comments-list">
+            <div class="muted">请选择一条公告查看评论。</div>
+          </div>
+        </div>
       </section>
 
       <section class="stats-grid" aria-label="运营统计概览">
@@ -620,7 +651,9 @@ export function renderAdminHtml({
       const pmExtraParamsEl = document.getElementById('pmExtraParams');
       const pmApplyUrlEl = document.getElementById('pmApplyUrl');
       const pmDescriptionEl = document.getElementById('pmDescription');
+      const pmFallbackModelIdEl = document.getElementById('pmFallbackModelId');
       const pmEnabledEl = document.getElementById('pmEnabled');
+      const pmAutoFallbackEl = document.getElementById('pmAutoFallback');
       const cancelPlatformModelBtnEl = document.getElementById('cancelPlatformModelBtn');
       const savePlatformModelBtnEl = document.getElementById('savePlatformModelBtn');
       const platformModelRowsEl = document.getElementById('platformModelRows');
@@ -674,6 +707,12 @@ export function renderAdminHtml({
       const saveAnnouncementBtnEl = document.getElementById('saveAnnouncementBtn');
       const cancelAnnouncementBtnEl = document.getElementById('cancelAnnouncementBtn');
       const announcementRowsEl = document.getElementById('announcementRows');
+      const announcementCommentsPanelEl = document.getElementById('announcementCommentsPanel');
+      const annCommentsTitleEl = document.getElementById('annCommentsTitle');
+      const annCommentsSubtitleEl = document.getElementById('annCommentsSubtitle');
+      const annCommentsListEl = document.getElementById('annCommentsList');
+      const refreshAnnCommentsBtnEl = document.getElementById('refreshAnnCommentsBtn');
+      const closeAnnCommentsBtnEl = document.getElementById('closeAnnCommentsBtn');
 
       let latestTempPassword = '';
       let currentMembershipEnabled = ${enabledFlag ? 'true' : 'false'};
@@ -689,6 +728,8 @@ export function renderAdminHtml({
       let announcementEmailEnabled = ${mailEnabledFlag ? 'true' : 'false'};
       let editingAnnouncementId = null;
       let editingAnnouncementExpiresAt = null;
+      let activeCommentsAnnouncementId = null;
+      let activeCommentsAnnouncementTitle = '';
 
       function showNotice(text, isError = false) {
         noticeEl.textContent = text;
@@ -829,6 +870,22 @@ export function renderAdminHtml({
         }
       }
 
+      function populateFallbackModelOptions(excludeId, selectedValue) {
+        const opts = ['<option value="">自动按排序选择其他有额度模型</option>'];
+        for (const m of allPlatformModels) {
+          if (excludeId && m.id === excludeId) continue;
+          const tierLabel = getTierInfo(m.minTier).label;
+          const statusSuffix = m.enabled ? '' : '（已停用）';
+          opts.push(
+            '<option value="' + esc(m.id) + '">' +
+              esc(m.name) + ' (' + esc(m.id) + ' · ' + esc(tierLabel) + ')' + statusSuffix +
+            '</option>'
+          );
+        }
+        pmFallbackModelIdEl.innerHTML = opts.join('');
+        pmFallbackModelIdEl.value = selectedValue && selectedValue !== excludeId ? selectedValue : '';
+      }
+
       function openPlatformModelForm(item) {
         if (item) {
           editingPlatformModelId = item.id;
@@ -849,6 +906,8 @@ export function renderAdminHtml({
           pmApplyUrlEl.value = item.applyUrl || '';
           pmDescriptionEl.value = item.description || '';
           pmEnabledEl.checked = Boolean(item.enabled);
+          pmAutoFallbackEl.checked = item.autoFallback !== false;
+          populateFallbackModelOptions(item.id, item.fallbackModelId || '');
           fillParamInputs(item.defaultParams, pmTempEl, pmTopPEl, pmMaxTokensEl, pmExtraParamsEl);
         } else {
           editingPlatformModelId = null;
@@ -863,6 +922,8 @@ export function renderAdminHtml({
           pmApiKeyEl.required = true;
           pmApiKeyEl.placeholder = '输入上游 API Key（必填）';
           pmEnabledEl.checked = true;
+          pmAutoFallbackEl.checked = true;
+          populateFallbackModelOptions(null, '');
         }
         platformModelFormWrapEl.style.display = 'block';
         togglePlatformModelFormBtnEl.textContent = '收起表单';
@@ -888,10 +949,34 @@ export function renderAdminHtml({
           return;
         }
 
+        const now = Date.now();
+        const modelNameById = new Map(allPlatformModels.map((item) => [item.id, item.name]));
+
         platformModelRowsEl.innerHTML = allPlatformModels.map((m) => {
           const statusBadge = m.enabled
             ? '<span class="badge badge-ok">已启用</span>'
             : '<span class="badge badge-free">已停用</span>';
+          let cooldownHtml = '';
+          if (m.inCooldown && m.cooldownUntil) {
+            const remainMin = Math.max(1, Math.ceil((m.cooldownUntil - now) / 60000));
+            const reasonSuffix = m.lastErrorReason ? ' · ' + esc(m.lastErrorReason) : '';
+            cooldownHtml =
+              '<div style="margin-top:4px;"><span class="badge badge-warn">额度/异常冷却中</span></div>' +
+              '<div class="sub" style="margin-top:3px;">约剩 ' + esc(remainMin) + ' 分钟' + reasonSuffix + '</div>';
+          } else if (m.lastErrorReason) {
+            cooldownHtml =
+              '<div class="sub" style="margin-top:3px;">最近异常：' + esc(m.lastErrorReason) + '</div>';
+          }
+          const preferredName = m.fallbackModelId
+            ? (modelNameById.get(m.fallbackModelId) || m.fallbackModelId)
+            : '';
+          const fallbackHint = m.autoFallback !== false
+            ? '自动切替：开启' + (preferredName ? '（优先 ' + preferredName + '）' : '')
+            : '自动切替：关闭';
+          const fallbackHtml = '<div class="sub" style="margin-top:4px;">' + esc(fallbackHint) + '</div>';
+          const clearCooldownBtn = (m.inCooldown || m.lastErrorReason)
+            ? '<button class="btn btn-sm" data-pm-act="clear-cooldown" data-id="' + esc(m.id) + '">恢复可用</button>'
+            : '';
           const applyLinkHtml = isSafeHttpUrl(m.applyUrl)
             ? '<div class="ann-link-preview"><a href="' + esc(m.applyUrl) + '" target="_blank" rel="noopener noreferrer">推广/申请链接 ↗</a></div>'
             : '';
@@ -918,8 +1003,9 @@ export function renderAdminHtml({
               '<div>' + summarizeParams(m.defaultParams) + '</div>' +
               applyLinkHtml +
             '</td>' +
-            '<td>' + statusBadge + '</td>' +
+            '<td>' + statusBadge + cooldownHtml + fallbackHtml + '</td>' +
             '<td class="op-cell">' +
+              clearCooldownBtn +
               '<button class="btn btn-sm" data-pm-act="test" data-id="' + esc(m.id) + '">测试连通</button>' +
               '<button class="btn btn-sm" data-pm-act="edit" data-id="' + esc(m.id) + '">编辑</button>' +
               '<button class="btn btn-sm" data-pm-act="toggle" data-id="' + esc(m.id) + '">' + (m.enabled ? '停用' : '启用') + '</button>' +
@@ -939,6 +1025,9 @@ export function renderAdminHtml({
           }
           allPlatformModels = Array.isArray(body.models) ? body.models : [];
           renderPlatformModels();
+          if (platformModelFormWrapEl.style.display !== 'none') {
+            populateFallbackModelOptions(editingPlatformModelId, pmFallbackModelIdEl.value);
+          }
         } catch (err) {
           showNotice('加载平台模型异常：' + err.message, true);
         }
@@ -998,10 +1087,13 @@ export function renderAdminHtml({
           const statusBadge = p.enabled
             ? '<span class="badge badge-ok">已启用</span>'
             : '<span class="badge badge-free">已停用</span>';
+          const featuredBadge = p.featured
+            ? ' <span class="badge badge-pin">主推</span>'
+            : '';
 
           return '<tr>' +
             '<td>' +
-              '<strong>' + esc(p.name) + '</strong> ' + formatPresetCategory(p.category) +
+              '<strong>' + esc(p.name) + '</strong>' + featuredBadge + ' ' + formatPresetCategory(p.category) +
               '<div class="sub">' + esc(p.providerId) + '</div>' +
             '</td>' +
             '<td class="preset-url-cell">' + linkHtml + '</td>' +
@@ -1147,6 +1239,7 @@ export function renderAdminHtml({
             : '';
 
           const expiryText = a.expiresAt ? fmtDate(a.expiresAt) : '长期有效';
+          const commentCount = Number(a.commentCount || 0);
           const emailStatusHtml = a.emailedAt
             ? '<span>已推 ' + (a.emailedCount || 0) + ' 人</span><div class="sub">' + fmtDate(a.emailedAt) + '</div>'
             : '<span class="muted">未推送</span>';
@@ -1162,10 +1255,11 @@ export function renderAdminHtml({
               '<div class="ann-preview">' + esc(previewText) + '</div>' +
               safeLink +
             '</td>' +
-            '<td>' + statusBadge + '</td>' +
+            '<td>' + statusBadge + '<div class="sub" style="margin-top:4px;">评论 ' + commentCount + '</div></td>' +
             '<td>' + esc(expiryText) + '</td>' +
             '<td>' + emailStatusHtml + '</td>' +
             '<td class="op-cell">' +
+              '<button class="btn btn-sm" data-ann-act="comments" data-id="' + esc(a.id) + '">评论管理</button>' +
               '<button class="btn btn-sm" data-ann-act="edit" data-id="' + esc(a.id) + '">编辑</button>' +
               '<button class="btn btn-sm" data-ann-act="toggle-active" data-id="' + esc(a.id) + '">' + (a.isActive ? '下线' : '发布') + '</button>' +
               '<button class="btn btn-sm" data-ann-act="toggle-pin" data-id="' + esc(a.id) + '">' + (a.isPinned ? '取消置顶' : '置顶') + '</button>' +
@@ -1174,6 +1268,69 @@ export function renderAdminHtml({
             '</td>' +
           '</tr>';
         }).join('');
+      }
+
+      function closeAnnouncementComments() {
+        activeCommentsAnnouncementId = null;
+        activeCommentsAnnouncementTitle = '';
+        announcementCommentsPanelEl.style.display = 'none';
+        annCommentsListEl.innerHTML = '<div class="muted">请选择一条公告查看评论。</div>';
+      }
+
+      function renderAnnouncementComments(comments) {
+        if (!comments.length) {
+          annCommentsListEl.innerHTML = '<div class="muted">该公告暂无会员评论。</div>';
+          return;
+        }
+        annCommentsListEl.innerHTML = comments.map((c) => {
+          const adminTag = c.role === 'admin' ? ' <span class="badge badge-admin">管理员</span>' : '';
+          return '<div class="ann-comment-item">' +
+            '<div class="ann-comment-head">' +
+              '<div class="ann-comment-meta">' +
+                '<strong>' + esc(c.username) + '</strong> ' +
+                renderTierBadge(c.effectiveTier) +
+                adminTag +
+                ' <span class="sub">' + esc(fmtDate(c.createdAt)) + '</span>' +
+              '</div>' +
+              '<button class="btn btn-sm btn-danger" type="button" data-comment-del="1" data-comment-id="' + esc(c.id) + '" data-comment-user="' + esc(c.username) + '">删除</button>' +
+            '</div>' +
+            '<div class="ann-comment-body">' + esc(c.content) + '</div>' +
+          '</div>';
+        }).join('');
+      }
+
+      async function loadAnnouncementComments(announcementId, title) {
+        activeCommentsAnnouncementId = announcementId;
+        activeCommentsAnnouncementTitle = title || activeCommentsAnnouncementTitle || '未命名公告';
+        annCommentsTitleEl.textContent = '评论管理：' + activeCommentsAnnouncementTitle;
+        annCommentsSubtitleEl.textContent = '正在加载会员评论...';
+        annCommentsListEl.innerHTML = '<div class="muted">正在加载评论...</div>';
+        announcementCommentsPanelEl.style.display = 'block';
+        refreshAnnCommentsBtnEl.disabled = true;
+        try {
+          const res = await fetch(
+            '/user-api/announcements/' + encodeURIComponent(announcementId) + '/comments?limit=100',
+            { credentials: 'same-origin' }
+          );
+          const body = await res.json();
+          if (!res.ok) {
+            annCommentsSubtitleEl.textContent = body.error || '加载评论失败';
+            annCommentsListEl.innerHTML = '<div class="muted">' + esc(body.error || '加载评论失败') + '</div>';
+            showNotice(body.error || '加载公告评论失败', true);
+            return;
+          }
+          if (activeCommentsAnnouncementId !== announcementId) return;
+          const comments = Array.isArray(body.comments) ? body.comments : [];
+          const totalCount = Number(body.commentCount ?? comments.length);
+          annCommentsTitleEl.textContent = '评论管理：' + activeCommentsAnnouncementTitle + '（共 ' + totalCount + ' 条）';
+          annCommentsSubtitleEl.textContent = '查看注册会员发表的评论，支持一键删除违规或无效评论。';
+          renderAnnouncementComments(comments);
+        } catch (err) {
+          annCommentsSubtitleEl.textContent = '加载评论异常：' + err.message;
+          showNotice('加载公告评论异常：' + err.message, true);
+        } finally {
+          refreshAnnCommentsBtnEl.disabled = false;
+        }
       }
 
       async function loadAnnouncements() {
@@ -1189,6 +1346,14 @@ export function renderAdminHtml({
           emailableUsersCount = Number(body.emailableUsersCount || 0);
           announcementEmailEnabled = Boolean(body.emailEnabled);
           renderAnnouncements();
+          if (activeCommentsAnnouncementId) {
+            const matched = allAnnouncements.find((a) => a.id === activeCommentsAnnouncementId);
+            if (!matched) {
+              closeAnnouncementComments();
+            } else {
+              activeCommentsAnnouncementTitle = matched.title;
+            }
+          }
         } catch (err) {
           showNotice('加载通知列表异常：' + err.message, true);
         }
@@ -1428,6 +1593,8 @@ export function renderAdminHtml({
           description: pmDescriptionEl.value.trim() || null,
           sortOrder: Number(pmSortOrderEl.value || 0),
           enabled: pmEnabledEl.checked,
+          autoFallback: pmAutoFallbackEl.checked,
+          fallbackModelId: pmFallbackModelIdEl.value.trim() || null,
         };
         const apiKeyVal = pmApiKeyEl.value.trim();
         if (!isEdit) {
@@ -1476,6 +1643,33 @@ export function renderAdminHtml({
           return;
         }
 
+        if (act === 'clear-cooldown') {
+          btn.disabled = true;
+          try {
+            const res = await fetch(
+              '/user-api/admin/platform-models/' + encodeURIComponent(id) + '/clear-cooldown',
+              {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+              }
+            );
+            const body = await res.json();
+            if (!res.ok) {
+              showNotice(body.error || '恢复模型状态失败', true);
+            } else {
+              showNotice('已解除平台模型「' + item.name + '」的冷却状态。');
+              await loadPlatformModels();
+            }
+          } catch (err) {
+            showNotice('请求失败：' + err.message, true);
+          } finally {
+            btn.disabled = false;
+          }
+          return;
+        }
+
         if (act === 'test') {
           btn.disabled = true;
           const prevText = btn.textContent;
@@ -1498,6 +1692,7 @@ export function renderAdminHtml({
                 '模型「' + item.name + '」连通成功（' + body.latencyMs + 'ms）' +
                 (body.replyPreview ? '，回复预览：' + body.replyPreview : '')
               );
+              await loadPlatformModels();
             }
           } catch (err) {
             showNotice('连通测试异常：' + err.message, true);
@@ -1979,6 +2174,11 @@ export function renderAdminHtml({
         const item = allAnnouncements.find((a) => a.id === id);
         if (!item) return;
 
+        if (act === 'comments') {
+          await loadAnnouncementComments(item.id, item.title);
+          return;
+        }
+
         if (act === 'edit') {
           openAnnouncementForm(item);
           return;
@@ -2000,6 +2200,9 @@ export function renderAdminHtml({
             } else {
               if (editingAnnouncementId === id) {
                 closeAnnouncementForm();
+              }
+              if (activeCommentsAnnouncementId === id) {
+                closeAnnouncementComments();
               }
               showNotice('已删除通知「' + item.title + '」。');
               await loadAnnouncements();
@@ -2091,6 +2294,51 @@ export function renderAdminHtml({
           }
         } catch (err) {
           showNotice('请求失败：' + err.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      refreshAnnCommentsBtnEl.addEventListener('click', () => {
+        if (!activeCommentsAnnouncementId) return;
+        loadAnnouncementComments(activeCommentsAnnouncementId, activeCommentsAnnouncementTitle);
+      });
+
+      closeAnnCommentsBtnEl.addEventListener('click', closeAnnouncementComments);
+
+      annCommentsListEl.addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-comment-del]');
+        if (!btn || !activeCommentsAnnouncementId) return;
+        const commentId = btn.dataset.commentId;
+        const commentUser = btn.dataset.commentUser || '该用户';
+        if (!commentId) return;
+        if (!window.confirm('确定要删除用户「' + commentUser + '」的这条评论吗？删除后无法恢复。')) {
+          return;
+        }
+        btn.disabled = true;
+        try {
+          const res = await fetch(
+            '/user-api/announcements/' +
+              encodeURIComponent(activeCommentsAnnouncementId) +
+              '/comments/' +
+              encodeURIComponent(commentId),
+            {
+              method: 'DELETE',
+              credentials: 'same-origin',
+            }
+          );
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '删除评论失败', true);
+          } else {
+            showNotice('已删除用户「' + commentUser + '」的评论。');
+            await Promise.all([
+              loadAnnouncementComments(activeCommentsAnnouncementId, activeCommentsAnnouncementTitle),
+              loadAnnouncements(),
+            ]);
+          }
+        } catch (err) {
+          showNotice('删除评论异常：' + err.message, true);
         } finally {
           btn.disabled = false;
         }
@@ -2670,6 +2918,36 @@ export function renderAdminHtml({
     .ann-link-preview { margin-top: 4px; font-size: 12px; }
     .ann-link-preview a { color: var(--accent); font-weight: 500; text-decoration: none; }
     .ann-link-preview a:hover { text-decoration: underline; }
+    .ann-comments-panel { margin-top: 16px; margin-bottom: 0; }
+    .ann-comments-list { display: flex; flex-direction: column; gap: 10px; }
+    .ann-comment-item {
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+    .ann-comment-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+    .ann-comment-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+    .ann-comment-body {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--ink);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     @media (max-width: 900px) {
       .announcement-form-row, .announcement-link-row { grid-template-columns: 1fr; }
     }

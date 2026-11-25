@@ -6,7 +6,10 @@ import {
   announcementDismissKey,
   changePassword,
   confirmPasswordReset,
+  createAnnouncementComment,
+  deleteAnnouncementComment,
   getActiveAnnouncements,
+  getAnnouncementComments,
   getConfig,
   getCredits,
   getMe,
@@ -335,6 +338,7 @@ test('getActiveAnnouncements parses items, sanitizes links, handles empty shapes
           isActive: true,
           isPinned: true,
           expiresAt: null,
+          commentCount: 4,
           createdAt: 100,
           updatedAt: 200,
         },
@@ -378,11 +382,13 @@ test('getActiveAnnouncements parses items, sanitizes links, handles empty shapes
     isActive: true,
     isPinned: true,
     expiresAt: null,
+    commentCount: 4,
     createdAt: 100,
     updatedAt: 200,
   })
   assert.equal(list[1].type, 'notice')
   assert.equal(list[1].linkUrl, null)
+  assert.equal(list[1].commentCount, 0)
 
   assert.deepEqual(await getActiveAnnouncements('/user-api', fetchMock), [])
   assert.deepEqual(await getActiveAnnouncements('/user-api', fetchMock), [])
@@ -649,6 +655,7 @@ test('getModelPresets normalizes domestic presets and rejects non-http apply URL
     applyLabel: '领 10 元优惠 Key',
     defaultModelId: 'deepseek-chat',
     defaultParams: { temperature: 0.5, max_tokens: 4096 },
+    featured: false,
     enabled: true,
     updatedAt: 1700000000000,
   })
@@ -660,5 +667,139 @@ test('getModelPresets normalizes domestic presets and rejects non-http apply URL
   assert.equal(presets[1].applyLabel, '申请 API Key')
   assert.equal(presets[1].defaultModelId, null)
   assert.deepEqual(presets[1].defaultParams, {})
+  assert.equal(presets[1].featured, false)
   assert.equal(presets[1].enabled, false)
+})
+
+test('getModelPresets normalizes featured siliconflow preset and default featured applyLabel', async () => {
+  const fetchMock = async () =>
+    jsonResponse({
+      presets: [
+        {
+          providerId: 'siliconflow',
+          name: '硅基流动',
+          category: 'both',
+          applyUrl: 'https://cloud.siliconflow.cn/i/promo',
+          customApplyUrl: 'https://cloud.siliconflow.cn/i/promo',
+          defaultApplyUrl: 'https://cloud.siliconflow.cn/account/ak',
+          applyLabel: '',
+          defaultModelId: 'Qwen/Qwen2.5-72B-Instruct',
+          defaultParams: { temperature: 0.7 },
+          featured: true,
+          enabled: true,
+          updatedAt: 1700000005000,
+        },
+      ],
+    })
+
+  const presets = await getModelPresets('/user-api', fetchMock)
+  assert.equal(presets.length, 1)
+  assert.equal(presets[0].providerId, 'siliconflow')
+  assert.equal(presets[0].featured, true)
+  assert.equal(presets[0].applyLabel, '主推 · 申请领免费额度')
+})
+
+test('announcement comments client lists, creates, deletes, normalizes fields, and propagates 401', async () => {
+  const calls = []
+  const queue = [
+    jsonResponse({
+      comments: [
+        {
+          id: 'c1',
+          announcementId: 'ann/1',
+          userId: 'u-admin',
+          username: 'admin',
+          role: 'admin',
+          tier: 'internal',
+          effectiveTier: 'internal',
+          content: '欢迎留言反馈！',
+          createdAt: 1750000002000,
+        },
+        {
+          id: 'c2',
+          announcementId: 'ann/1',
+          userId: 'u-2',
+          username: 'bob',
+          role: 'weird-role',
+          tier: 'pro',
+          content: '第二条评论\n支持换行',
+          createdAt: 1750000001000,
+        },
+        { id: '', announcementId: 'ann/1', username: 'bad', content: 'skip' },
+        { id: 'c-empty', announcementId: 'ann/1', username: 'bob', content: '   ' },
+        null,
+      ],
+      commentCount: 2,
+    }),
+    jsonResponse(
+      {
+        comment: {
+          id: 'c3',
+          announcementId: 'ann/1',
+          userId: 'u-3',
+          username: 'alice',
+          role: 'user',
+          tier: 'standard',
+          effectiveTier: 'standard',
+          content: '新发表的建议',
+          createdAt: 1750000003000,
+        },
+        commentCount: 3,
+      },
+      201,
+    ),
+    jsonResponse({ ok: true, commentCount: 2 }, 200),
+    jsonResponse({ error: '请先登录' }, 401),
+  ]
+
+  const fetchMock = async (url, init) => {
+    calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    return queue.shift()
+  }
+
+  const listRes = await getAnnouncementComments('ann/1', '/user-api/', fetchMock)
+  assert.equal(listRes.commentCount, 2)
+  assert.equal(listRes.comments.length, 2)
+  assert.deepEqual(listRes.comments[0], {
+    id: 'c1',
+    announcementId: 'ann/1',
+    userId: 'u-admin',
+    username: 'admin',
+    role: 'admin',
+    tier: 'internal',
+    effectiveTier: 'internal',
+    content: '欢迎留言反馈！',
+    createdAt: 1750000002000,
+  })
+  assert.equal(listRes.comments[1].role, 'user')
+  assert.equal(listRes.comments[1].effectiveTier, 'pro')
+  assert.equal(listRes.comments[1].content, '第二条评论\n支持换行')
+
+  const createRes = await createAnnouncementComment('ann/1', '新发表的建议', '/user-api', fetchMock)
+  assert.equal(createRes.commentCount, 3)
+  assert.equal(createRes.comment.id, 'c3')
+  assert.equal(createRes.comment.effectiveTier, 'standard')
+
+  const delRes = await deleteAnnouncementComment('ann/1', 'c/3', '/user-api', fetchMock)
+  assert.deepEqual(delRes, { ok: true, commentCount: 2 })
+
+  await assert.rejects(
+    () => createAnnouncementComment('ann/1', 'guest', '/user-api', fetchMock),
+    (err) => err instanceof UserSyncError && err.status === 401,
+  )
+
+  assert.deepEqual(calls, [
+    { url: '/user-api/announcements/ann%2F1/comments', method: 'GET', body: undefined },
+    {
+      url: '/user-api/announcements/ann%2F1/comments',
+      method: 'POST',
+      body: { content: '新发表的建议' },
+    },
+    { url: '/user-api/announcements/ann%2F1/comments/c%2F3', method: 'DELETE', body: undefined },
+    {
+      url: '/user-api/announcements/ann%2F1/comments',
+      method: 'POST',
+      body: { content: 'guest' },
+    },
+  ])
 })

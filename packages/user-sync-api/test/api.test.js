@@ -2342,16 +2342,16 @@ test('platform models CRUD, key masking, test endpoint, tier gate 403, 402 credi
 test('domestic model presets GET/PATCH, promo links with query params, XSS rejection, and upgraded admin HTML controls', async () => {
   const ctx = await startTestApp();
   try {
-    // Public /model-presets works without auth and returns exact 10 providers in order
+    // Public /model-presets works without auth and returns exact 10 providers in order (SiliconFlow #1)
     const initPublic = await fetch(`${ctx.baseUrl}/user-api/model-presets`);
     assert.equal(initPublic.status, 200);
     const { presets: initPresets } = await initPublic.json();
     assert.deepEqual(
       initPresets.map((p) => p.providerId),
       [
+        'siliconflow',
         'deepseek',
         'dashscope',
-        'siliconflow',
         'zhipu',
         'modelscope',
         'minimax',
@@ -2361,9 +2361,18 @@ test('domestic model presets GET/PATCH, promo links with query params, XSS rejec
         'openai-compatible',
       ],
     );
-    assert.equal(initPresets[0].applyUrl, 'https://platform.deepseek.com/api_keys');
-    assert.equal(initPresets[0].customApplyUrl, null);
-    assert.equal(initPresets[8].applyUrl, null);
+    assert.equal(initPresets[0].providerId, 'siliconflow');
+    assert.equal(initPresets[0].featured, true);
+    assert.equal(initPresets[0].applyUrl, 'https://cloud.siliconflow.cn/account/ak');
+    assert.equal(initPresets[0].applyLabel, '主推 · 申请领免费额度');
+    const initDeepseek = initPresets.find((p) => p.providerId === 'deepseek');
+    const initOllama = initPresets.find((p) => p.providerId === 'ollama');
+    assert.equal(initDeepseek.featured, false);
+    assert.equal(initDeepseek.applyUrl, 'https://platform.deepseek.com/api_keys');
+    assert.equal(initDeepseek.customApplyUrl, null);
+    assert.equal(initDeepseek.applyLabel, '申请 API Key');
+    assert.equal(initOllama.applyUrl, null);
+    assert.equal(initOllama.featured, false);
 
     // Non-admin blocked from admin preset endpoints -> 403
     const userReg = await fetch(`${ctx.baseUrl}/user-api/register`, {
@@ -2513,5 +2522,1089 @@ test('domestic model presets GET/PATCH, promo links with query params, XSS rejec
     assert.equal(listedLegacyPro.creditBalance, 500);
   } finally {
     await ctx.cleanup();
+  }
+});
+
+test('announcement comments public read/CORS, member posting/validation, delete permissions, cascade, SiliconFlow #1 & admin UI', async () => {
+  const ctx = await startTestApp();
+  try {
+    // Login as admin
+    const adminLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    assert.equal(adminLogin.status, 200);
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    // Register two regular members (alice -> pro, bob -> free) and one disabled user
+    const aliceReg = await fetch(`${ctx.baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'comment_alice', password: 'Password123!' }),
+    });
+    assert.equal(aliceReg.status, 201);
+    const aliceCookie = extractCookieHeader(aliceReg);
+    const { user: alice } = await aliceReg.json();
+
+    await fetch(`${ctx.baseUrl}/user-api/admin/users/${alice.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'pro', tierExpiresAt: Date.now() + 30 * 86_400_000 }),
+    });
+
+    const bobReg = await fetch(`${ctx.baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'comment_bob', password: 'Password123!' }),
+    });
+    assert.equal(bobReg.status, 201);
+    const bobCookie = extractCookieHeader(bobReg);
+
+    const disabledReg = await fetch(`${ctx.baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'comment_disabled', password: 'Password123!' }),
+    });
+    const disabledCookie = extractCookieHeader(disabledReg);
+    const { user: disabledUser } = await disabledReg.json();
+    await fetch(`${ctx.baseUrl}/user-api/admin/users/${disabledUser.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ disabled: true }),
+    });
+
+    // Create one active announcement and one inactive announcement
+    const createActive = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '高词新版本发布',
+        content: '欢迎各位注册会员在评论区交流反馈。',
+        type: 'notice',
+        isActive: true,
+      }),
+    });
+    assert.equal(createActive.status, 201);
+    const { announcement: activeAnn } = await createActive.json();
+    assert.equal(activeAnn.commentCount, 0);
+
+    const createDraft = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '草稿公告',
+        content: '尚未发布',
+        isActive: false,
+      }),
+    });
+    assert.equal(createDraft.status, 201);
+    const { announcement: draftAnn } = await createDraft.json();
+
+    // Public GET & OPTIONS CORS allowlist for https://goprmpt.com on /announcements/:id/comments
+    const commentsPreflight = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
+      {
+        method: 'OPTIONS',
+        headers: { Origin: 'https://goprmpt.com' },
+      },
+    );
+    assert.equal(commentsPreflight.status, 204);
+    assert.equal(
+      commentsPreflight.headers.get('access-control-allow-origin'),
+      'https://goprmpt.com',
+    );
+    assert.equal(commentsPreflight.headers.get('access-control-allow-methods'), 'GET, OPTIONS');
+    assert.equal(commentsPreflight.headers.get('vary'), 'Origin');
+
+    const publicGet = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
+      { headers: { Origin: 'https://www.goprmpt.com' } },
+    );
+    assert.equal(publicGet.status, 200);
+    assert.equal(publicGet.headers.get('access-control-allow-origin'), 'https://www.goprmpt.com');
+    assert.deepEqual(await publicGet.json(), { comments: [], commentCount: 0 });
+
+    const evilOriginGet = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
+      { headers: { Origin: 'https://evil.example' } },
+    );
+    assert.equal(evilOriginGet.status, 200);
+    assert.equal(evilOriginGet.headers.get('access-control-allow-origin'), null);
+
+    // Non-admin cannot read comments on inactive announcement (404), admin can (200)
+    const draftPublicGet = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${draftAnn.id}/comments`,
+    );
+    assert.equal(draftPublicGet.status, 404);
+
+    const draftUserGet = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${draftAnn.id}/comments`,
+      { headers: { Cookie: aliceCookie } },
+    );
+    assert.equal(draftUserGet.status, 404);
+
+    const draftAdminGet = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${draftAnn.id}/comments`,
+      { headers: { Cookie: adminCookie } },
+    );
+    assert.equal(draftAdminGet.status, 200);
+    assert.deepEqual(await draftAdminGet.json(), { comments: [], commentCount: 0 });
+
+    // Unauthenticated POST -> 401 (and no public CORS header on POST)
+    const anonPost = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'https://goprmpt.com',
+        },
+        body: JSON.stringify({ content: '未登录评论' }),
+      },
+    );
+    assert.equal(anonPost.status, 401);
+    assert.equal(anonPost.headers.get('access-control-allow-origin'), null);
+    assert.equal((await anonPost.json()).error, '请先注册并登录会员账号后再发表评论');
+
+    // Disabled user POST -> 403
+    const disabledPost = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: disabledCookie },
+        body: JSON.stringify({ content: '停用账号评论' }),
+      },
+    );
+    assert.equal(disabledPost.status, 403);
+
+    // POST to inactive or nonexistent announcement -> 404
+    const draftPost = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${draftAnn.id}/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: aliceCookie },
+        body: JSON.stringify({ content: '评论草稿' }),
+      },
+    );
+    assert.equal(draftPost.status, 404);
+
+    // Validation rejects empty, >500 chars, non-string, and NUL/control chars -> 400
+    for (const badBody of [
+      {},
+      { content: '' },
+      { content: '   \n\t  ' },
+      { content: 12345 },
+      { content: 'a'.repeat(501) },
+      { content: 'hello\u0000world' },
+      { content: 'bell\u0007char' },
+      { content: 'vtab\u000bchar' },
+      { content: 'ff\u000cchar' },
+      { content: 'ctrl\u001fchar' },
+      { content: 'del\u007fchar' },
+    ]) {
+      const res = await fetch(
+        `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Cookie: aliceCookie },
+          body: JSON.stringify(badBody),
+        },
+      );
+      assert.equal(res.status, 400, `expected 400 for comment payload ${JSON.stringify(badBody)}`);
+    }
+
+    // Registered member alice posts comment (with newline & surrounding spaces trimmed) -> 201
+    const alicePost = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: aliceCookie },
+        body: JSON.stringify({ content: '  第一行支持换行\n第二行很赞！  ' }),
+      },
+    );
+    assert.equal(alicePost.status, 201);
+    const alicePostBody = await alicePost.json();
+    assert.equal(alicePostBody.commentCount, 1);
+    assert.equal(alicePostBody.comment.announcementId, activeAnn.id);
+    assert.equal(alicePostBody.comment.userId, alice.id);
+    assert.equal(alicePostBody.comment.username, 'comment_alice');
+    assert.equal(alicePostBody.comment.role, 'user');
+    assert.equal(alicePostBody.comment.tier, 'pro');
+    assert.equal(alicePostBody.comment.effectiveTier, 'pro');
+    assert.equal(alicePostBody.comment.content, '第一行支持换行\n第二行很赞！');
+    assert.equal(typeof alicePostBody.comment.createdAt, 'number');
+
+    // Bob posts an exact 500-char comment -> 201
+    const exact500 = '赞'.repeat(500);
+    const bobPost = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: bobCookie },
+        body: JSON.stringify({ content: exact500 }),
+      },
+    );
+    assert.equal(bobPost.status, 201);
+    const bobPostBody = await bobPost.json();
+    assert.equal(bobPostBody.commentCount, 2);
+    assert.equal(bobPostBody.comment.username, 'comment_bob');
+    assert.equal(bobPostBody.comment.effectiveTier, 'free');
+
+    // Public GET returns both newest-first, and ?limit=1 clamps while reporting total commentCount
+    const listAll = await (
+      await fetch(`${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`)
+    ).json();
+    assert.equal(listAll.commentCount, 2);
+    assert.equal(listAll.comments.length, 2);
+    assert.equal(listAll.comments[0].id, bobPostBody.comment.id);
+    assert.equal(listAll.comments[1].id, alicePostBody.comment.id);
+
+    const listLimited = await (
+      await fetch(`${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments?limit=1`)
+    ).json();
+    assert.equal(listLimited.commentCount, 2);
+    assert.equal(listLimited.comments.length, 1);
+    assert.equal(listLimited.comments[0].id, bobPostBody.comment.id);
+
+    // /announcements/active and /admin/announcements reflect commentCount: 2
+    const activeAfterComment = await (
+      await fetch(`${ctx.baseUrl}/user-api/announcements/active`)
+    ).json();
+    assert.equal(activeAfterComment.announcements[0].commentCount, 2);
+
+    const adminAfterComment = await (
+      await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, { headers: { Cookie: adminCookie } })
+    ).json();
+    const adminFoundAnn = adminAfterComment.announcements.find((a) => a.id === activeAnn.id);
+    assert.equal(adminFoundAnn.commentCount, 2);
+
+    // Delete permission checks: bob cannot delete alice's comment (403); wrong announcementId -> 404
+    const bobDelAlice = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments/${alicePostBody.comment.id}`,
+      {
+        method: 'DELETE',
+        headers: { Cookie: bobCookie },
+      },
+    );
+    assert.equal(bobDelAlice.status, 403);
+
+    const wrongAnnDel = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${draftAnn.id}/comments/${alicePostBody.comment.id}`,
+      {
+        method: 'DELETE',
+        headers: { Cookie: aliceCookie },
+      },
+    );
+    assert.equal(wrongAnnDel.status, 404);
+
+    // Alice deletes own comment -> 200, commentCount becomes 1
+    const aliceDelOwn = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments/${alicePostBody.comment.id}`,
+      {
+        method: 'DELETE',
+        headers: { Cookie: aliceCookie },
+      },
+    );
+    assert.equal(aliceDelOwn.status, 200);
+    assert.deepEqual(await aliceDelOwn.json(), { ok: true, commentCount: 1 });
+
+    // Admin deletes bob's comment -> 200, commentCount becomes 0
+    const adminDelBob = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments/${bobPostBody.comment.id}`,
+      {
+        method: 'DELETE',
+        headers: { Cookie: adminCookie },
+      },
+    );
+    assert.equal(adminDelBob.status, 200);
+    assert.deepEqual(await adminDelBob.json(), { ok: true, commentCount: 0 });
+
+    // Post another comment then delete announcement -> ON DELETE CASCADE cleans announcement_comments
+    const cascadePost = await fetch(
+      `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: bobCookie },
+        body: JSON.stringify({ content: '将被级联删除的评论' }),
+      },
+    );
+    assert.equal(cascadePost.status, 201);
+    assert.equal(
+      ctx.app.db.raw
+        .prepare('SELECT COUNT(*) AS c FROM announcement_comments WHERE announcement_id = ?')
+        .get(activeAnn.id).c,
+      1,
+    );
+
+    const delAnnRes = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${activeAnn.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(delAnnRes.status, 200);
+    assert.equal(
+      ctx.app.db.raw
+        .prepare('SELECT COUNT(*) AS c FROM announcement_comments WHERE announcement_id = ?')
+        .get(activeAnn.id).c,
+      0,
+    );
+
+    // Verify SiliconFlow is #1 in /user-api/model-presets with featured: true & default applyLabel
+    const presetsRes = await fetch(`${ctx.baseUrl}/user-api/model-presets`);
+    assert.equal(presetsRes.status, 200);
+    const { presets } = await presetsRes.json();
+    assert.equal(presets[0].providerId, 'siliconflow');
+    assert.equal(presets[0].name, '硅基流动 SiliconFlow');
+    assert.equal(presets[0].featured, true);
+    assert.equal(presets[0].applyLabel, '主推 · 申请领免费额度');
+    for (const other of presets.slice(1)) {
+      assert.equal(other.featured, false);
+      assert.equal(other.applyLabel, '申请 API Key');
+    }
+
+    // Clearing custom applyLabel falls back to SiliconFlow's defaultApplyLabel
+    await fetch(`${ctx.baseUrl}/user-api/admin/model-presets/siliconflow`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ applyLabel: '自定义硅基文案' }),
+    });
+    const clearedSf = await (
+      await fetch(`${ctx.baseUrl}/user-api/admin/model-presets/siliconflow`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({ applyLabel: '' }),
+      })
+    ).json();
+    assert.equal(clearedSf.preset.applyLabel, '主推 · 申请领免费额度');
+
+    // Admin HTML renders #announcementCommentsPanel, 主推 badge, SiliconFlow placeholders, zero em dashes, valid JS
+    const adminHtmlRes = await fetch(`${ctx.baseUrl}/user-api/admin`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(adminHtmlRes.status, 200);
+    const html = await adminHtmlRes.text();
+    assert.match(html, /id="announcementCommentsPanel"/);
+    assert.match(html, /data-ann-act="comments"/);
+    assert.match(html, /<span class="badge badge-pin">主推<\/span>/);
+    assert.match(html, /例如：硅基流动 DeepSeek-V3/);
+    assert.match(html, /https:\/\/api\.siliconflow\.cn\/v1/);
+    assert.match(html, /deepseek-ai\/DeepSeek-V3/);
+    assert.equal(html.includes('—'), false, 'admin UI copy should not contain em dashes');
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    assert.ok(scriptMatch);
+    assert.doesNotThrow(() => new Function(scriptMatch[1]));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test('legacy platform_models table migrates idempotently to add failover and cooldown columns', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'legacy-platform-models', 'users.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+  const now = Date.now();
+  const legacyDb = new DatabaseSync(dbPath);
+  legacyDb.exec(`
+    CREATE TABLE platform_models (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      provider_label TEXT NOT NULL DEFAULT '平台模型',
+      base_url TEXT NOT NULL,
+      api_key TEXT NOT NULL,
+      upstream_model TEXT NOT NULL,
+      credit_cost INTEGER NOT NULL DEFAULT 1,
+      min_tier TEXT NOT NULL DEFAULT 'standard' CHECK (min_tier IN ('free', 'standard', 'pro', 'internal')),
+      default_params_json TEXT NOT NULL DEFAULT '{}',
+      apply_url TEXT,
+      description TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+  legacyDb
+    .prepare(
+      `INSERT INTO platform_models (
+        id, name, provider_label, base_url, api_key, upstream_model,
+        credit_cost, min_tier, default_params_json, apply_url, description,
+        sort_order, enabled, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      'legacy-model-a',
+      'Legacy Model A',
+      'Legacy Provider',
+      'https://legacy.example/v1',
+      'sk-legacy-key-987654321',
+      'legacy-chat',
+      5,
+      'standard',
+      '{}',
+      null,
+      'pre-failover model',
+      1,
+      1,
+      now,
+      now,
+    );
+  legacyDb.close();
+
+  const env = {
+    USER_SYNC_HOST: '127.0.0.1',
+    USER_SYNC_PORT: '0',
+    USER_SYNC_DB_PATH: dbPath,
+    ADMIN_USERNAME: 'root_admin',
+    ADMIN_PASSWORD: 'AdminPassword123!',
+    RATE_LIMIT_MAX: '50',
+    RATE_LIMIT_WINDOW_MS: '60000',
+  };
+
+  let app1 = createApp(loadConfig(env));
+  let app2 = null;
+  try {
+    const addr1 = await app1.listen();
+    const base1 = `http://${addr1.host}:${addr1.port}`;
+
+    const colNames = new Set(
+      app1.db.raw.prepare('PRAGMA table_info(platform_models)').all().map((c) => c.name),
+    );
+    assert.equal(colNames.has('auto_fallback'), true);
+    assert.equal(colNames.has('fallback_model_id'), true);
+    assert.equal(colNames.has('cooldown_until'), true);
+    assert.equal(colNames.has('last_error_reason'), true);
+    assert.equal(colNames.has('last_error_at'), true);
+
+    const adminLogin = await fetch(`${base1}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    const list1 = await (
+      await fetch(`${base1}/user-api/admin/platform-models`, { headers: { Cookie: adminCookie } })
+    ).json();
+    assert.equal(list1.models.length, 1);
+    const migrated = list1.models[0];
+    assert.equal(migrated.id, 'legacy-model-a');
+    assert.equal(migrated.autoFallback, true);
+    assert.equal(migrated.fallbackModelId, null);
+    assert.equal(migrated.cooldownUntil, null);
+    assert.equal(migrated.inCooldown, false);
+    assert.equal(migrated.lastErrorReason, null);
+    assert.equal(migrated.lastErrorAt, null);
+
+    // Reopen same migrated DB cleanly to confirm idempotency
+    await app1.close();
+    app1 = null;
+    app2 = createApp(loadConfig(env));
+    const addr2 = await app2.listen();
+    const base2 = `http://${addr2.host}:${addr2.port}`;
+
+    const pubList = await (await fetch(`${base2}/user-api/platform-models`)).json();
+    assert.equal(pubList.models.length, 1);
+    assert.equal(pubList.models[0].id, 'legacy-model-a');
+    assert.equal(pubList.models[0].autoFallback, true);
+    assert.equal(pubList.models[0].fallbackModelId, null);
+    assert.equal(pubList.models[0].inCooldown, false);
+    assert.equal('lastErrorReason' in pubList.models[0], false);
+    assert.equal('baseUrl' in pubList.models[0], false);
+    assert.equal('apiKey' in pubList.models[0], false);
+  } finally {
+    if (app1) await app1.close();
+    if (app2) await app2.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('platform model quota failover, cooldown skip, single credit charge, ledger note, SSE failover, explicit fallback, tier isolation, and admin clear-cooldown/test recovery', async () => {
+  const {
+    buildFailoverCandidateChain,
+    classifyUpstreamFailure,
+  } = await import('../src/platform-models.js');
+
+  // Verify pure failure classification for quota/rate-limit/unavailable/client errors
+  assert.deepEqual(classifyUpstreamFailure(402, '{"error":"Payment Required"}'), {
+    kind: 'quota_exhausted',
+    retryable: true,
+    reason: '上游模型额度或余额不足',
+  });
+  assert.equal(classifyUpstreamFailure(400, '{"code":"Arrearage","message":"账户欠费"}').kind, 'quota_exhausted');
+  assert.equal(classifyUpstreamFailure(429, '{"error":{"message":"余额不足"}}').kind, 'quota_exhausted');
+  assert.equal(classifyUpstreamFailure(429, '{"error":{"message":"rate limit"}}').kind, 'rate_limited');
+  assert.equal(classifyUpstreamFailure(503, 'service unavailable').kind, 'upstream_unavailable');
+  assert.equal(classifyUpstreamFailure(401, 'invalid api key').retryable, true);
+  assert.equal(classifyUpstreamFailure(400, '{"error":{"message":"invalid messages format"}}').retryable, false);
+
+  // Verify pure candidate chain respects maxAttempts cap and cooled ordering
+  const mockChain = buildFailoverCandidateChain(
+    { id: 'm1', enabled: 1, min_tier: 'free', auto_fallback: 1, cooldown_until: null, sort_order: 1, created_at: 1 },
+    [
+      { id: 'm1', enabled: 1, min_tier: 'free', sort_order: 1, created_at: 1 },
+      { id: 'm2', enabled: 1, min_tier: 'free', sort_order: 2, created_at: 2 },
+      { id: 'm3', enabled: 1, min_tier: 'free', sort_order: 3, created_at: 3 },
+      { id: 'm4', enabled: 1, min_tier: 'free', sort_order: 4, created_at: 4 },
+      { id: 'm5', enabled: 1, min_tier: 'free', sort_order: 5, created_at: 5 },
+      { id: 'm6', enabled: 1, min_tier: 'free', sort_order: 6, created_at: 6 },
+    ],
+    { role: 'user', tier: 'free', tier_expires_at: null },
+    { now: 1000 },
+  );
+  assert.deepEqual(mockChain.map((m) => m.id), ['m1', 'm2', 'm3', 'm4', 'm5']);
+
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'failover', 'users.db');
+  const upstreamCalls = [];
+  const behaviorByUpstreamModel = new Map();
+
+  const mockFetch = async (url, init) => {
+    const body = JSON.parse(String(init?.body || '{}'));
+    const upstreamModel = body.model;
+    upstreamCalls.push({
+      url,
+      authHeader: init?.headers?.Authorization || '',
+      upstreamModel,
+      stream: Boolean(body.stream),
+    });
+
+    const mode = behaviorByUpstreamModel.get(upstreamModel) || 'ok';
+    if (mode === 'throw-network') {
+      throw new Error('ECONNREFUSED upstream down');
+    }
+    if (mode === 'quota-402') {
+      return new Response(
+        JSON.stringify({ error: { message: '余额不足，请充值' } }),
+        { status: 402, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (mode === 'quota-400-arrearage') {
+      return new Response(
+        JSON.stringify({ error: { code: 'Arrearage', message: '账户欠费，请及时缴费' } }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (mode === 'client-400') {
+      return new Response(
+        JSON.stringify({ error: { message: 'messages must be a non-empty array' } }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (mode === 'fail-503') {
+      return new Response(
+        JSON.stringify({ error: { message: 'upstream service overloaded' } }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (mode === 'ok-sse') {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(`data: {"choices":[{"delta":{"content":"stream-from-${upstreamModel}"}}]}\n\n`),
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream; charset=utf-8' },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        id: `chatcmpl-${upstreamModel}`,
+        object: 'chat.completion',
+        model: upstreamModel,
+        choices: [{ index: 0, message: { role: 'assistant', content: `reply-from-${upstreamModel}` } }],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  };
+
+  const config = {
+    ...loadConfig({
+      USER_SYNC_HOST: '127.0.0.1',
+      USER_SYNC_PORT: '0',
+      USER_SYNC_DB_PATH: dbPath,
+      ADMIN_USERNAME: 'root_admin',
+      ADMIN_PASSWORD: 'AdminPassword123!',
+      RATE_LIMIT_MAX: '100',
+      RATE_LIMIT_WINDOW_MS: '60000',
+    }),
+    quotaCooldownMs: 60_000,
+    transientCooldownMs: 30_000,
+  };
+  const app = createApp(config, { fetchImpl: mockFetch });
+
+  try {
+    const addr = await app.listen();
+    const baseUrl = `http://${addr.host}:${addr.port}`;
+
+    // Login as admin and create a standard user with 100 credits
+    const adminLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    const userReg = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'failover_std', password: 'Password123!' }),
+    });
+    const userCookie = extractCookieHeader(userReg);
+    const { user: stdUser } = await userReg.json();
+
+    await fetch(`${baseUrl}/user-api/admin/users/${stdUser.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ tier: 'standard', tierExpiresAt: Date.now() + 30 * 86_400_000 }),
+    });
+
+    // Reject self-referencing fallbackModelId on POST -> 400
+    const badSelfCreate = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        id: 'self-loop',
+        name: 'Self Loop',
+        baseUrl: 'https://self.example/v1',
+        apiKey: 'sk-self-1234',
+        upstreamModel: 'up-self',
+        fallbackModelId: 'self-loop',
+      }),
+    });
+    assert.equal(badSelfCreate.status, 400);
+
+    // Create Model A (standard, cost=10, sortOrder=1), Model B (standard, cost=30, sortOrder=2),
+    // Model C (internal-only, cost=5, sortOrder=0 -> lower sortOrder than B!)
+    const createModel = async (payload) => {
+      const res = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify(payload),
+      });
+      assert.equal(res.status, 201, `create ${payload.id} failed`);
+      return (await res.json()).model;
+    };
+
+    await createModel({
+      id: 'model-a',
+      name: '主力模型 A',
+      baseUrl: 'https://a.example/v1',
+      apiKey: 'sk-model-a-secret',
+      upstreamModel: 'up-a',
+      creditCost: 10,
+      minTier: 'standard',
+      sortOrder: 1,
+      autoFallback: true,
+    });
+
+    await createModel({
+      id: 'model-b',
+      name: '备用模型 B',
+      baseUrl: 'https://b.example/v1',
+      apiKey: 'sk-model-b-secret',
+      upstreamModel: 'up-b',
+      creditCost: 30,
+      minTier: 'standard',
+      sortOrder: 2,
+      autoFallback: true,
+    });
+
+    await createModel({
+      id: 'model-c-internal',
+      name: '内部专属模型 C',
+      baseUrl: 'https://c.example/v1',
+      apiKey: 'sk-model-c-secret',
+      upstreamModel: 'up-c',
+      creditCost: 5,
+      minTier: 'internal',
+      sortOrder: 0,
+      autoFallback: true,
+    });
+
+    // Reject self-referencing fallbackModelId on PATCH -> 400
+    const badSelfPatch = await fetch(`${baseUrl}/user-api/admin/platform-models/model-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ fallbackModelId: 'model-a' }),
+    });
+    assert.equal(badSelfPatch.status, 400);
+
+    // Scenario 2 & 4: Model A returns 402 (余额不足). Even though Model C (internal) has sortOrder 0,
+    // standard user MUST NOT fail over to Model C; MUST fail over to Model B and pay ONLY Model A's 10 credits ONCE!
+    behaviorByUpstreamModel.set('up-a', 'quota-402');
+    behaviorByUpstreamModel.set('up-b', 'ok');
+    behaviorByUpstreamModel.set('up-c', 'ok');
+    upstreamCalls.length = 0;
+
+    const extOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const res1 = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: userCookie,
+        Origin: extOrigin,
+      },
+      body: JSON.stringify({
+        model: 'model-a',
+        messages: [{ role: 'user', content: '测试自动切替' }],
+      }),
+    });
+    assert.equal(res1.status, 200);
+    assert.equal(res1.headers.get('x-goprmpt-failover'), '1');
+    assert.equal(res1.headers.get('x-goprmpt-requested-model'), 'model-a');
+    assert.equal(res1.headers.get('x-goprmpt-actual-model'), 'model-b');
+    assert.equal(res1.headers.get('x-goprmpt-credits-cost'), '10');
+    assert.equal(res1.headers.get('x-goprmpt-credits-remaining'), '90');
+    assert.match(
+      res1.headers.get('access-control-expose-headers') || '',
+      /X-GoPrmpt-Failover/,
+    );
+    const body1 = await res1.json();
+    assert.equal(body1.choices[0].message.content, 'reply-from-up-b');
+    assert.deepEqual(
+      upstreamCalls.map((c) => c.upstreamModel),
+      ['up-a', 'up-b'],
+    );
+
+    // Check ledger note recorded the failover cleanly and only debited once (-10)
+    const creditsAfter1 = await (
+      await fetch(`${baseUrl}/user-api/credits`, { headers: { Cookie: userCookie } })
+    ).json();
+    assert.equal(creditsAfter1.balance, 90);
+    assert.equal(creditsAfter1.ledger[0].reason, 'usage_debit');
+    assert.equal(creditsAfter1.ledger[0].delta, -10);
+    assert.match(creditsAfter1.ledger[0].note, /自动切替至 备用模型 B/);
+
+    // Check admin vs public visibility of cooldown state (public never exposes lastErrorReason)
+    const adminModelsAfterFail = await (
+      await fetch(`${baseUrl}/user-api/admin/platform-models`, { headers: { Cookie: adminCookie } })
+    ).json();
+    const adminModelA = adminModelsAfterFail.models.find((m) => m.id === 'model-a');
+    assert.equal(adminModelA.inCooldown, true);
+    assert.equal(typeof adminModelA.cooldownUntil, 'number');
+    assert.equal(adminModelA.lastErrorReason, '上游模型额度或余额不足');
+    assert.equal(typeof adminModelA.lastErrorAt, 'number');
+
+    const publicModelsAfterFail = await (
+      await fetch(`${baseUrl}/user-api/platform-models`, { headers: { Cookie: userCookie } })
+    ).json();
+    const pubModelA = publicModelsAfterFail.models.find((m) => m.id === 'model-a');
+    assert.equal(pubModelA.inCooldown, true);
+    assert.equal('lastErrorReason' in pubModelA, false);
+    assert.equal('cooldownUntil' in pubModelA, false);
+    assert.equal('baseUrl' in pubModelA, false);
+    assert.equal('apiKey' in pubModelA, false);
+
+    // 2nd request while Model A is in cooldown MUST skip Model A directly (0 upstream calls to up-a!)
+    upstreamCalls.length = 0;
+    const res2 = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: 'model-a',
+        messages: [{ role: 'user', content: '冷却期内直接跳过主模型' }],
+      }),
+    });
+    assert.equal(res2.status, 200);
+    assert.equal(res2.headers.get('x-goprmpt-failover'), '1');
+    assert.equal(res2.headers.get('x-goprmpt-requested-model'), 'model-a');
+    assert.equal(res2.headers.get('x-goprmpt-actual-model'), 'model-b');
+    assert.equal(res2.headers.get('x-goprmpt-credits-remaining'), '80');
+    assert.deepEqual(
+      upstreamCalls.map((c) => c.upstreamModel),
+      ['up-b'],
+    );
+
+    // SSE streaming failover also works cleanly while skipping cooled primary
+    behaviorByUpstreamModel.set('up-b', 'ok-sse');
+    upstreamCalls.length = 0;
+    const sseFailoverRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: 'model-a',
+        stream: true,
+        messages: [{ role: 'user', content: '流式自动切替' }],
+      }),
+    });
+    assert.equal(sseFailoverRes.status, 200);
+    assert.equal(sseFailoverRes.headers.get('x-goprmpt-failover'), '1');
+    assert.equal(sseFailoverRes.headers.get('x-goprmpt-actual-model'), 'model-b');
+    assert.ok((await sseFailoverRes.text()).includes('stream-from-up-b'));
+    assert.deepEqual(
+      upstreamCalls.map((c) => c.upstreamModel),
+      ['up-b'],
+    );
+    behaviorByUpstreamModel.set('up-b', 'ok');
+
+    // Scenario 8a: clear-cooldown requires admin (403 for user, 404 for unknown)
+    const nonAdminClear = await fetch(
+      `${baseUrl}/user-api/admin/platform-models/model-a/clear-cooldown`,
+      { method: 'POST', headers: { Cookie: userCookie } },
+    );
+    assert.equal(nonAdminClear.status, 403);
+
+    const missingClear = await fetch(
+      `${baseUrl}/user-api/admin/platform-models/does-not-exist/clear-cooldown`,
+      { method: 'POST', headers: { Cookie: adminCookie } },
+    );
+    assert.equal(missingClear.status, 404);
+
+    // Admin clears cooldown on Model A -> next request targets Model A again!
+    const clearRes = await fetch(
+      `${baseUrl}/user-api/admin/platform-models/model-a/clear-cooldown`,
+      { method: 'POST', headers: { Cookie: adminCookie } },
+    );
+    assert.equal(clearRes.status, 200);
+    const clearedModel = (await clearRes.json()).model;
+    assert.equal(clearedModel.inCooldown, false);
+    assert.equal(clearedModel.cooldownUntil, null);
+    assert.equal(clearedModel.lastErrorReason, null);
+    assert.equal(clearedModel.lastErrorAt, null);
+
+    behaviorByUpstreamModel.set('up-a', 'ok');
+    upstreamCalls.length = 0;
+    const resAfterClear = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: 'model-a',
+        messages: [{ role: 'user', content: '恢复后命中主模型' }],
+      }),
+    });
+    assert.equal(resAfterClear.status, 200);
+    assert.equal(resAfterClear.headers.get('x-goprmpt-failover'), null);
+    assert.equal(resAfterClear.headers.get('x-goprmpt-requested-model'), 'model-a');
+    assert.equal(resAfterClear.headers.get('x-goprmpt-actual-model'), 'model-a');
+    assert.deepEqual(
+      upstreamCalls.map((c) => c.upstreamModel),
+      ['up-a'],
+    );
+
+    // Scenario 3: Explicit fallbackModelId takes priority over lower sortOrder model
+    await createModel({
+      id: 'model-d-preferred',
+      name: '指定备用模型 D',
+      baseUrl: 'https://d.example/v1',
+      apiKey: 'sk-model-d-secret',
+      upstreamModel: 'up-d',
+      creditCost: 20,
+      minTier: 'standard',
+      sortOrder: 99,
+      autoFallback: true,
+    });
+    const setFallbackRes = await fetch(`${baseUrl}/user-api/admin/platform-models/model-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ fallbackModelId: 'model-d-preferred' }),
+    });
+    assert.equal(setFallbackRes.status, 200);
+    assert.equal((await setFallbackRes.json()).model.fallbackModelId, 'model-d-preferred');
+
+    // Trigger 400 Arrearage on Model A -> must pick model-d-preferred (sortOrder 99) BEFORE model-b (sortOrder 2)
+    behaviorByUpstreamModel.set('up-a', 'quota-400-arrearage');
+    behaviorByUpstreamModel.set('up-d', 'ok');
+    upstreamCalls.length = 0;
+    const preferredRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: 'model-a',
+        messages: [{ role: 'user', content: '验证优先备用模型' }],
+      }),
+    });
+    assert.equal(preferredRes.status, 200);
+    assert.equal(preferredRes.headers.get('x-goprmpt-failover'), '1');
+    assert.equal(preferredRes.headers.get('x-goprmpt-actual-model'), 'model-d-preferred');
+    assert.deepEqual(
+      upstreamCalls.map((c) => c.upstreamModel),
+      ['up-a', 'up-d'],
+    );
+
+    // Scenario 8b: POST /test success automatically clears Model A's cooldown!
+    behaviorByUpstreamModel.set('up-a', 'ok');
+    const testRecoveryRes = await fetch(
+      `${baseUrl}/user-api/admin/platform-models/model-a/test`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: '{}',
+      },
+    );
+    assert.equal(testRecoveryRes.status, 200);
+    const adminAfterTest = await (
+      await fetch(`${baseUrl}/user-api/admin/platform-models`, { headers: { Cookie: adminCookie } })
+    ).json();
+    assert.equal(
+      adminAfterTest.models.find((m) => m.id === 'model-a').inCooldown,
+      false,
+    );
+
+    // Scenario 6: Non-retryable 400 client error does NOT put Model A in cooldown, does NOT fail over, and refunds credits
+    const creditsBeforeBad400 = (
+      await (await fetch(`${baseUrl}/user-api/credits`, { headers: { Cookie: userCookie } })).json()
+    ).balance;
+    behaviorByUpstreamModel.set('up-a', 'client-400');
+    upstreamCalls.length = 0;
+    const bad400Res = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: 'model-a',
+        messages: [],
+      }),
+    });
+    assert.equal(bad400Res.status, 400);
+    const bad400Body = await bad400Res.json();
+    assert.deepEqual(bad400Body.attemptedModels, ['model-a']);
+    assert.deepEqual(
+      upstreamCalls.map((c) => c.upstreamModel),
+      ['up-a'],
+    );
+    const creditsAfterBad400 = (
+      await (await fetch(`${baseUrl}/user-api/credits`, { headers: { Cookie: userCookie } })).json()
+    ).balance;
+    assert.equal(creditsAfterBad400, creditsBeforeBad400);
+    const adminAfterBad400 = await (
+      await fetch(`${baseUrl}/user-api/admin/platform-models`, { headers: { Cookie: adminCookie } })
+    ).json();
+    assert.equal(
+      adminAfterBad400.models.find((m) => m.id === 'model-a').inCooldown,
+      false,
+    );
+
+    // Scenario 5: autoFallback: false does NOT fail over and immediately refunds credits
+    await fetch(`${baseUrl}/user-api/admin/platform-models/model-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ autoFallback: false }),
+    });
+    behaviorByUpstreamModel.set('up-a', 'quota-402');
+    upstreamCalls.length = 0;
+    const noFallbackRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: 'model-a',
+        messages: [{ role: 'user', content: '禁用自动切替' }],
+      }),
+    });
+    assert.equal(noFallbackRes.status, 402);
+    assert.deepEqual((await noFallbackRes.json()).attemptedModels, ['model-a']);
+    assert.deepEqual(
+      upstreamCalls.map((c) => c.upstreamModel),
+      ['up-a'],
+    );
+    const creditsAfterNoFallback = (
+      await (await fetch(`${baseUrl}/user-api/credits`, { headers: { Cookie: userCookie } })).json()
+    ).balance;
+    assert.equal(creditsAfterNoFallback, creditsBeforeBad400);
+
+    // Re-enable autoFallback, clear cooldown, and test network error failover + Scenario 7 (all candidates exhausted)
+    await fetch(`${baseUrl}/user-api/admin/platform-models/model-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ autoFallback: true, fallbackModelId: 'model-c-internal' }),
+    });
+    await fetch(`${baseUrl}/user-api/admin/platform-models/model-a/clear-cooldown`, {
+      method: 'POST',
+      headers: { Cookie: adminCookie },
+    });
+
+    // Even when fallbackModelId explicitly points to internal-only model-c-internal,
+    // standard user MUST NOT call model-c-internal; all eligible candidates (a, b, d) fail -> refund once & return attemptedModels!
+    behaviorByUpstreamModel.set('up-a', 'throw-network');
+    behaviorByUpstreamModel.set('up-b', 'quota-402');
+    behaviorByUpstreamModel.set('up-d', 'fail-503');
+    behaviorByUpstreamModel.set('up-c', 'ok');
+    upstreamCalls.length = 0;
+
+    const allFailRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: 'model-a',
+        messages: [{ role: 'user', content: '所有可用候选均失败' }],
+      }),
+    });
+    assert.equal(allFailRes.status, 503);
+    const allFailBody = await allFailRes.json();
+    assert.deepEqual(allFailBody.attemptedModels, ['model-a', 'model-b', 'model-d-preferred']);
+    assert.equal(allFailBody.attemptedModels.includes('model-c-internal'), false);
+    assert.deepEqual(
+      upstreamCalls.map((c) => c.upstreamModel),
+      ['up-a', 'up-b', 'up-d'],
+    );
+
+    const creditsAfterAllFail = await (
+      await fetch(`${baseUrl}/user-api/credits`, { headers: { Cookie: userCookie } })
+    ).json();
+    assert.equal(creditsAfterAllFail.balance, creditsBeforeBad400);
+    assert.equal(creditsAfterAllFail.ledger[0].reason, 'usage_refund');
+    assert.equal(creditsAfterAllFail.ledger[0].delta, 10);
+
+    // Scenario 4b: Disable B and D so ONLY internal Model C remains besides Model A -> standard user fails cleanly & refunds!
+    await fetch(`${baseUrl}/user-api/admin/platform-models/model-b`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ enabled: false }),
+    });
+    await fetch(`${baseUrl}/user-api/admin/platform-models/model-d-preferred`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ enabled: false }),
+    });
+    await fetch(`${baseUrl}/user-api/admin/platform-models/model-a/clear-cooldown`, {
+      method: 'POST',
+      headers: { Cookie: adminCookie },
+    });
+    behaviorByUpstreamModel.set('up-a', 'quota-402');
+    upstreamCalls.length = 0;
+
+    const onlyInternalLeft = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({
+        model: 'model-a',
+        messages: [{ role: 'user', content: '仅剩内部模型不可越权切替' }],
+      }),
+    });
+    assert.equal(onlyInternalLeft.status, 402);
+    assert.deepEqual((await onlyInternalLeft.json()).attemptedModels, ['model-a']);
+    assert.deepEqual(
+      upstreamCalls.map((c) => c.upstreamModel),
+      ['up-a'],
+    );
+    const creditsAfterInternalBlock = (
+      await (await fetch(`${baseUrl}/user-api/credits`, { headers: { Cookie: userCookie } })).json()
+    ).balance;
+    assert.equal(creditsAfterInternalBlock, creditsBeforeBad400);
+
+    // Scenario 8c: Admin HTML renders #pmAutoFallback, #pmFallbackModelId, clear-cooldown control, zero em dashes, valid JS
+    const adminHtmlRes = await fetch(`${baseUrl}/user-api/admin`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(adminHtmlRes.status, 200);
+    const html = await adminHtmlRes.text();
+    assert.match(html, /id="pmAutoFallback"/);
+    assert.match(html, /id="pmFallbackModelId"/);
+    assert.match(html, /data-pm-act="clear-cooldown"/);
+    assert.match(html, /额度\/异常冷却中/);
+    assert.match(html, /恢复可用/);
+    assert.equal(html.includes('—'), false, 'admin UI copy should not contain em dashes');
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    assert.ok(scriptMatch);
+    assert.doesNotThrow(() => new Function(scriptMatch[1]), 'admin inline script should parse cleanly');
+  } finally {
+    await app.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

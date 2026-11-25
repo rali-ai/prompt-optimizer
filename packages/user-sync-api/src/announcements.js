@@ -1,9 +1,12 @@
+import { getEffectiveTier } from './membership.js';
 import { PayloadError } from './sanitize.js';
 
 export const MAX_TITLE_LENGTH = 80;
 export const MAX_CONTENT_LENGTH = 800;
 export const MAX_LINK_URL_LENGTH = 500;
 export const MAX_LINK_TEXT_LENGTH = 32;
+export const MAX_COMMENT_LENGTH = 500;
+const COMMENT_FORBIDDEN_CONTROL_REGEX = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
 export const ANNOUNCEMENT_TYPES = Object.freeze({
   notice: Object.freeze({
@@ -58,8 +61,24 @@ export function serializeAnnouncement(row) {
     expiresAt: row.expires_at ?? null,
     emailedAt: row.emailed_at ?? null,
     emailedCount: Number(row.emailed_count ?? 0),
+    commentCount: Number(row.comment_count ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function serializeAnnouncementComment(row, now = Date.now()) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    announcementId: row.announcement_id,
+    userId: row.user_id,
+    username: row.username,
+    role: row.role,
+    tier: row.tier,
+    effectiveTier: getEffectiveTier(row, now),
+    content: row.content,
+    createdAt: row.created_at,
   };
 }
 
@@ -207,4 +226,21 @@ export function parseUpdateAnnouncementInput(body) {
     throw new PayloadError('请提供至少一个可更新的公告字段', 400);
   }
   return patch;
+}
+
+export function parseCreateCommentInput(body) {
+  if (!isPlainObject(body)) {
+    throw new PayloadError('请求体必须为 JSON 对象', 400);
+  }
+  if (typeof body.content !== 'string') {
+    throw new PayloadError('评论内容必须为字符串', 400);
+  }
+  if (COMMENT_FORBIDDEN_CONTROL_REGEX.test(body.content)) {
+    throw new PayloadError('评论内容不能包含非法控制字符', 400);
+  }
+  const content = body.content.trim();
+  if (!content || content.length > MAX_COMMENT_LENGTH) {
+    throw new PayloadError(`评论内容不能为空且不能超过 ${MAX_COMMENT_LENGTH} 个字符`, 400);
+  }
+  return { content };
 }

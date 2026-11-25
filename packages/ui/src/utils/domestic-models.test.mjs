@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  FEATURED_PROVIDER_ID,
   OVERSEAS_PROVIDER_IDS,
   PLATFORM_MODEL_ID_PREFIX,
   buildPlatformTextModelConfig,
@@ -8,10 +9,14 @@ import {
   filterDomesticImageConfigs,
   filterDomesticProviders,
   filterDomesticTextModels,
+  isFeaturedProvider,
   isOverseasProvider,
   isPlatformModelId,
   mergePresetDefaultParams,
   resolveProviderApplyLink,
+  sortDomesticImageConfigs,
+  sortDomesticProviders,
+  sortDomesticTextModels,
   syncPlatformModelsToManager,
 } from './domestic-models.ts'
 
@@ -409,4 +414,151 @@ test('syncPlatformModelsToManager is idempotent, preserves user toggles & BYOK m
     loggedIn: false,
   })
   assert.equal(logoutAgain, false)
+})
+
+test('isFeaturedProvider defaults to siliconflow and respects explicit preset featured flags', () => {
+  assert.equal(FEATURED_PROVIDER_ID, 'siliconflow')
+  assert.equal(isFeaturedProvider('siliconflow'), true)
+  assert.equal(isFeaturedProvider('SiliconFlow'), true)
+  assert.equal(isFeaturedProvider('deepseek'), false)
+  assert.equal(isFeaturedProvider(''), false)
+  assert.equal(isFeaturedProvider(null), false)
+
+  const presets = new Map([
+    [
+      'siliconflow',
+      {
+        providerId: 'siliconflow',
+        name: '硅基流动',
+        category: 'both',
+        applyUrl: null,
+        customApplyUrl: null,
+        defaultApplyUrl: null,
+        applyLabel: '主推 · 申请领免费额度',
+        defaultModelId: null,
+        defaultParams: {},
+        featured: false,
+        enabled: true,
+        updatedAt: null,
+      },
+    ],
+    [
+      'deepseek',
+      {
+        providerId: 'deepseek',
+        name: 'DeepSeek',
+        category: 'text',
+        applyUrl: null,
+        customApplyUrl: null,
+        defaultApplyUrl: null,
+        applyLabel: '申请 API Key',
+        defaultModelId: null,
+        defaultParams: {},
+        featured: true,
+        enabled: true,
+        updatedAt: null,
+      },
+    ],
+  ])
+
+  assert.equal(isFeaturedProvider('siliconflow', presets), false)
+  assert.equal(isFeaturedProvider('deepseek', presets), true)
+})
+
+test('sortDomesticProviders places featured siliconflow first while preserving relative order of others', () => {
+  const providers = [
+    { id: 'deepseek', name: 'DeepSeek' },
+    { id: 'zhipu', name: '智谱' },
+    { id: 'siliconflow', name: '硅基流动' },
+    { id: 'dashscope', name: '通义千问' },
+  ]
+
+  const sorted = sortDomesticProviders(providers)
+  assert.deepEqual(
+    sorted.map((p) => p.id),
+    ['siliconflow', 'deepseek', 'zhipu', 'dashscope'],
+  )
+  // Does not mutate input array
+  assert.equal(providers[0].id, 'deepseek')
+})
+
+test('sortDomesticTextModels orders enabled (platform -> featured -> default -> user) before disabled (featured -> default -> user)', () => {
+  const models = [
+    { id: 'user-disabled-a', name: 'Alpha Disabled', enabled: false, providerId: 'zhipu' },
+    { id: 'deepseek', name: 'DeepSeek', enabled: false, providerId: 'deepseek' },
+    { id: 'dashscope', name: 'DashScope', enabled: false, providerId: 'dashscope' },
+    { id: 'siliconflow', name: '硅基流动', enabled: false, providerId: 'siliconflow' },
+    { id: 'user-enabled-a', name: 'Alpha Custom', enabled: true, providerId: 'zhipu' },
+    { id: 'zhipu', name: '智谱', enabled: true, providerId: 'zhipu' },
+    { id: 'my-sf', name: '硅基流动主力', enabled: true, providerId: 'siliconflow' },
+    { id: 'platform:ds-v3', name: 'DeepSeek 平台版', enabled: true, providerId: 'openai-compatible' },
+  ]
+
+  const sorted = sortDomesticTextModels(models)
+  assert.deepEqual(
+    sorted.map((m) => m.id),
+    [
+      'platform:ds-v3',
+      'my-sf',
+      'zhipu',
+      'user-enabled-a',
+      'siliconflow',
+      'dashscope',
+      'deepseek',
+      'user-disabled-a',
+    ],
+  )
+})
+
+test('sortDomesticImageConfigs puts enabled before disabled and featured siliconflow first in each group', () => {
+  const configs = [
+    { id: 'img-seedream-off', name: 'A Seedream', enabled: false, providerId: 'seedream' },
+    { id: 'image-siliconflow-kolors', name: 'SiliconFlow Kolors', enabled: false, providerId: 'siliconflow' },
+    { id: 'img-dashscope-on', name: 'A DashScope', enabled: true, providerId: 'dashscope' },
+    { id: 'img-sf-on', name: 'Z SiliconFlow', enabled: true, providerId: 'siliconflow' },
+  ]
+
+  const sorted = sortDomesticImageConfigs(configs)
+  assert.deepEqual(
+    sorted.map((c) => c.id),
+    ['img-sf-on', 'img-dashscope-on', 'image-siliconflow-kolors', 'img-seedream-off'],
+  )
+})
+
+test('resolveProviderApplyLink uses featured default label for siliconflow and allows admin override', () => {
+  assert.deepEqual(
+    resolveProviderApplyLink('siliconflow', 'https://cloud.siliconflow.cn/account/ak'),
+    {
+      url: 'https://cloud.siliconflow.cn/account/ak',
+      label: '主推 · 申请领免费额度',
+    },
+  )
+
+  const customPresets = new Map([
+    [
+      'siliconflow',
+      {
+        providerId: 'siliconflow',
+        name: '硅基流动',
+        category: 'both',
+        applyUrl: 'https://cloud.siliconflow.cn/i/custom-code',
+        customApplyUrl: 'https://cloud.siliconflow.cn/i/custom-code',
+        defaultApplyUrl: 'https://cloud.siliconflow.cn/account/ak',
+        applyLabel: '专属链接领 2000 万 Token',
+        defaultModelId: null,
+        defaultParams: {},
+        featured: true,
+        enabled: true,
+        updatedAt: 1,
+      },
+    ],
+  ])
+
+  assert.deepEqual(
+    resolveProviderApplyLink('siliconflow', 'https://cloud.siliconflow.cn/account/ak', customPresets),
+    {
+      url: 'https://cloud.siliconflow.cn/i/custom-code',
+      label: '专属链接领 2000 万 Token',
+    },
+  )
 })

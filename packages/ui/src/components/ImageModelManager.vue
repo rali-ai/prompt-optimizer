@@ -1,5 +1,52 @@
 <template>
   <div class="image-model-list">
+    <div
+      v-if="showSiliconFlowSpotlight"
+      class="image-siliconflow-spotlight"
+      data-testid="image-siliconflow-spotlight"
+    >
+      <div class="image-siliconflow-spotlight__content">
+        <div class="image-siliconflow-spotlight__title-row">
+          <span class="image-siliconflow-spotlight__badge">{{ isZh ? '主推图像通道' : 'Featured Image' }}</span>
+          <strong class="image-siliconflow-spotlight__title">
+            {{ isZh ? '硅基流动 SiliconFlow' : 'SiliconFlow' }}
+          </strong>
+        </div>
+        <div class="image-siliconflow-spotlight__desc">
+          {{
+            isZh
+              ? '国内直连稳定，支持 Kolors / FLUX 等主流文生图模型，免费注册即可领取额度。'
+              : 'Fast domestic access for Kolors, FLUX and more image models with free starter credits.'
+          }}
+        </div>
+      </div>
+      <div class="image-siliconflow-spotlight__actions">
+        <NButton
+          v-if="siliconflowApplyLink.url"
+          type="primary"
+          size="small"
+          tag="a"
+          :href="siliconflowApplyLink.url"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="image-siliconflow-spotlight-apply"
+        >
+          <template #icon>
+            <ExternalLinkIcon />
+          </template>
+          {{ siliconflowApplyLink.label }}
+        </NButton>
+        <NButton
+          secondary
+          size="small"
+          data-testid="image-siliconflow-spotlight-configure"
+          @click="handleConfigureSiliconFlow"
+        >
+          {{ isZh ? '去配置硅基流动' : 'Configure SiliconFlow' }}
+        </NButton>
+      </div>
+    </div>
+
     <!-- 空状态 -->
     <NEmpty v-if="visibleConfigs.length === 0" :description="t('image.model.empty')">
       <template #extra>
@@ -26,6 +73,7 @@
         @action="handleMobileAction($event, config)"
       >
         <div class="image-model-mobile-capabilities">
+          <span v-if="isFeaturedConfig(config)" class="image-mobile-featured-badge">{{ isZh ? '主推' : 'Featured' }}</span>
           <NText v-if="config.model?.capabilities?.text2image" depth="3">{{ t('image.capability.text2image') }}</NText>
           <NText v-if="config.model?.capabilities?.image2image" depth="3">{{ t('image.capability.image2image') }}</NText>
           <NText v-if="config.provider?.corsRestricted && !isElectronEnv" type="warning">{{ t('modelManager.corsRestrictedTag') }}</NText>
@@ -67,6 +115,7 @@
         size="small"
         hoverable
         class="image-model-card"
+        :class="{ 'image-model-card--featured': isFeaturedConfig(config) }"
         :style="{
           opacity: config.enabled ? 1 : 0.6
         }"
@@ -77,6 +126,16 @@
               <!-- 配置名称行 -->
               <NSpace align="center" :size="8">
                 <NText strong>{{ config.name || config.id }}</NText>
+                <NTag
+                  v-if="isFeaturedConfig(config)"
+                  type="warning"
+                  size="small"
+                  round
+                  :bordered="false"
+                  data-testid="image-featured-model-badge"
+                >
+                  {{ isZh ? '主推' : 'Featured' }}
+                </NTag>
                 <NTag
                   v-if="!config.enabled"
                   type="warning"
@@ -120,14 +179,16 @@
           <NSpace @click.stop :size="4" class="image-model-actions">
             <NButton
               v-if="getApplyLink(config).url"
-              text
+              :text="!isFeaturedConfig(config)"
+              :secondary="isFeaturedConfig(config)"
+              :round="isFeaturedConfig(config)"
               size="small"
               type="primary"
               tag="a"
               :href="getApplyLink(config).url!"
               target="_blank"
               rel="noopener noreferrer"
-              class="image-apply-link-btn"
+              :class="['image-apply-link-btn', { 'image-apply-link-btn--featured': isFeaturedConfig(config) }]"
               data-testid="image-model-card-apply-link"
             >
               <template #icon>
@@ -219,6 +280,7 @@ import { Link as UiLink, SquarePen as UiSquarePen, Copy as UiCopy, PowerOff as U
 import { ref, onMounted, inject, h, computed } from 'vue'
 
 import { useI18n } from 'vue-i18n'
+import { i18n } from '../plugins/i18n'
 import {
   NSpace, NCard, NText, NTag, NButton, NEmpty, NInput, useDialog
 } from 'naive-ui'
@@ -229,7 +291,13 @@ import { useToast } from '../composables/ui/useToast'
 import { getI18nErrorMessage } from '../utils/error'
 import { isRunningInElectron, type IImageService, type ImageModel, type ImageModelConfig } from '@prompt-optimizer/core'
 import { getProviderDisplayName } from '../utils/provider-display'
-import { filterDomesticImageConfigs, resolveProviderApplyLink } from '../utils/domestic-models'
+import {
+  FEATURED_PROVIDER_ID,
+  filterDomesticImageConfigs,
+  isFeaturedProvider,
+  resolveProviderApplyLink,
+  sortDomesticImageConfigs,
+} from '../utils/domestic-models'
 import AppPreviewImage from './media/AppPreviewImage.vue'
 import MobileModelRow from './common/MobileModelRow.vue'
 import ExternalLinkIcon from './icons/ExternalLinkIcon.vue'
@@ -277,8 +345,27 @@ const isTestingConnectionFor = (configId: string) => !!testingConnections.value[
 const providerDisplayName = (config: { provider?: { id?: string; name?: string }; providerId?: string }) =>
   getProviderDisplayName(config.provider || { id: config.providerId }, t)
 
+const isZh = computed(() => String(i18n.global.locale.value || '').toLowerCase().startsWith('zh'))
+const showSiliconFlowSpotlight = computed(() => {
+  const preset = platformCatalog.presetsByProviderId.value.get(FEATURED_PROVIDER_ID)
+  return preset?.enabled !== false && isFeaturedProvider(FEATURED_PROVIDER_ID, platformCatalog.presetsByProviderId.value)
+})
+const siliconflowApplyLink = computed(() =>
+  resolveProviderApplyLink(
+    FEATURED_PROVIDER_ID,
+    'https://cloud.siliconflow.cn/account/ak',
+    platformCatalog.presetsByProviderId.value,
+  )
+)
+
+const isFeaturedConfig = (config: ImageModelConfig) =>
+  isFeaturedProvider(config.providerId ?? config.provider?.id, platformCatalog.presetsByProviderId.value)
+
 const visibleConfigs = computed(() =>
-  filterDomesticImageConfigs(configs.value, platformCatalog.presetsByProviderId.value)
+  sortDomesticImageConfigs(
+    filterDomesticImageConfigs(configs.value, platformCatalog.presetsByProviderId.value),
+    platformCatalog.presetsByProviderId.value,
+  )
 )
 
 const getApplyLink = (config: ImageModelConfig) =>
@@ -344,6 +431,19 @@ const openAddModal = () => {
 
 const editConfig = (configId: string) => {
   emit('edit', configId)
+}
+
+const handleConfigureSiliconFlow = () => {
+  const existing =
+    visibleConfigs.value.find((c) => c.id === 'image-siliconflow-kolors') ??
+    visibleConfigs.value.find(
+      (c) => String(c.providerId ?? c.provider?.id ?? '').trim().toLowerCase() === FEATURED_PROVIDER_ID,
+    )
+  if (existing) {
+    editConfig(existing.id)
+    return
+  }
+  openAddModal()
 }
 
 const cloneConfig = (configId: string) => {
@@ -494,6 +594,79 @@ defineExpose({
 <style scoped>
 .image-model-list {
   width: 100%;
+}
+
+.image-siliconflow-spotlight {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(217, 107, 67, 0.30);
+  background: linear-gradient(135deg, rgba(217, 107, 67, 0.085) 0%, rgba(15, 118, 110, 0.065) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.image-siliconflow-spotlight__content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.image-siliconflow-spotlight__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.image-siliconflow-spotlight__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--gp-copper, #d96b43);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.image-siliconflow-spotlight__title {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.image-siliconflow-spotlight__desc {
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.82;
+}
+
+.image-siliconflow-spotlight__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.image-model-card--featured {
+  border-color: rgba(217, 107, 67, 0.42);
+  background: linear-gradient(135deg, rgba(217, 107, 67, 0.06) 0%, rgba(15, 118, 110, 0.035) 100%);
+}
+
+.image-apply-link-btn--featured {
+  padding: 0 10px;
+  font-weight: 600;
+}
+
+.image-mobile-featured-badge {
+  color: var(--gp-copper, #d96b43);
+  font-weight: 600;
 }
 
 .image-model-mobile-list {

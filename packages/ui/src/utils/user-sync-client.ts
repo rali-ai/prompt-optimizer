@@ -62,6 +62,9 @@ export interface PublicPlatformModel {
   applyUrl: string | null
   description: string | null
   sortOrder: number
+  autoFallback?: boolean
+  fallbackModelId?: string | null
+  inCooldown?: boolean
   accessible: boolean
   accessReason: string | null
 }
@@ -76,6 +79,7 @@ export interface DomesticModelPreset {
   applyLabel: string
   defaultModelId: string | null
   defaultParams: Record<string, unknown>
+  featured?: boolean
   enabled: boolean
   updatedAt: number | null
 }
@@ -112,8 +116,21 @@ export interface ActiveAnnouncement {
   isActive: boolean
   isPinned: boolean
   expiresAt: number | null
+  commentCount: number
   createdAt: number
   updatedAt: number
+}
+
+export interface AnnouncementComment {
+  id: string
+  announcementId: string
+  userId: string
+  username: string
+  role: 'user' | 'admin'
+  tier: MembershipTier
+  effectiveTier: MembershipTier
+  content: string
+  createdAt: number
 }
 
 export class UserSyncError extends Error {
@@ -539,6 +556,10 @@ function normalizeAnnouncement(raw: unknown): ActiveAnnouncement | null {
   const id = typeof raw.id === 'string' ? raw.id.trim() : ''
   const title = typeof raw.title === 'string' ? raw.title.trim() : ''
   if (!id || !title) return null
+  const rawCommentCount =
+    typeof raw.commentCount === 'number' && Number.isFinite(raw.commentCount)
+      ? Math.max(0, Math.floor(raw.commentCount))
+      : 0
   return {
     id,
     title,
@@ -549,6 +570,7 @@ function normalizeAnnouncement(raw: unknown): ActiveAnnouncement | null {
     isActive: raw.isActive !== false,
     isPinned: Boolean(raw.isPinned),
     expiresAt: typeof raw.expiresAt === 'number' && Number.isFinite(raw.expiresAt) ? raw.expiresAt : null,
+    commentCount: rawCommentCount,
     createdAt: typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) ? raw.createdAt : 0,
     updatedAt: typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
   }
@@ -572,6 +594,109 @@ export async function getActiveAnnouncements(
     if (normalized) items.push(normalized)
   }
   return items
+}
+
+function normalizeAnnouncementComment(raw: unknown): AnnouncementComment | null {
+  if (!isPlainObject(raw)) return null
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const announcementId = typeof raw.announcementId === 'string' ? raw.announcementId.trim() : ''
+  const userId = typeof raw.userId === 'string' ? raw.userId.trim() : ''
+  const username = typeof raw.username === 'string' ? raw.username.trim() : ''
+  const content = typeof raw.content === 'string' ? raw.content : ''
+  if (!id || !announcementId || !username || !content.trim()) return null
+  const tier = normalizeMembershipTier(raw.tier)
+  const effectiveTier =
+    raw.effectiveTier !== undefined ? normalizeMembershipTier(raw.effectiveTier) : tier
+  return {
+    id,
+    announcementId,
+    userId,
+    username,
+    role: raw.role === 'admin' ? 'admin' : 'user',
+    tier,
+    effectiveTier,
+    content,
+    createdAt: normalizeFiniteNumber(raw.createdAt, 0),
+  }
+}
+
+export async function getAnnouncementComments(
+  announcementId: string,
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ comments: AnnouncementComment[]; commentCount: number }> {
+  const id = String(announcementId || '').trim()
+  if (!id) {
+    return { comments: [], commentCount: 0 }
+  }
+  const res = await requestJson<{ comments?: unknown; commentCount?: unknown }>(
+    joinUrl(baseUrl, `/announcements/${encodeURIComponent(id)}/comments`),
+    { method: 'GET' },
+    fetchImpl,
+  )
+  const rawComments = isPlainObject(res) && Array.isArray(res.comments) ? res.comments : []
+  const comments: AnnouncementComment[] = []
+  for (const entry of rawComments) {
+    const normalized = normalizeAnnouncementComment(entry)
+    if (normalized) comments.push(normalized)
+  }
+  const commentCount =
+    isPlainObject(res) && typeof res.commentCount === 'number' && Number.isFinite(res.commentCount)
+      ? Math.max(0, Math.floor(res.commentCount))
+      : comments.length
+  return { comments, commentCount }
+}
+
+export async function createAnnouncementComment(
+  announcementId: string,
+  content: string,
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ comment: AnnouncementComment; commentCount: number }> {
+  const id = String(announcementId || '').trim()
+  const res = await requestJson<{ comment?: unknown; commentCount?: unknown }>(
+    joinUrl(baseUrl, `/announcements/${encodeURIComponent(id)}/comments`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    },
+    fetchImpl,
+  )
+  const comment = normalizeAnnouncementComment(isPlainObject(res) ? res.comment : null)
+  if (!comment) {
+    throw new UserSyncError('评论响应异常', 500)
+  }
+  const commentCount =
+    isPlainObject(res) && typeof res.commentCount === 'number' && Number.isFinite(res.commentCount)
+      ? Math.max(0, Math.floor(res.commentCount))
+      : 1
+  return { comment, commentCount }
+}
+
+export async function deleteAnnouncementComment(
+  announcementId: string,
+  commentId: string,
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; commentCount: number }> {
+  const annId = String(announcementId || '').trim()
+  const cId = String(commentId || '').trim()
+  const res = await requestJson<{ ok?: unknown; commentCount?: unknown }>(
+    joinUrl(
+      baseUrl,
+      `/announcements/${encodeURIComponent(annId)}/comments/${encodeURIComponent(cId)}`,
+    ),
+    { method: 'DELETE' },
+    fetchImpl,
+  )
+  const commentCount =
+    isPlainObject(res) && typeof res.commentCount === 'number' && Number.isFinite(res.commentCount)
+      ? Math.max(0, Math.floor(res.commentCount))
+      : 0
+  return {
+    ok: isPlainObject(res) ? res.ok !== false : true,
+    commentCount,
+  }
 }
 
 function normalizeMembershipTier(raw: unknown): MembershipTier {
@@ -642,6 +767,9 @@ function normalizePublicPlatformModel(raw: unknown): PublicPlatformModel | null 
     applyUrl: safeAnnouncementUrl(raw.applyUrl),
     description: normalizeOptionalString(raw.description),
     sortOrder: normalizeFiniteNumber(raw.sortOrder, 0),
+    autoFallback: raw.autoFallback === undefined ? true : Boolean(raw.autoFallback),
+    fallbackModelId: normalizeOptionalString(raw.fallbackModelId),
+    inCooldown: Boolean(raw.inCooldown),
     accessible: Boolean(raw.accessible),
     accessReason: normalizeOptionalString(raw.accessReason),
   }
@@ -658,6 +786,8 @@ function normalizeDomesticModelPreset(raw: unknown): DomesticModelPreset | null 
   if (!isPlainObject(raw)) return null
   const providerId = typeof raw.providerId === 'string' ? raw.providerId.trim() : ''
   if (!providerId) return null
+  const defaultLabel =
+    providerId.toLowerCase() === 'siliconflow' ? '主推 · 申请领免费额度' : '申请 API Key'
   return {
     providerId,
     name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : providerId,
@@ -668,9 +798,10 @@ function normalizeDomesticModelPreset(raw: unknown): DomesticModelPreset | null 
     applyLabel:
       typeof raw.applyLabel === 'string' && raw.applyLabel.trim()
         ? raw.applyLabel.trim()
-        : '申请 API Key',
+        : defaultLabel,
     defaultModelId: normalizeOptionalString(raw.defaultModelId),
     defaultParams: normalizePlainParams(raw.defaultParams),
+    featured: Boolean(raw.featured),
     enabled: raw.enabled !== false,
     updatedAt: normalizeNullableNumber(raw.updatedAt),
   }

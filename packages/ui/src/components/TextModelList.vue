@@ -20,7 +20,8 @@
       @test="emit('test', model.id)"
       @action="handleMobileAction($event, model)"
     >
-      <div v-if="hasMobileCapabilities(model) || isPlatformModel(model) || getApplyLink(model).url" class="mobile-text-model-capabilities">
+      <div v-if="hasMobileCapabilities(model) || isPlatformModel(model) || isFeaturedModel(model) || getApplyLink(model).url" class="mobile-text-model-capabilities">
+        <span v-if="isFeaturedModel(model)" class="mobile-featured-badge">{{ isZh ? '主推' : 'Featured' }}</span>
         <span v-if="isPlatformModel(model)" class="mobile-platform-badge">{{ isZh ? '网站提供' : 'Platform' }}</span>
         <span v-if="getPlatformMeta(model)">
           {{ isZh ? `每次 ${getPlatformMeta(model)!.creditCost} 积分` : `${getPlatformMeta(model)!.creditCost} credits` }}
@@ -54,6 +55,7 @@
       size="small"
       hoverable
       class="model-config-card"
+      :class="{ 'model-config-card--featured': isFeaturedModel(model) }"
       :style="{ opacity: model.enabled ? 1 : 0.6 }"
     >
       <template #header>
@@ -61,6 +63,16 @@
           <NSpace vertical :size="4" class="model-card-heading">
             <NSpace align="center" :size="8">
               <NText strong>{{ modelDisplayName(model) }}</NText>
+              <NTag
+                v-if="isFeaturedModel(model)"
+                type="warning"
+                size="small"
+                round
+                :bordered="false"
+                data-testid="featured-model-badge"
+              >
+                {{ isZh ? '主推' : 'Featured' }}
+              </NTag>
               <NTag
                 v-if="isPlatformModel(model)"
                 type="primary"
@@ -90,6 +102,16 @@
                 data-testid="platform-model-tier-badge"
               >
                 {{ formatTierLabel(getPlatformMeta(model)!.minTier, isZh) }}
+              </NTag>
+              <NTag
+                v-if="getPlatformMeta(model)?.autoFallback !== false && getPlatformMeta(model)"
+                type="success"
+                size="small"
+                round
+                :bordered="false"
+                data-testid="platform-model-autofallback-badge"
+              >
+                {{ isZh ? '自动切替' : 'Auto failover' }}
               </NTag>
               <NTag v-if="!model.enabled" type="warning" size="small" round :bordered="false">
                 {{ t('modelManager.disabled') }}
@@ -139,14 +161,16 @@
         <NSpace @click.stop :size="4" class="model-card-actions">
           <NButton
             v-if="getApplyLink(model).url"
-            text
+            :text="!isFeaturedModel(model)"
+            :secondary="isFeaturedModel(model)"
+            :round="isFeaturedModel(model)"
             size="small"
             type="primary"
             tag="a"
             :href="getApplyLink(model).url!"
             target="_blank"
             rel="noopener noreferrer"
-            class="model-apply-link-btn"
+            :class="['model-apply-link-btn', { 'model-apply-link-btn--featured': isFeaturedModel(model) }]"
             data-testid="text-model-card-apply-link"
           >
             <template #icon>
@@ -235,7 +259,7 @@ import ExternalLinkIcon from './icons/ExternalLinkIcon.vue'
 import { useWorkspaceLayout } from '../composables/ui/useWorkspaceLayout'
 import { isRunningInElectron, type TextModelConfig } from '@prompt-optimizer/core'
 import { getProviderDisplayName, getTextModelConfigDisplayName } from '../utils/provider-display'
-import { isPlatformModelId, resolveProviderApplyLink } from '../utils/domestic-models'
+import { isFeaturedProvider, isPlatformModelId, resolveProviderApplyLink } from '../utils/domestic-models'
 import {
   formatTierLabel,
   tierTagType,
@@ -273,6 +297,9 @@ const filteredModels = computed(() => {
 })
 const isElectronEnv = isRunningInElectron()
 const isPlatformModel = (model: TextModelConfig) => isPlatformModelId(model.id)
+const isFeaturedModel = (model: TextModelConfig) =>
+  !isPlatformModel(model) &&
+  isFeaturedProvider(model.providerId ?? model.providerMeta?.id, catalog.presetsByProviderId.value)
 const getPlatformMeta = (model: TextModelConfig) =>
   isPlatformModel(model) ? (catalog.platformMetaByConfigId.value.get(model.id) || null) : null
 
@@ -352,6 +379,21 @@ const providerDisplayName = (model: TextModelConfig) => {
 
 .model-config-card {
    border-radius: 16px;
+}
+
+.model-config-card--featured {
+  border-color: rgba(217, 107, 67, 0.42);
+  background: linear-gradient(135deg, rgba(217, 107, 67, 0.06) 0%, rgba(15, 118, 110, 0.035) 100%);
+}
+
+.model-apply-link-btn--featured {
+  padding: 0 10px;
+  font-weight: 600;
+}
+
+.mobile-featured-badge {
+  color: var(--gp-copper, #d96b43);
+  font-weight: 600;
 }
 
 .model-config-card :deep(.n-card-header) {

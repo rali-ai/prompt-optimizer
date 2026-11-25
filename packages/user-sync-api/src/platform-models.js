@@ -5,71 +5,96 @@ import { PayloadError } from './sanitize.js';
 
 export const MODEL_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$/;
 export const MAX_CREDIT_COST = 10_000;
+export const DEFAULT_QUOTA_COOLDOWN_MS = 10 * 60 * 1000;
+export const DEFAULT_TRANSIENT_COOLDOWN_MS = 60 * 1000;
+export const MAX_FAILOVER_ATTEMPTS = 5;
 const MAX_URL_LENGTH = 500;
 const MAX_PARAMS_BYTES = 16 * 1024;
 const MAX_PARAMS_DEPTH = 6;
 const FORBIDDEN_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const QUOTA_EXHAUSTED_PATTERN =
+  /(insufficient_quota|insufficient_balance|quota_exceeded|quota exceeded|out of quota|arrearage|exceeded your current quota|credit balance|balance is not enough|not enough balance|billing|余额不足|额度不足|额度已用完|额度耗尽|欠费|资源包已用完|超出配额)/i;
 
 export const DOMESTIC_MODEL_PRESETS_DEFAULTS = Object.freeze([
+  Object.freeze({
+    providerId: 'siliconflow',
+    name: '硅基流动 SiliconFlow',
+    category: 'both',
+    defaultApplyUrl: 'https://cloud.siliconflow.cn/account/ak',
+    defaultApplyLabel: '主推 · 申请领免费额度',
+    featured: true,
+  }),
   Object.freeze({
     providerId: 'deepseek',
     name: 'DeepSeek',
     category: 'text',
     defaultApplyUrl: 'https://platform.deepseek.com/api_keys',
+    defaultApplyLabel: '申请 API Key',
+    featured: false,
   }),
   Object.freeze({
     providerId: 'dashscope',
     name: '通义千问 / 阿里云百炼',
     category: 'both',
     defaultApplyUrl: 'https://bailian.console.aliyun.com/#/api-key',
-  }),
-  Object.freeze({
-    providerId: 'siliconflow',
-    name: '硅基流动 SiliconFlow',
-    category: 'both',
-    defaultApplyUrl: 'https://cloud.siliconflow.cn/account/ak',
+    defaultApplyLabel: '申请 API Key',
+    featured: false,
   }),
   Object.freeze({
     providerId: 'zhipu',
     name: '智谱 AI (GLM)',
     category: 'text',
     defaultApplyUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
+    defaultApplyLabel: '申请 API Key',
+    featured: false,
   }),
   Object.freeze({
     providerId: 'modelscope',
     name: '魔搭 ModelScope',
     category: 'both',
     defaultApplyUrl: 'https://modelscope.cn/my/myaccesstoken',
+    defaultApplyLabel: '申请 API Key',
+    featured: false,
   }),
   Object.freeze({
     providerId: 'minimax',
     name: 'MiniMax 稀宇',
     category: 'text',
     defaultApplyUrl: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
+    defaultApplyLabel: '申请 API Key',
+    featured: false,
   }),
   Object.freeze({
     providerId: 'xiaomi-mimo-token-plan',
     name: '小米 MiMo',
     category: 'text',
     defaultApplyUrl: 'https://platform.xiaomimimo.com',
+    defaultApplyLabel: '申请 API Key',
+    featured: false,
   }),
   Object.freeze({
     providerId: 'seedream',
     name: '豆包 Seedream / 火山方舟',
     category: 'image',
     defaultApplyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey',
+    defaultApplyLabel: '申请 API Key',
+    featured: false,
   }),
   Object.freeze({
     providerId: 'ollama',
     name: 'Ollama 本地模型',
     category: 'both',
     defaultApplyUrl: null,
+    defaultApplyLabel: '申请 API Key',
+    featured: false,
   }),
   Object.freeze({
     providerId: 'openai-compatible',
     name: '自定义国内接口 (OpenAI 兼容)',
     category: 'text',
     defaultApplyUrl: null,
+    defaultApplyLabel: '申请 API Key',
+    featured: false,
   }),
 ]);
 
@@ -255,6 +280,135 @@ function validateBoolean(raw, fieldName, fallback) {
   return raw;
 }
 
+function validateFallbackModelId(raw, selfId = null) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'string') {
+    throw new PayloadError('fallbackModelId 必须为字符串或 null', 400);
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (!MODEL_ID_REGEX.test(trimmed)) {
+    throw new PayloadError(
+      '优先备用模型 ID 需为 2 到 64 位字母数字开头，仅允许字母、数字、点、下划线和短横线',
+      400,
+    );
+  }
+  if (selfId && trimmed === selfId) {
+    throw new PayloadError('优先备用模型不能指向当前模型自身', 400);
+  }
+  return trimmed;
+}
+
+export function classifyUpstreamFailure(status, bodyText = '') {
+  const statusCode = Number(status);
+  const text = typeof bodyText === 'string' ? bodyText : String(bodyText ?? '');
+
+  if (
+    statusCode === 402 ||
+    ((statusCode === 429 || statusCode === 403 || statusCode === 400) &&
+      QUOTA_EXHAUSTED_PATTERN.test(text))
+  ) {
+    return {
+      kind: 'quota_exhausted',
+      retryable: true,
+      reason: '上游模型额度或余额不足',
+    };
+  }
+
+  if (statusCode === 429) {
+    return {
+      kind: 'rate_limited',
+      retryable: true,
+      reason: '上游模型触发限流',
+    };
+  }
+
+  if (statusCode >= 500 || statusCode === 401 || statusCode === 403 || statusCode === 408) {
+    return {
+      kind: 'upstream_unavailable',
+      retryable: true,
+      reason: '上游模型服务异常（HTTP ' + statusCode + '）',
+    };
+  }
+
+  return {
+    kind: 'client_error',
+    retryable: false,
+    reason: '请求参数不被上游模型接受（HTTP ' + statusCode + '）',
+  };
+}
+
+function isModelHealthy(row, now) {
+  return !row?.cooldown_until || Number(row.cooldown_until) <= now;
+}
+
+function compareByOrder(a, b) {
+  const sortDiff = Number(a.sort_order || 0) - Number(b.sort_order || 0);
+  if (sortDiff !== 0) return sortDiff;
+  return Number(a.created_at || 0) - Number(b.created_at || 0);
+}
+
+function compareCooled(a, b) {
+  const cdDiff = Number(a.cooldown_until || 0) - Number(b.cooldown_until || 0);
+  if (cdDiff !== 0) return cdDiff;
+  return compareByOrder(a, b);
+}
+
+function prioritizePreferredModel(models, preferredId, comparator) {
+  const preferred = [];
+  const rest = [];
+  for (const model of models) {
+    if (preferredId && model.id === preferredId) {
+      preferred.push(model);
+    } else {
+      rest.push(model);
+    }
+  }
+  rest.sort(comparator);
+  return [...preferred, ...rest];
+}
+
+export function buildFailoverCandidateChain(
+  primaryModel,
+  allEnabledModels,
+  userRow,
+  { now = Date.now(), maxAttempts = MAX_FAILOVER_ATTEMPTS } = {},
+) {
+  if (!primaryModel) return [];
+  const limit =
+    Number.isInteger(maxAttempts) && maxAttempts > 0 ? maxAttempts : MAX_FAILOVER_ATTEMPTS;
+
+  if (primaryModel.auto_fallback === 0 || primaryModel.auto_fallback === false) {
+    return [primaryModel];
+  }
+
+  const seenIds = new Set([primaryModel.id]);
+  const healthyRaw = [];
+  const cooledRaw = [];
+
+  for (const model of Array.isArray(allEnabledModels) ? allEnabledModels : []) {
+    if (!model || !model.id || seenIds.has(model.id)) continue;
+    if (!Boolean(model.enabled)) continue;
+    if (!tierMeetsRequirement(userRow, model.min_tier, now)) continue;
+    seenIds.add(model.id);
+    if (isModelHealthy(model, now)) {
+      healthyRaw.push(model);
+    } else {
+      cooledRaw.push(model);
+    }
+  }
+
+  const preferredId = primaryModel.fallback_model_id || null;
+  const healthyFallbacks = prioritizePreferredModel(healthyRaw, preferredId, compareByOrder);
+  const cooledFallbacks = prioritizePreferredModel(cooledRaw, preferredId, compareCooled);
+
+  const ordered = isModelHealthy(primaryModel, now)
+    ? [primaryModel, ...healthyFallbacks, ...cooledFallbacks]
+    : [...healthyFallbacks, primaryModel, ...cooledFallbacks];
+
+  return ordered.slice(0, limit);
+}
+
 export function parseCreatePlatformModelInput(body) {
   if (!isPlainObject(body)) {
     throw new PayloadError('请求体必须为 JSON 对象', 400);
@@ -295,10 +449,12 @@ export function parseCreatePlatformModelInput(body) {
     description: validateText(body.description, '模型描述', { required: false, maxLength: 300, fallback: null }),
     sortOrder: validateSortOrder(body.sortOrder, 0),
     enabled: validateBoolean(body.enabled, 'enabled', true),
+    autoFallback: validateBoolean(body.autoFallback, 'autoFallback', true),
+    fallbackModelId: validateFallbackModelId(body.fallbackModelId, id),
   };
 }
 
-export function parseUpdatePlatformModelInput(body) {
+export function parseUpdatePlatformModelInput(body, currentId = null) {
   if (!isPlainObject(body)) {
     throw new PayloadError('请求体必须为 JSON 对象', 400);
   }
@@ -356,6 +512,12 @@ export function parseUpdatePlatformModelInput(body) {
   if (body.enabled !== undefined) {
     patch.enabled = validateBoolean(body.enabled, 'enabled');
   }
+  if (body.autoFallback !== undefined) {
+    patch.autoFallback = validateBoolean(body.autoFallback, 'autoFallback');
+  }
+  if (body.fallbackModelId !== undefined) {
+    patch.fallbackModelId = validateFallbackModelId(body.fallbackModelId, currentId);
+  }
 
   if (Object.keys(patch).length === 0) {
     throw new PayloadError('请提供至少一个可更新的模型字段', 400);
@@ -363,8 +525,9 @@ export function parseUpdatePlatformModelInput(body) {
   return patch;
 }
 
-export function serializeAdminPlatformModel(row) {
+export function serializeAdminPlatformModel(row, now = Date.now()) {
   if (!row) return null;
+  const cooldownUntil = row.cooldown_until ?? null;
   return {
     id: row.id,
     name: row.name,
@@ -380,6 +543,12 @@ export function serializeAdminPlatformModel(row) {
     description: row.description ?? null,
     sortOrder: Number(row.sort_order || 0),
     enabled: Boolean(row.enabled),
+    autoFallback: row.auto_fallback === undefined ? true : Boolean(row.auto_fallback),
+    fallbackModelId: row.fallback_model_id ?? null,
+    cooldownUntil,
+    inCooldown: Boolean(cooldownUntil && cooldownUntil > now),
+    lastErrorReason: row.last_error_reason ?? null,
+    lastErrorAt: row.last_error_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -409,6 +578,9 @@ export function serializePublicPlatformModel(row, userRow, now = Date.now()) {
     applyUrl: row.apply_url ?? null,
     description: row.description ?? null,
     sortOrder: Number(row.sort_order || 0),
+    autoFallback: row.auto_fallback === undefined ? true : Boolean(row.auto_fallback),
+    fallbackModelId: row.fallback_model_id ?? null,
+    inCooldown: Boolean(row.cooldown_until && row.cooldown_until > now),
     accessible,
     accessReason,
   };
@@ -427,14 +599,17 @@ export function buildUpstreamChatPayload(rawModelRow, clientBody) {
 export function mergeDomesticPreset(def, overrideRow) {
   const customApplyUrl = overrideRow?.apply_url ?? null;
   const applyUrl = customApplyUrl || def.defaultApplyUrl || null;
+  const rawOverrideLabel = typeof overrideRow?.apply_label === 'string' ? overrideRow.apply_label.trim() : '';
+  const applyLabel = rawOverrideLabel || def.defaultApplyLabel || '申请 API Key';
   return {
     providerId: def.providerId,
     name: def.name,
     category: def.category,
+    featured: Boolean(def.featured),
     applyUrl,
     customApplyUrl,
     defaultApplyUrl: def.defaultApplyUrl,
-    applyLabel: overrideRow?.apply_label ?? null,
+    applyLabel,
     defaultModelId: overrideRow?.default_model_id ?? null,
     defaultParams: overrideRow ? safeParseParamsJson(overrideRow.default_params_json) : {},
     enabled: overrideRow ? Boolean(overrideRow.enabled) : true,

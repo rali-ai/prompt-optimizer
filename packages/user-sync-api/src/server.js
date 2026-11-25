@@ -29,7 +29,9 @@ import {
   sendTestEmail,
 } from './mailer.js';
 import {
+  isAnnouncementCurrentlyActive,
   parseCreateAnnouncementInput,
+  parseCreateCommentInput,
   parseUpdateAnnouncementInput,
 } from './announcements.js';
 import {
@@ -41,8 +43,12 @@ import {
   tierMeetsRequirement,
 } from './membership.js';
 import {
+  DEFAULT_QUOTA_COOLDOWN_MS,
+  DEFAULT_TRANSIENT_COOLDOWN_MS,
   DOMESTIC_PRESET_MAP,
+  buildFailoverCandidateChain,
   buildUpstreamChatPayload,
+  classifyUpstreamFailure,
   parseCreatePlatformModelInput,
   parseUpdateModelPresetInput,
   parseUpdatePlatformModelInput,
@@ -60,6 +66,7 @@ const PUBLIC_ANNOUNCEMENT_ALLOWED_ORIGINS = new Set([
   'https://goprmpt.com',
   'https://www.goprmpt.com',
 ]);
+const PUBLIC_ANNOUNCEMENT_COMMENTS_PATH_REGEX = /^\/user-api\/announcements\/[^/]+\/comments$/;
 
 function getAllowedExtensionOrigin(req) {
   const origin = req.headers.origin;
@@ -82,14 +89,17 @@ function applyExtensionCors(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Client-Type');
   res.setHeader(
     'Access-Control-Expose-Headers',
-    'X-GoPrmpt-Credits-Remaining, X-GoPrmpt-Credits-Cost',
+    'X-GoPrmpt-Credits-Remaining, X-GoPrmpt-Credits-Cost, X-GoPrmpt-Requested-Model, X-GoPrmpt-Actual-Model, X-GoPrmpt-Failover',
   );
   res.setHeader('Access-Control-Max-Age', '86400');
   return true;
 }
 
 function applyPublicAnnouncementCors(req, res, pathname, method) {
-  if (pathname !== '/user-api/announcements/active') return false;
+  const isPublicAnnouncementPath =
+    pathname === '/user-api/announcements/active' ||
+    PUBLIC_ANNOUNCEMENT_COMMENTS_PATH_REGEX.test(pathname);
+  if (!isPublicAnnouncementPath) return false;
   if (method !== 'GET' && method !== 'OPTIONS') return false;
   const origin = req.headers.origin;
   if (typeof origin !== 'string' || !PUBLIC_ANNOUNCEMENT_ALLOWED_ORIGINS.has(origin)) {
@@ -261,12 +271,12 @@ function scrubSecretText(text, secret) {
   return str.split(secret).join('[REDACTED]');
 }
 
-async function extractUpstreamErrorDetail(upstreamRes, apiKey) {
+async function readUpstreamErrorInfo(upstreamRes, apiKey) {
   let rawText = '';
   try {
     rawText = await upstreamRes.text();
   } catch {
-    return `HTTP ${upstreamRes.status}`;
+    return { rawText: '', detail: `HTTP ${upstreamRes.status}` };
   }
   let detail = '';
   if (rawText) {
@@ -284,7 +294,12 @@ async function extractUpstreamErrorDetail(upstreamRes, apiKey) {
     }
   }
   const safe = scrubSecretText(detail || `HTTP ${upstreamRes.status}`, apiKey);
-  return safe.slice(0, 300);
+  return { rawText, detail: safe.slice(0, 300) };
+}
+
+async function extractUpstreamErrorDetail(upstreamRes, apiKey) {
+  const { detail } = await readUpstreamErrorInfo(upstreamRes, apiKey);
+  return detail;
 }
 
 function extractChatReplyPreview(json) {
@@ -305,6 +320,14 @@ function extractChatReplyPreview(json) {
 
 export function createApp(config, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
+  const quotaCooldownMs =
+    Number.isFinite(config.quotaCooldownMs) && config.quotaCooldownMs > 0
+      ? config.quotaCooldownMs
+      : DEFAULT_QUOTA_COOLDOWN_MS;
+  const transientCooldownMs =
+    Number.isFinite(config.transientCooldownMs) && config.transientCooldownMs > 0
+      ? config.transientCooldownMs
+      : DEFAULT_TRANSIENT_COOLDOWN_MS;
   const db = openDatabase(config.dbPath);
   if (config.adminUsername && config.adminPassword) {
     db.bootstrapAdmin({
@@ -435,6 +458,80 @@ export function createApp(config, options = {}) {
       return sendJson(res, 200, { announcements: db.listActiveAnnouncements() });
     }
 
+    const announcementCommentsMatch = pathname.match(
+      /^\/user-api\/announcements\/([^/]+)\/comments$/,
+    );
+    if (method === 'GET' && announcementCommentsMatch) {
+      const id = decodePathParam(announcementCommentsMatch[1]);
+      const announcement = db.findAnnouncementById(id);
+      const userRow = authenticate(req);
+      const isAdminCaller = Boolean(userRow && !userRow.disabled && userRow.role === 'admin');
+      if (!announcement || (!isAdminCaller && !isAnnouncementCurrentlyActive(announcement))) {
+        return sendJson(res, 404, { error: '公告不存在或已下线' });
+      }
+      const rawLimit = url.searchParams.get('limit');
+      let limit = 50;
+      if (rawLimit !== null && rawLimit.trim() !== '') {
+        const parsed = Number.parseInt(rawLimit, 10);
+        if (Number.isFinite(parsed)) {
+          limit = Math.min(100, Math.max(1, parsed));
+        }
+      }
+      return sendJson(res, 200, {
+        comments: db.listAnnouncementComments(id, limit),
+        commentCount: db.countAnnouncementComments(id),
+      });
+    }
+
+    if (method === 'POST' && announcementCommentsMatch) {
+      if (!checkRateLimit(req, res)) return;
+      const userRow = authenticate(req);
+      if (!userRow) {
+        return sendJson(res, 401, { error: '请先注册并登录会员账号后再发表评论' });
+      }
+      if (userRow.disabled) {
+        return sendJson(res, 403, { error: '账号已被停用' });
+      }
+      const id = decodePathParam(announcementCommentsMatch[1]);
+      const announcement = db.findAnnouncementById(id);
+      if (!announcement || !isAnnouncementCurrentlyActive(announcement)) {
+        return sendJson(res, 404, { error: '公告不存在或已下线' });
+      }
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      const { content } = parseCreateCommentInput(body);
+      const comment = db.createAnnouncementComment({
+        announcementId: id,
+        userId: userRow.id,
+        content,
+      });
+      return sendJson(res, 201, {
+        comment,
+        commentCount: db.countAnnouncementComments(id),
+      });
+    }
+
+    const announcementCommentItemMatch = pathname.match(
+      /^\/user-api\/announcements\/([^/]+)\/comments\/([^/]+)$/,
+    );
+    if (method === 'DELETE' && announcementCommentItemMatch) {
+      const userRow = requireActiveUser(req, res);
+      if (!userRow) return;
+      const id = decodePathParam(announcementCommentItemMatch[1]);
+      const commentId = decodePathParam(announcementCommentItemMatch[2]);
+      const comment = db.findAnnouncementCommentById(commentId);
+      if (!comment || comment.announcement_id !== id) {
+        return sendJson(res, 404, { error: '评论不存在' });
+      }
+      if (userRow.role !== 'admin' && comment.user_id !== userRow.id) {
+        return sendJson(res, 403, { error: '仅可删除自己的评论或需管理员权限' });
+      }
+      db.deleteAnnouncementComment(commentId);
+      return sendJson(res, 200, {
+        ok: true,
+        commentCount: db.countAnnouncementComments(id),
+      });
+    }
+
     if (method === 'GET' && pathname === '/user-api/config') {
       const mail = resolveMailConfig();
       return sendJson(res, 200, {
@@ -452,7 +549,7 @@ export function createApp(config, options = {}) {
     if (method === 'GET' && pathname === '/user-api/platform-models') {
       const userRow = authenticate(req);
       const now = Date.now();
-      const rows = db.listPlatformModelsRaw({ onlyEnabled: true });
+      const rows = db.listPlatformModelsRaw({ enabledOnly: true });
       return sendJson(res, 200, {
         models: rows.map((row) => serializePublicPlatformModel(row, userRow, now)),
       });
@@ -490,7 +587,7 @@ export function createApp(config, options = {}) {
       if (!userRow) return;
       const now = Date.now();
       const accessible = db
-        .listPlatformModelsRaw({ onlyEnabled: true })
+        .listPlatformModelsRaw({ enabledOnly: true })
         .filter((row) => tierMeetsRequirement(userRow, row.min_tier, now));
       return sendJson(res, 200, {
         object: 'list',
@@ -511,23 +608,25 @@ export function createApp(config, options = {}) {
       if (!modelId) {
         return sendJson(res, 400, { error: '请指定平台模型 ID' });
       }
-      const modelRow = db.findPlatformModelRawById(modelId);
-      if (!modelRow || !modelRow.enabled) {
+      const primaryModel = db.findPlatformModelRawById(modelId);
+      if (!primaryModel || !primaryModel.enabled) {
         return sendJson(res, 404, { error: '平台模型不存在或已停用' });
       }
-      if (!tierMeetsRequirement(userRow, modelRow.min_tier)) {
-        const reqMeta = getTierMeta(modelRow.min_tier);
+      const now = Date.now();
+      if (!tierMeetsRequirement(userRow, primaryModel.min_tier, now)) {
+        const reqMeta = getTierMeta(primaryModel.min_tier);
         return sendJson(res, 403, {
           error: `该模型需要「${reqMeta.label}」及以上会员才能使用`,
-          requiredTier: modelRow.min_tier,
-          effectiveTier: getEffectiveTier(userRow),
+          requiredTier: primaryModel.min_tier,
+          effectiveTier: getEffectiveTier(userRow, now),
         });
       }
 
-      const creditCost = Number(modelRow.credit_cost || 0);
+      const creditCost = Number(primaryModel.credit_cost || 0);
       const debit = db.debitUserCreditsAtomic(userRow.id, creditCost, {
-        modelId: modelRow.id,
-        note: `调用 ${modelRow.name}`,
+        modelId: primaryModel.id,
+        note: `调用 ${primaryModel.name}`,
+        now,
       });
       if (!debit.ok) {
         if (debit.reason === 'disabled') {
@@ -546,106 +645,183 @@ export function createApp(config, options = {}) {
         refunded = true;
         try {
           db.refundUserCredits(userRow.id, debit.cost, {
-            modelId: modelRow.id,
-            note: reasonNote || `调用 ${modelRow.name} 失败自动退回`,
+            modelId: primaryModel.id,
+            note: reasonNote || `调用 ${primaryModel.name} 失败自动退回`,
           });
         } catch (refundErr) {
           console.error('[user-sync-api] credit refund failed:', refundErr);
         }
       };
 
-      const upstreamUrl = `${modelRow.base_url.replace(/\/+$/, '')}/chat/completions`;
-      const upstreamPayload = buildUpstreamChatPayload(modelRow, body);
-      let upstreamRes;
-      try {
-        upstreamRes = await fetchImpl(upstreamUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${modelRow.api_key}`,
-          },
-          body: JSON.stringify(upstreamPayload),
-        });
-      } catch (err) {
-        refundIfNeeded(`调用 ${modelRow.name} 上游连接失败自动退回`);
-        const msg = scrubSecretText(
-          err instanceof Error ? err.message : String(err),
-          modelRow.api_key,
-        );
-        return sendJson(res, 502, { error: `上游模型服务连接失败：${msg}` });
-      }
+      const candidates = buildFailoverCandidateChain(
+        primaryModel,
+        db.listPlatformModelsRaw({ enabledOnly: true }),
+        userRow,
+        { now },
+      );
 
-      if (!upstreamRes.ok) {
-        refundIfNeeded(`调用 ${modelRow.name} 上游返回 ${upstreamRes.status} 自动退回`);
-        const detail = await extractUpstreamErrorDetail(upstreamRes, modelRow.api_key);
-        const status =
-          upstreamRes.status >= 400 && upstreamRes.status <= 599 ? upstreamRes.status : 502;
-        return sendJson(res, status, { error: `上游模型调用失败：${detail}` });
-      }
+      const attemptedModels = [];
+      let lastErrorStatus = 502;
+      let lastErrorMessage = '上游模型服务暂时不可用';
+      let lastRefundNote = `调用 ${primaryModel.name} 失败自动退回`;
+      const allowFailover = primaryModel.auto_fallback !== 0 && primaryModel.auto_fallback !== false;
 
-      const creditHeaders = {
-        'X-GoPrmpt-Credits-Remaining': String(debit.balanceAfter),
-        'X-GoPrmpt-Credits-Cost': String(debit.cost),
-      };
-      const upstreamContentType = upstreamRes.headers.get('content-type') || '';
-      const isStreaming =
-        body.stream === true || upstreamContentType.toLowerCase().includes('text/event-stream');
+      for (const candidate of candidates) {
+        attemptedModels.push(candidate.id);
+        const upstreamUrl = `${candidate.base_url.replace(/\/+$/, '')}/chat/completions`;
+        const upstreamPayload = buildUpstreamChatPayload(candidate, body);
 
-      if (isStreaming) {
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-cache',
-          'X-Accel-Buffering': 'no',
-          ...creditHeaders,
-        });
-        if (upstreamRes.body && typeof upstreamRes.body.getReader === 'function') {
-          const reader = upstreamRes.body.getReader();
-          const onClose = () => {
-            reader.cancel().catch(() => {});
-          };
-          req.on('close', onClose);
+        let upstreamRes;
+        try {
+          upstreamRes = await fetchImpl(upstreamUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${candidate.api_key}`,
+            },
+            body: JSON.stringify(upstreamPayload),
+          });
+        } catch (err) {
+          const attemptNow = Date.now();
+          db.recordPlatformModelFailure(candidate.id, {
+            cooldownUntil: attemptNow + transientCooldownMs,
+            reason: '上游连接异常',
+            now: attemptNow,
+          });
+          const msg = scrubSecretText(
+            err instanceof Error ? err.message : String(err),
+            candidate.api_key,
+          );
+          lastErrorStatus = 502;
+          lastErrorMessage = `上游模型服务连接失败：${msg}`;
+          lastRefundNote = `调用 ${primaryModel.name} 上游连接失败自动退回`;
+          if (!allowFailover) break;
+          continue;
+        }
+
+        if (!upstreamRes.ok) {
+          const { rawText, detail } = await readUpstreamErrorInfo(upstreamRes, candidate.api_key);
+          const classification = classifyUpstreamFailure(upstreamRes.status, rawText || detail);
+          lastErrorStatus =
+            upstreamRes.status >= 400 && upstreamRes.status <= 599 ? upstreamRes.status : 502;
+          lastErrorMessage = `上游模型调用失败：${detail}`;
+          lastRefundNote = `调用 ${primaryModel.name} 上游返回 ${upstreamRes.status} 自动退回`;
+
+          if (classification.retryable) {
+            const attemptNow = Date.now();
+            const cooldownMs =
+              classification.kind === 'quota_exhausted' ? quotaCooldownMs : transientCooldownMs;
+            db.recordPlatformModelFailure(candidate.id, {
+              cooldownUntil: attemptNow + cooldownMs,
+              reason: classification.reason,
+              now: attemptNow,
+            });
+            if (!allowFailover) break;
+            continue;
+          }
+          break;
+        }
+
+        const upstreamContentType = upstreamRes.headers.get('content-type') || '';
+        const isStreaming =
+          body.stream === true || upstreamContentType.toLowerCase().includes('text/event-stream');
+
+        let responseText = null;
+        if (!isStreaming) {
           try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (value && value.length > 0 && !res.writableEnded) {
-                res.write(Buffer.from(value));
+            responseText = await upstreamRes.text();
+          } catch (readErr) {
+            const attemptNow = Date.now();
+            db.recordPlatformModelFailure(candidate.id, {
+              cooldownUntil: attemptNow + transientCooldownMs,
+              reason: '上游响应读取异常',
+              now: attemptNow,
+            });
+            const msg = scrubSecretText(
+              readErr instanceof Error ? readErr.message : String(readErr),
+              candidate.api_key,
+            );
+            lastErrorStatus = 502;
+            lastErrorMessage = `上游模型响应读取失败：${msg}`;
+            lastRefundNote = `调用 ${primaryModel.name} 读取响应失败自动退回`;
+            if (!allowFailover) break;
+            continue;
+          }
+        }
+
+        if (candidate.cooldown_until || candidate.last_error_reason) {
+          db.clearPlatformModelCooldown(candidate.id);
+        }
+
+        const failedOver = candidate.id !== primaryModel.id;
+        if (failedOver && debit.ledgerId) {
+          db.updateCreditLedgerNote(
+            debit.ledgerId,
+            `调用 ${primaryModel.name}（自动切替至 ${candidate.name}）`,
+          );
+        }
+
+        const responseHeaders = {
+          'X-GoPrmpt-Credits-Remaining': String(debit.balanceAfter),
+          'X-GoPrmpt-Credits-Cost': String(debit.cost),
+          'X-GoPrmpt-Requested-Model': primaryModel.id,
+          'X-GoPrmpt-Actual-Model': candidate.id,
+        };
+        if (failedOver) {
+          responseHeaders['X-GoPrmpt-Failover'] = '1';
+        }
+
+        if (isStreaming) {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            ...responseHeaders,
+          });
+          if (upstreamRes.body && typeof upstreamRes.body.getReader === 'function') {
+            const reader = upstreamRes.body.getReader();
+            const onClose = () => {
+              reader.cancel().catch(() => {});
+            };
+            req.on('close', onClose);
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (value && value.length > 0 && !res.writableEnded) {
+                  res.write(Buffer.from(value));
+                }
+              }
+            } catch (streamErr) {
+              console.error('[user-sync-api] stream proxy interrupted:', streamErr?.message || streamErr);
+            } finally {
+              req.off('close', onClose);
+              if (!res.writableEnded) {
+                res.end();
               }
             }
-          } catch (streamErr) {
-            console.error('[user-sync-api] stream proxy interrupted:', streamErr?.message || streamErr);
-          } finally {
-            req.off('close', onClose);
-            if (!res.writableEnded) {
-              res.end();
-            }
+            return;
           }
+          const text = await upstreamRes.text();
+          res.end(text);
           return;
         }
-        const text = await upstreamRes.text();
-        res.end(text);
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Content-Length': Buffer.byteLength(responseText, 'utf8'),
+          ...responseHeaders,
+        });
+        res.end(responseText);
         return;
       }
 
-      let text;
-      try {
-        text = await upstreamRes.text();
-      } catch (readErr) {
-        refundIfNeeded(`调用 ${modelRow.name} 读取响应失败自动退回`);
-        const msg = scrubSecretText(
-          readErr instanceof Error ? readErr.message : String(readErr),
-          modelRow.api_key,
-        );
-        return sendJson(res, 502, { error: `上游模型响应读取失败：${msg}` });
-      }
-      res.writeHead(200, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'no-store',
-        'Content-Length': Buffer.byteLength(text, 'utf8'),
-        ...creditHeaders,
+      refundIfNeeded(lastRefundNote);
+      return sendJson(res, lastErrorStatus, {
+        error: lastErrorMessage,
+        attemptedModels,
       });
-      res.end(text);
-      return;
     }
 
     if (method === 'POST' && pathname === '/user-api/register') {
@@ -1140,7 +1316,8 @@ export function createApp(config, options = {}) {
     if (method === 'GET' && pathname === '/user-api/admin/platform-models') {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
-      const models = db.listPlatformModelsRaw().map(serializeAdminPlatformModel);
+      const now = Date.now();
+      const models = db.listPlatformModelsRaw().map((row) => serializeAdminPlatformModel(row, now));
       return sendJson(res, 200, { models });
     }
 
@@ -1151,6 +1328,20 @@ export function createApp(config, options = {}) {
       const input = parseCreatePlatformModelInput(body);
       const model = db.createPlatformModel(input);
       return sendJson(res, 201, { model });
+    }
+
+    const adminPlatformModelClearCooldownMatch = pathname.match(
+      /^\/user-api\/admin\/platform-models\/([^/]+)\/clear-cooldown$/,
+    );
+    if (method === 'POST' && adminPlatformModelClearCooldownMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const id = decodePathParam(adminPlatformModelClearCooldownMatch[1]);
+      const updated = db.clearPlatformModelCooldown(id);
+      if (!updated) {
+        return sendJson(res, 404, { error: '平台模型不存在' });
+      }
+      return sendJson(res, 200, { model: serializeAdminPlatformModel(updated) });
     }
 
     const adminPlatformModelTestMatch = pathname.match(
@@ -1200,6 +1391,7 @@ export function createApp(config, options = {}) {
         });
       }
 
+      const clearedRow = db.clearPlatformModelCooldown(id);
       const latencyMs = Math.max(0, Date.now() - startedAt);
       const json = await upstreamRes.json().catch(() => null);
       const replyPreview = extractChatReplyPreview(json);
@@ -1208,6 +1400,7 @@ export function createApp(config, options = {}) {
         latencyMs,
         replyPreview,
         upstreamModel: row.upstream_model,
+        model: clearedRow ? serializeAdminPlatformModel(clearedRow) : undefined,
       });
     }
 
@@ -1217,7 +1410,7 @@ export function createApp(config, options = {}) {
       if (!adminRow) return;
       const id = decodePathParam(adminPlatformModelMatch[1]);
       const body = await readJsonBody(req, MAX_ADMIN_BODY_BYTES);
-      const patch = parseUpdatePlatformModelInput(body);
+      const patch = parseUpdatePlatformModelInput(body, id);
       const updated = db.updatePlatformModel(id, patch);
       if (!updated) {
         return sendJson(res, 404, { error: '平台模型不存在' });

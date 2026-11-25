@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 
 import {
   ANNOUNCEMENTS_API_URL,
+  ANNOUNCEMENT_COMMENTS_API_BASE,
   pickVisibleAnnouncement,
-  renderAnnouncementBannerHtml
+  renderAnnouncementBannerHtml,
+  renderAnnouncementCommentsHtml
 } from './shell.js'
 
 const NOW = 1_750_000_000_000
@@ -189,4 +191,96 @@ test('renderAnnouncementBannerHtml strictly escapes HTML and strips unsafe link 
   )
   assert.ok(httpHtml.includes('href="http://example.com/a?x=1&amp;y=2"'))
   assert.ok(httpHtml.includes('&lt;Go&gt;'))
+})
+
+test('ANNOUNCEMENT_COMMENTS_API_BASE and renderAnnouncementBannerHtml include comment toggle and hidden panel', () => {
+  assert.equal(ANNOUNCEMENT_COMMENTS_API_BASE, 'https://goprmpt.net/user-api/announcements')
+
+  const zhWithCount = renderAnnouncementBannerHtml(
+    {
+      id: 'ann-42',
+      title: '新功能上线',
+      content: '支持评论互动',
+      type: 'notice',
+      commentCount: 7,
+      updatedAt: 100
+    },
+    'zh-CN'
+  )
+  assert.match(zhWithCount, /class="site-announcement-bar__row"/)
+  assert.match(
+    zhWithCount,
+    /<button class="site-announcement-bar__comments-btn" type="button" data-toggle-announcement-comments="ann-42" aria-expanded="false">评论 \(7\)<\/button>/
+  )
+  assert.match(
+    zhWithCount,
+    /<div class="site-announcement-comments" data-announcement-comments="ann-42" hidden><\/div>/
+  )
+
+  const zhZero = renderAnnouncementBannerHtml(
+    { id: 'ann-0', title: '无评论', content: '', commentCount: 0, updatedAt: 1 },
+    'zh-CN'
+  )
+  assert.match(zhZero, />评论<\/button>/)
+
+  const enWithCount = renderAnnouncementBannerHtml(
+    { id: 'ann-en', title: 'Update', content: 'Comments ready', commentCount: 3, updatedAt: 1 },
+    'en'
+  )
+  assert.match(enWithCount, />Comments \(3\)<\/button>/)
+})
+
+test('renderAnnouncementCommentsHtml renders bilingual states, badges, CTA link, and strictly escapes XSS', () => {
+  const emptyZh = renderAnnouncementCommentsHtml([], 'zh-CN')
+  assert.match(emptyZh, /评论区 \(0\)/)
+  assert.match(emptyZh, /暂无评论/)
+  assert.match(
+    emptyZh,
+    /<a class="site-announcement-comments__cta" href="https:\/\/goprmpt\.net" target="_blank" rel="noopener noreferrer">注册 \/ 登录后参与评论 →<\/a>/
+  )
+
+  const emptyEn = renderAnnouncementCommentsHtml(null, 'en')
+  assert.match(emptyEn, /Comments \(0\)/)
+  assert.match(emptyEn, /No comments yet/)
+  assert.match(emptyEn, /Sign up \/ Sign in to comment →/)
+
+  const xssComments = [
+    {
+      id: 'c1',
+      announcementId: 'ann-1',
+      userId: 'u1',
+      username: '<img src=x onerror=alert(1)>',
+      role: 'admin',
+      tier: 'internal',
+      effectiveTier: 'internal',
+      content: '<script>alert("xss")</script>\n安全换行 & 引号',
+      createdAt: 1750000000000
+    },
+    {
+      id: 'c2',
+      announcementId: 'ann-1',
+      userId: 'u2',
+      username: 'alice',
+      role: 'user',
+      tier: 'pro',
+      effectiveTier: 'pro',
+      content: '非常好用！',
+      createdAt: 1750000060000
+    },
+    { id: 'bad', username: '', content: 'skip' }
+  ]
+
+  const zhHtml = renderAnnouncementCommentsHtml(xssComments, 'zh-CN')
+  assert.match(zhHtml, /评论区 \(2\)/)
+  assert.equal(zhHtml.includes('<script>'), false)
+  assert.equal(zhHtml.includes('<img'), false)
+  assert.ok(zhHtml.includes('&lt;img src=x onerror=alert(1)&gt;'))
+  assert.ok(zhHtml.includes('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;\n安全换行 &amp; 引号'))
+  assert.match(zhHtml, /site-announcement-comments__badge--admin">管理员<\/span>/)
+  assert.match(zhHtml, /site-announcement-comments__badge--pro">专业会员<\/span>/)
+
+  const enHtml = renderAnnouncementCommentsHtml(xssComments, 'en')
+  assert.match(enHtml, /Comments \(2\)/)
+  assert.match(enHtml, /site-announcement-comments__badge--admin">Admin<\/span>/)
+  assert.match(enHtml, /site-announcement-comments__badge--pro">Pro<\/span>/)
 })

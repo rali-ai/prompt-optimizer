@@ -8,6 +8,7 @@ const MAX_STORED_DISMISSED_KEYS = 100
 
 export const OPTIMIZER_URL = 'https://goprmpt.net'
 export const ANNOUNCEMENTS_API_URL = 'https://goprmpt.net/user-api/announcements/active'
+export const ANNOUNCEMENT_COMMENTS_API_BASE = 'https://goprmpt.net/user-api/announcements'
 
 export const chromeCopy = {
   'zh-CN': {
@@ -232,6 +233,19 @@ const ANNOUNCEMENT_COPY = {
     regionAria: '站点公告',
     dismissAria: '关闭公告',
     defaultLinkText: '查看详情',
+    commentsBtn: (count) => (count > 0 ? `评论 (${count})` : '评论'),
+    commentsHeading: (count) => `评论区 (${count})`,
+    commentsEmpty: '暂无评论，前往工作台发表第一条留言吧',
+    commentsLoading: '正在加载评论...',
+    commentsError: '评论加载失败，请稍后重试或前往工作台查看',
+    commentsCta: '注册 / 登录后参与评论 →',
+    adminBadge: '管理员',
+    tiers: {
+      free: '非会员',
+      standard: '标准会员',
+      pro: '专业会员',
+      internal: '内部会员'
+    },
     types: {
       notice: '通知',
       activity: '活动',
@@ -242,12 +256,103 @@ const ANNOUNCEMENT_COPY = {
     regionAria: 'Site announcement',
     dismissAria: 'Dismiss announcement',
     defaultLinkText: 'Learn more',
+    commentsBtn: (count) => (count > 0 ? `Comments (${count})` : 'Comments'),
+    commentsHeading: (count) => `Comments (${count})`,
+    commentsEmpty: 'No comments yet. Open the workbench to leave the first comment.',
+    commentsLoading: 'Loading comments...',
+    commentsError: 'Failed to load comments. Please retry or open the workbench.',
+    commentsCta: 'Sign up / Sign in to comment →',
+    adminBadge: 'Admin',
+    tiers: {
+      free: 'Free',
+      standard: 'Standard',
+      pro: 'Pro',
+      internal: 'Internal'
+    },
     types: {
       notice: 'Notice',
       activity: 'Event',
       maintenance: 'Maintenance'
     }
   }
+}
+
+function normalizeCommentCount(raw) {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
+}
+
+function formatCommentTime(ts) {
+  if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) return ''
+  const date = new Date(ts)
+  if (Number.isNaN(date.getTime())) return ''
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const min = String(date.getMinutes()).padStart(2, '0')
+  return `${mm}-${dd} ${hh}:${min}`
+}
+
+function resolveCommentBadge(comment, copy) {
+  if (comment?.role === 'admin') {
+    return { label: copy.adminBadge, modifier: 'admin' }
+  }
+  const rawTier = typeof comment?.effectiveTier === 'string' && comment.effectiveTier
+    ? comment.effectiveTier
+    : comment?.tier
+  const tierKey =
+    rawTier === 'standard' || rawTier === 'pro' || rawTier === 'internal' ? rawTier : 'free'
+  return {
+    label: copy.tiers[tierKey] ?? copy.tiers.free,
+    modifier: tierKey
+  }
+}
+
+export function renderAnnouncementCommentsHtml(comments, locale = 'zh-CN') {
+  const copy = ANNOUNCEMENT_COPY[locale] ?? ANNOUNCEMENT_COPY['zh-CN']
+  const list = Array.isArray(comments)
+    ? comments.filter(
+        (entry) =>
+          entry &&
+          typeof entry === 'object' &&
+          typeof entry.username === 'string' &&
+          entry.username.trim() &&
+          typeof entry.content === 'string' &&
+          entry.content.trim()
+      )
+    : []
+
+  const bodyHtml =
+    list.length === 0
+      ? `<p class="site-announcement-comments__empty">${escapeHtml(copy.commentsEmpty)}</p>`
+      : `<ul class="site-announcement-comments__list">${list
+          .map((entry) => {
+            const username = entry.username.trim()
+            const badge = resolveCommentBadge(entry, copy)
+            const timeStr = formatCommentTime(entry.createdAt)
+            return `
+              <li class="site-announcement-comments__item">
+                <div class="site-announcement-comments__meta">
+                  <span class="site-announcement-comments__author">${escapeHtml(username)}</span>
+                  <span class="site-announcement-comments__badge site-announcement-comments__badge--${escapeHtml(badge.modifier)}">${escapeHtml(badge.label)}</span>
+                  ${timeStr ? `<span class="site-announcement-comments__time">${escapeHtml(timeStr)}</span>` : ''}
+                </div>
+                <p class="site-announcement-comments__body">${escapeHtml(entry.content)}</p>
+              </li>
+            `.trim()
+          })
+          .join('')}</ul>`
+
+  return `
+    <div class="site-announcement-comments__inner">
+      <div class="site-announcement-comments__head">
+        <span class="site-announcement-comments__title">${escapeHtml(copy.commentsHeading(list.length))}</span>
+      </div>
+      ${bodyHtml}
+      <div class="site-announcement-comments__footer">
+        <a class="site-announcement-comments__cta" href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${escapeHtml(copy.commentsCta)}</a>
+      </div>
+    </div>
+  `.trim()
 }
 
 function normalizeAnnouncementType(type) {
@@ -304,28 +409,34 @@ export function renderAnnouncementBannerHtml(item, locale = 'zh-CN') {
   const linkLabel =
     typeof item.linkText === 'string' && item.linkText.trim() ? item.linkText.trim() : copy.defaultLinkText
   const dismissKey = announcementDismissKey({ id, updatedAt: item.updatedAt })
+  const commentCount = normalizeCommentCount(item.commentCount)
 
   return `
     <div class="site-announcement-bar site-announcement-bar--${type}" role="region" aria-label="${escapeHtml(copy.regionAria)}" data-announcement-key="${escapeHtml(dismissKey)}">
-      <div class="site-announcement-bar__main">
-        <span class="site-announcement-bar__pill">${escapeHtml(typeLabel)}</span>
-        <strong class="site-announcement-bar__title">${escapeHtml(title)}</strong>
-        ${content ? `<span class="site-announcement-bar__content">${escapeHtml(content)}</span>` : ''}
+      <div class="site-announcement-bar__row">
+        <div class="site-announcement-bar__main">
+          <span class="site-announcement-bar__pill">${escapeHtml(typeLabel)}</span>
+          <strong class="site-announcement-bar__title">${escapeHtml(title)}</strong>
+          ${content ? `<span class="site-announcement-bar__content">${escapeHtml(content)}</span>` : ''}
+        </div>
+        <div class="site-announcement-bar__actions">
+          ${
+            safeHref
+              ? `<a class="site-announcement-bar__link" href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(linkLabel)}<span aria-hidden="true"> →</span></a>`
+              : ''
+          }
+          <button class="site-announcement-bar__comments-btn" type="button" data-toggle-announcement-comments="${escapeHtml(id)}" aria-expanded="false">${escapeHtml(copy.commentsBtn(commentCount))}</button>
+          <button class="site-announcement-bar__close" type="button" data-dismiss-announcement="${escapeHtml(dismissKey)}" aria-label="${escapeHtml(copy.dismissAria)}" title="${escapeHtml(copy.dismissAria)}">×</button>
+        </div>
       </div>
-      <div class="site-announcement-bar__actions">
-        ${
-          safeHref
-            ? `<a class="site-announcement-bar__link" href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(linkLabel)}<span aria-hidden="true"> →</span></a>`
-            : ''
-        }
-        <button class="site-announcement-bar__close" type="button" data-dismiss-announcement="${escapeHtml(dismissKey)}" aria-label="${escapeHtml(copy.dismissAria)}" title="${escapeHtml(copy.dismissAria)}">×</button>
-      </div>
+      <div class="site-announcement-comments" data-announcement-comments="${escapeHtml(id)}" hidden></div>
     </div>
   `.trim()
 }
 
 let cachedAnnouncements = []
 let announcementsFetchStarted = false
+const cachedAnnouncementComments = new Map()
 
 function readDismissedAnnouncementKeys() {
   if (typeof window === 'undefined') return new Set()
@@ -389,11 +500,91 @@ async function loadSiteAnnouncements() {
   }
 }
 
+async function loadAnnouncementCommentsIntoPanel(id, panel, toggleBtn) {
+  const locale = document.documentElement.dataset.locale || 'zh-CN'
+  const copy = ANNOUNCEMENT_COPY[locale] ?? ANNOUNCEMENT_COPY['zh-CN']
+
+  if (cachedAnnouncementComments.has(id)) {
+    const cached = cachedAnnouncementComments.get(id)
+    panel.innerHTML = renderAnnouncementCommentsHtml(cached.comments, locale)
+    panel.dataset.loaded = 'true'
+    if (toggleBtn) {
+      toggleBtn.textContent = copy.commentsBtn(cached.commentCount)
+    }
+    return
+  }
+
+  if (panel.dataset.loading === 'true' || typeof fetch !== 'function') return
+  panel.dataset.loading = 'true'
+  panel.innerHTML = `<div class="site-announcement-comments__inner"><p class="site-announcement-comments__empty">${escapeHtml(copy.commentsLoading)}</p></div>`
+
+  try {
+    const options = { headers: { Accept: 'application/json' } }
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      options.signal = AbortSignal.timeout(4000)
+    }
+    const response = await fetch(
+      `${ANNOUNCEMENT_COMMENTS_API_BASE}/${encodeURIComponent(id)}/comments`,
+      options
+    )
+    if (!response?.ok) {
+      throw new Error(`HTTP ${response?.status || 0}`)
+    }
+    const data = await response.json().catch(() => null)
+    const comments = Array.isArray(data?.comments) ? data.comments : []
+    const commentCount =
+      typeof data?.commentCount === 'number' && Number.isFinite(data.commentCount)
+        ? Math.max(0, Math.floor(data.commentCount))
+        : comments.length
+    cachedAnnouncementComments.set(id, { comments, commentCount })
+    cachedAnnouncements = cachedAnnouncements.map((item) =>
+      item && item.id === id ? { ...item, commentCount } : item
+    )
+    const activeLocale = document.documentElement.dataset.locale || 'zh-CN'
+    const activeCopy = ANNOUNCEMENT_COPY[activeLocale] ?? ANNOUNCEMENT_COPY['zh-CN']
+    panel.innerHTML = renderAnnouncementCommentsHtml(comments, activeLocale)
+    panel.dataset.loaded = 'true'
+    if (toggleBtn) {
+      toggleBtn.textContent = activeCopy.commentsBtn(commentCount)
+    }
+  } catch {
+    const activeLocale = document.documentElement.dataset.locale || 'zh-CN'
+    const activeCopy = ANNOUNCEMENT_COPY[activeLocale] ?? ANNOUNCEMENT_COPY['zh-CN']
+    panel.dataset.loaded = 'false'
+    panel.innerHTML = `
+      <div class="site-announcement-comments__inner">
+        <p class="site-announcement-comments__error">${escapeHtml(activeCopy.commentsError)}</p>
+        <div class="site-announcement-comments__footer">
+          <a class="site-announcement-comments__cta" href="${OPTIMIZER_URL}" target="_blank" rel="noopener noreferrer">${escapeHtml(activeCopy.commentsCta)}</a>
+        </div>
+      </div>
+    `.trim()
+  } finally {
+    delete panel.dataset.loading
+  }
+}
+
 export function initSiteChrome({ onLocaleToggle } = {}) {
   applyTheme()
   void loadSiteAnnouncements()
 
   document.addEventListener('click', (event) => {
+    const commentsBtn = event.target.closest('[data-toggle-announcement-comments]')
+    if (commentsBtn) {
+      const id = commentsBtn.getAttribute('data-toggle-announcement-comments')
+      const bar = commentsBtn.closest('.site-announcement-bar')
+      const panel = bar?.querySelector('[data-announcement-comments]')
+      if (id && panel) {
+        const opening = panel.hidden
+        panel.hidden = !opening
+        commentsBtn.setAttribute('aria-expanded', String(opening))
+        if (opening) {
+          void loadAnnouncementCommentsIntoPanel(id, panel, commentsBtn)
+        }
+      }
+      return
+    }
+
     const dismissBtn = event.target.closest('[data-dismiss-announcement]')
     if (dismissBtn) {
       const key = dismissBtn.getAttribute('data-dismiss-announcement')
