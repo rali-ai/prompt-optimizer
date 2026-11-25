@@ -17,6 +17,7 @@
         <NLayoutHeader class="compact-header">
           <slot name="mobile-nav" />
         </NLayoutHeader>
+        <AnnouncementBar mode="banner" />
         <NLayoutContent
           style="flex: 1; min-height: 0; overflow: hidden;"
           content-style="height: 100%; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;"
@@ -81,6 +82,7 @@
                 <slot name="core-nav"></slot>
               </div>
               <div class="gp-topbar-right">
+                <AnnouncementBar mode="bell" />
                 <a class="gp-top-pill" href="https://goprmpt.com/library/" target="_blank" rel="noopener noreferrer">
                   <NIcon :size="14"><BookOpen :stroke-width="1.75" /></NIcon>
                   <span>{{ isEn ? '151 Prompts' : '151 条词库' }}</span>
@@ -92,6 +94,8 @@
               </div>
             </div>
           </NLayoutHeader>
+
+          <AnnouncementBar mode="banner" />
 
           <NLayoutContent
             has-sider
@@ -119,6 +123,7 @@ import { useI18n } from 'vue-i18n'
 import { NLayout, NLayoutHeader, NLayoutContent, NText, NIcon } from 'naive-ui'
 import { PanelLeftClose, PanelLeftOpen, BookOpen, GraduationCap } from '@lucide/vue'
 import ToastUI from './Toast.vue'
+import AnnouncementBar from './AnnouncementBar.vue'
 import logoImage from '../assets/logo.svg'
 import AppPreviewImage from './media/AppPreviewImage.vue'
 import { i18n } from '../plugins/i18n'
@@ -298,6 +303,9 @@ const fallbackLogoSrc = createFallbackSvg()
 }
 
 .gp-topbar {
+  position: relative;
+  z-index: 30;
+  overflow: visible !important;
   min-height: 54px !important;
   padding: 8px clamp(16px, 2vw, 28px) !important;
   background: var(--gp-header-bg, rgba(250, 249, 245, 0.88)) !important;

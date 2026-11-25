@@ -24,13 +24,22 @@ import { renderAdminHtml } from './admin-page.js';
 import {
   DEFAULT_MAIL_FROM,
   maskApiKey,
+  sendAnnouncementEmail,
   sendPasswordResetEmail,
   sendTestEmail,
 } from './mailer.js';
+import {
+  parseCreateAnnouncementInput,
+  parseUpdateAnnouncementInput,
+} from './announcements.js';
 
 const MAX_AUTH_BODY_BYTES = 16 * 1024;
 const MAX_SYNC_BODY_BYTES = MAX_SYNC_BYTES + 256 * 1024;
 const EXTENSION_ORIGIN_REGEX = /^(chrome|moz)-extension:\/\/[a-zA-Z0-9._-]+$/;
+const PUBLIC_ANNOUNCEMENT_ALLOWED_ORIGINS = new Set([
+  'https://goprmpt.com',
+  'https://www.goprmpt.com',
+]);
 
 function getAllowedExtensionOrigin(req) {
   const origin = req.headers.origin;
@@ -53,6 +62,29 @@ function applyExtensionCors(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Client-Type');
   res.setHeader('Access-Control-Max-Age', '86400');
   return true;
+}
+
+function applyPublicAnnouncementCors(req, res, pathname, method) {
+  if (pathname !== '/user-api/announcements/active') return false;
+  if (method !== 'GET' && method !== 'OPTIONS') return false;
+  const origin = req.headers.origin;
+  if (typeof origin !== 'string' || !PUBLIC_ANNOUNCEMENT_ALLOWED_ORIGINS.has(origin)) {
+    return false;
+  }
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Accept');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  return true;
+}
+
+function decodePathParam(raw) {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new PayloadError('无效的路径参数', 400);
+  }
 }
 
 function extractBearerToken(req) {
@@ -314,6 +346,8 @@ export function createApp(config, options = {}) {
     const pathname = url.pathname;
     const method = (req.method || 'GET').toUpperCase();
 
+    applyPublicAnnouncementCors(req, res, pathname, method);
+
     if (method === 'OPTIONS' && pathname.startsWith('/user-api/')) {
       res.writeHead(204, { 'Cache-Control': 'no-store' });
       res.end();
@@ -322,6 +356,10 @@ export function createApp(config, options = {}) {
 
     if (method === 'GET' && pathname === '/user-api/healthz') {
       return sendJson(res, 200, { ok: true });
+    }
+
+    if (method === 'GET' && pathname === '/user-api/announcements/active') {
+      return sendJson(res, 200, { announcements: db.listActiveAnnouncements() });
     }
 
     if (method === 'GET' && pathname === '/user-api/config') {
@@ -770,6 +808,136 @@ export function createApp(config, options = {}) {
         return sendJson(res, 404, { error: '用户不存在' });
       }
       return sendJson(res, 200, { user: serializeUser(updated) });
+    }
+
+    if (method === 'GET' && pathname === '/user-api/admin/announcements') {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const mail = resolveMailConfig();
+      const emailableUsers = db.listEmailableActiveUsers();
+      return sendJson(res, 200, {
+        announcements: db.listAllAnnouncements(),
+        emailableUsersCount: emailableUsers.length,
+        emailEnabled: mail.enabled,
+      });
+    }
+
+    if (method === 'POST' && pathname === '/user-api/admin/announcements') {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      const input = parseCreateAnnouncementInput(body);
+      const announcement = db.createAnnouncement(input);
+      return sendJson(res, 201, { announcement });
+    }
+
+    const adminAnnouncementEmailMatch = pathname.match(
+      /^\/user-api\/admin\/announcements\/([^/]+)\/send-email$/,
+    );
+    if (method === 'POST' && adminAnnouncementEmailMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const id = decodePathParam(adminAnnouncementEmailMatch[1]);
+      const announcement = db.findAnnouncementById(id);
+      if (!announcement) {
+        return sendJson(res, 404, { error: '公告不存在' });
+      }
+      const mail = resolveMailConfig();
+      if (!mail.enabled) {
+        return sendJson(res, 400, { error: '请先配置并保存 Resend API Key 与发件人地址' });
+      }
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      if (body.testTo !== undefined && body.testTo !== null) {
+        const testTo = validateOptionalEmail(body.testTo);
+        if (!testTo) {
+          throw new PayloadError('请输入有效的测试收件邮箱地址', 400);
+        }
+        try {
+          await sendAnnouncementEmail({
+            apiKey: mail.apiKey,
+            from: mail.from,
+            to: testTo,
+            username: adminRow.username,
+            announcement,
+            fetchImpl,
+          });
+        } catch (err) {
+          return sendJson(res, 502, {
+            error: err instanceof Error ? err.message : '测试推送邮件发送失败',
+          });
+        }
+        return sendJson(res, 200, {
+          ok: true,
+          mode: 'test',
+          sent: 1,
+          failed: 0,
+          total: 1,
+          to: testTo,
+        });
+      }
+
+      const recipients = db.listEmailableActiveUsers();
+      if (recipients.length === 0) {
+        return sendJson(res, 400, { error: '当前没有已绑定邮箱的活跃用户可推送' });
+      }
+
+      let sent = 0;
+      let failed = 0;
+      for (const recipient of recipients) {
+        try {
+          await sendAnnouncementEmail({
+            apiKey: mail.apiKey,
+            from: mail.from,
+            to: recipient.email,
+            username: recipient.username,
+            announcement,
+            fetchImpl,
+          });
+          sent += 1;
+        } catch (err) {
+          failed += 1;
+          console.error(
+            `[user-sync-api] announcement email failed for ${recipient.id}:`,
+            err?.message || err,
+          );
+        }
+      }
+
+      const updatedAnnouncement =
+        sent > 0 ? db.recordAnnouncementEmailed(id, sent) : announcement;
+      return sendJson(res, 200, {
+        ok: true,
+        mode: 'broadcast',
+        sent,
+        failed,
+        total: recipients.length,
+        announcement: updatedAnnouncement,
+      });
+    }
+
+    const adminAnnouncementMatch = pathname.match(/^\/user-api\/admin\/announcements\/([^/]+)$/);
+    if (method === 'PATCH' && adminAnnouncementMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const id = decodePathParam(adminAnnouncementMatch[1]);
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      const patch = parseUpdateAnnouncementInput(body);
+      const updated = db.updateAnnouncement(id, patch);
+      if (!updated) {
+        return sendJson(res, 404, { error: '公告不存在' });
+      }
+      return sendJson(res, 200, { announcement: updated });
+    }
+
+    if (method === 'DELETE' && adminAnnouncementMatch) {
+      const adminRow = requireAdmin(req, res);
+      if (!adminRow) return;
+      const id = decodePathParam(adminAnnouncementMatch[1]);
+      const deleted = db.deleteAnnouncement(id);
+      if (!deleted) {
+        return sendJson(res, 404, { error: '公告不存在' });
+      }
+      return sendJson(res, 200, { ok: true });
     }
 
     return sendJson(res, 404, { error: 'Not Found' });

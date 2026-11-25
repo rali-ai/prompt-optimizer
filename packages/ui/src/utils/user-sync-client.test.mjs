@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 import {
   EXTENSION_SYNC_BASE_URL,
   UserSyncError,
+  announcementDismissKey,
   changePassword,
   confirmPasswordReset,
+  getActiveAnnouncements,
   getConfig,
   getMe,
   isExtensionRuntime,
@@ -15,6 +17,7 @@ import {
   register,
   requestPasswordReset,
   resolveDefaultSyncBaseUrl,
+  safeAnnouncementUrl,
   stripSecretsForSync,
   toDataManagerImportEnvelope,
   updateProfile,
@@ -284,6 +287,152 @@ test('extension runtime resolves goprmpt.net baseUrl and authenticates with stor
     assert.equal(seen[0].headers['X-Client-Type'], 'extension')
     assert.equal(seen[1].headers.Authorization, 'Bearer ext_signed_token_xyz')
     assert.equal(storage.size, 0)
+  } finally {
+    if (prevWindow === undefined) {
+      delete globalThis.window
+    } else {
+      globalThis.window = prevWindow
+    }
+  }
+})
+
+test('announcementDismissKey and safeAnnouncementUrl validate keys and protocols', () => {
+  assert.equal(announcementDismissKey({ id: 'ann-1', updatedAt: 1700000001 }), 'ann-1:1700000001')
+  assert.notEqual(
+    announcementDismissKey({ id: 'ann-1', updatedAt: 1700000001 }),
+    announcementDismissKey({ id: 'ann-1', updatedAt: 1700000002 }),
+  )
+
+  assert.equal(safeAnnouncementUrl('https://goprmpt.com/guide/'), 'https://goprmpt.com/guide/')
+  assert.equal(safeAnnouncementUrl('  http://example.com/promo?a=1  '), 'http://example.com/promo?a=1')
+  assert.equal(safeAnnouncementUrl('javascript:alert(1)'), null)
+  assert.equal(safeAnnouncementUrl('data:text/html,<script>alert(1)</script>'), null)
+  assert.equal(safeAnnouncementUrl('vbscript:msgbox(1)'), null)
+  assert.equal(safeAnnouncementUrl('/relative/path'), null)
+  assert.equal(safeAnnouncementUrl(''), null)
+  assert.equal(safeAnnouncementUrl(null), null)
+  assert.equal(safeAnnouncementUrl(undefined), null)
+  assert.equal(safeAnnouncementUrl(123), null)
+})
+
+test('getActiveAnnouncements parses items, sanitizes links, handles empty shapes, and throws on HTTP error', async () => {
+  const seenUrls = []
+  const queue = [
+    jsonResponse({
+      announcements: [
+        {
+          id: 'a1',
+          title: '春季活动',
+          content: '全新 151 条词库上线',
+          type: 'activity',
+          linkUrl: 'https://goprmpt.com/library/',
+          linkText: '立即查看',
+          isActive: true,
+          isPinned: true,
+          expiresAt: null,
+          createdAt: 100,
+          updatedAt: 200,
+        },
+        {
+          id: 'a2',
+          title: '不安全链接测试',
+          content: '协议应被剥离',
+          type: 'unknown-type',
+          linkUrl: 'javascript:alert(1)',
+          linkText: '点击',
+          isActive: true,
+          isPinned: false,
+          expiresAt: 9999999999999,
+          createdAt: 10,
+          updatedAt: 20,
+        },
+        { id: '', title: '无 ID 应跳过' },
+        null,
+      ],
+    }),
+    jsonResponse({}),
+    jsonResponse({ announcements: null }),
+    jsonResponse({ error: '服务暂不可用' }, 503),
+  ]
+
+  const fetchMock = async (url) => {
+    seenUrls.push(url)
+    return queue.shift()
+  }
+
+  const list = await getActiveAnnouncements('/user-api/', fetchMock)
+  assert.equal(seenUrls[0], '/user-api/announcements/active')
+  assert.equal(list.length, 2)
+  assert.deepEqual(list[0], {
+    id: 'a1',
+    title: '春季活动',
+    content: '全新 151 条词库上线',
+    type: 'activity',
+    linkUrl: 'https://goprmpt.com/library/',
+    linkText: '立即查看',
+    isActive: true,
+    isPinned: true,
+    expiresAt: null,
+    createdAt: 100,
+    updatedAt: 200,
+  })
+  assert.equal(list[1].type, 'notice')
+  assert.equal(list[1].linkUrl, null)
+
+  assert.deepEqual(await getActiveAnnouncements('/user-api', fetchMock), [])
+  assert.deepEqual(await getActiveAnnouncements('/user-api', fetchMock), [])
+
+  await assert.rejects(
+    () => getActiveAnnouncements('/user-api', fetchMock),
+    (err) => {
+      assert.ok(err instanceof UserSyncError)
+      assert.equal(err.status, 503)
+      assert.equal(err.message, '服务暂不可用')
+      return true
+    },
+  )
+})
+
+test('getActiveAnnouncements works in extension runtime with goprmpt.net baseUrl', async () => {
+  const prevWindow = globalThis.window
+  globalThis.window = {
+    location: { protocol: 'chrome-extension:' },
+    localStorage: {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    },
+  }
+
+  try {
+    const seen = []
+    const fetchMock = async (url, init) => {
+      seen.push({ url, credentials: init?.credentials, headers: init?.headers })
+      return jsonResponse({
+        announcements: [
+          {
+            id: 'ext-1',
+            title: '维护通知',
+            content: '今晚维护 5 分钟',
+            type: 'maintenance',
+            linkUrl: null,
+            linkText: null,
+            isActive: true,
+            isPinned: false,
+            expiresAt: null,
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+      })
+    }
+
+    const items = await getActiveAnnouncements(resolveDefaultSyncBaseUrl(), fetchMock)
+    assert.equal(items.length, 1)
+    assert.equal(items[0].id, 'ext-1')
+    assert.equal(seen[0].url, `${EXTENSION_SYNC_BASE_URL}/announcements/active`)
+    assert.equal(seen[0].credentials, 'omit')
+    assert.equal(seen[0].headers['X-Client-Type'], 'extension')
   } finally {
     if (prevWindow === undefined) {
       delete globalThis.window

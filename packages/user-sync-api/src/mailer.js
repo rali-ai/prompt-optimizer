@@ -1,3 +1,5 @@
+import { getAnnouncementTypeMeta } from './announcements.js';
+
 export const DEFAULT_MAIL_FROM = '高词 · GoPrmpt <noreply@goprmpt.com>';
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
@@ -114,6 +116,76 @@ export async function sendTestEmail({ apiKey, from, to, fetchImpl = fetch }) {
     <h1 style="margin:0 0 12px;font-size:19px;color:#18181B;">Resend 邮件通道测试成功</h1>
     <p style="margin:0;font-size:14px;line-height:1.6;color:#52525B;">
       你的 Resend API Key 与发信域名已正确生效，现在工作台和管理后台均已启用「邮箱验证码自助重置密码」。
+    </p>
+  </div>
+</body>
+</html>`;
+
+  return sendViaResend({ apiKey, from, to, subject, html, text, fetchImpl });
+}
+
+export async function sendAnnouncementEmail({
+  apiKey,
+  from,
+  to,
+  username = '',
+  announcement,
+  fetchImpl = fetch,
+}) {
+  const typeMeta = getAnnouncementTypeMeta(announcement?.type);
+  const title = String(announcement?.title ?? '');
+  const content = String(announcement?.content ?? '');
+  const linkUrl = typeof announcement?.linkUrl === 'string' && announcement.linkUrl ? announcement.linkUrl : null;
+  const linkText =
+    typeof announcement?.linkText === 'string' && announcement.linkText.trim()
+      ? announcement.linkText.trim()
+      : '查看详情';
+
+  const safeBadge = escapeHtml(typeMeta.label);
+  const safeTitle = escapeHtml(title);
+  const safeContentHtml = escapeHtml(content).replace(/\r\n|\r|\n/g, '<br />');
+  const safeUser = username ? escapeHtml(username) : '';
+
+  const subject = `【高词 · GoPrmpt · ${typeMeta.label}】${title}`;
+  const textLines = [
+    username ? `你好 ${username}：` : '你好：',
+    '',
+    `[${typeMeta.label}] ${title}`,
+    '',
+    content,
+  ];
+  if (linkUrl) {
+    textLines.push('', `${linkText}：${linkUrl}`);
+  }
+  textLines.push('', '高词 · GoPrmpt (https://goprmpt.net)');
+  const text = textLines.join('\n');
+
+  const greetingHtml = safeUser
+    ? `<p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#52525B;">你好 <strong>${safeUser}</strong>，</p>`
+    : '';
+
+  const ctaHtml = linkUrl
+    ? `<div style="margin:22px 0 6px;">
+      <a href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:11px 22px;background:#0F766E;color:#FAF9F5;border-radius:10px;text-decoration:none;font-size:14px;font-weight:600;">${escapeHtml(linkText)}</a>
+    </div>`
+    : '';
+
+  const html = `<!doctype html>
+<html lang="zh-CN">
+<body style="margin:0;padding:24px;background:#FAF9F5;color:#18181B;font-family:'PingFang SC','Microsoft YaHei',-apple-system,sans-serif;">
+  <div style="max-width:540px;margin:0 auto;background:#FFFFFF;border:1px solid rgba(24,24,27,0.09);border-radius:16px;padding:28px;">
+    <div style="margin-bottom:12px;">
+      <span style="font-size:13px;font-weight:700;color:#0F766E;letter-spacing:0.03em;">高词 · GoPrmpt</span>
+      <span style="display:inline-block;margin-left:8px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;background:${typeMeta.emailBadgeBg};color:${typeMeta.emailBadgeColor};">${safeBadge}</span>
+    </div>
+    <h1 style="margin:0 0 14px;font-size:20px;line-height:1.4;color:#18181B;">${safeTitle}</h1>
+    ${greetingHtml}
+    <div style="margin:0 0 16px;padding:16px 18px;background:#FAF9F5;border:1px solid rgba(24,24,27,0.08);border-radius:12px;font-size:14px;line-height:1.75;color:#27272A;">
+      ${safeContentHtml}
+    </div>
+    ${ctaHtml}
+    <p style="margin:20px 0 0;padding-top:14px;border-top:1px solid rgba(24,24,27,0.08);font-size:12px;line-height:1.6;color:#71717A;">
+      此通知来自高词（GoPrmpt）官方工作台：<a href="https://goprmpt.net" style="color:#0F766E;text-decoration:none;">goprmpt.net</a>。本邮件由系统自动发送，请勿直接回复。
     </p>
   </div>
 </body>

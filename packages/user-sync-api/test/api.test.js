@@ -968,3 +968,632 @@ test('browser extension CORS allowlist and Bearer token bidirectional sync (web 
     await ctx.cleanup();
   }
 });
+
+test('announcements CRUD, validation/XSS rejection, non-admin 403, active/pinned/expiry filtering, and admin HTML', async () => {
+  const ctx = await startTestApp();
+  try {
+    // Public active endpoint works without auth and starts empty
+    const initActive = await fetch(`${ctx.baseUrl}/user-api/announcements/active`);
+    assert.equal(initActive.status, 200);
+    assert.deepEqual(await initActive.json(), { announcements: [] });
+
+    // Unauthenticated admin announcements -> 401
+    const anonAdminList = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`);
+    assert.equal(anonAdminList.status, 401);
+
+    // Register normal user and verify 403 on all admin announcement endpoints
+    const userReg = await fetch(`${ctx.baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'normal_reader', password: 'Password123!' }),
+    });
+    const userCookie = extractCookieHeader(userReg);
+
+    const nonAdminGet = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      headers: { Cookie: userCookie },
+    });
+    assert.equal(nonAdminGet.status, 403);
+
+    const nonAdminPost = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ title: 'nope', content: 'nope' }),
+    });
+    assert.equal(nonAdminPost.status, 403);
+
+    const nonAdminPatch = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/fake-id`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ title: 'nope' }),
+    });
+    assert.equal(nonAdminPatch.status, 403);
+
+    const nonAdminDelete = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/fake-id`, {
+      method: 'DELETE',
+      headers: { Cookie: userCookie },
+    });
+    assert.equal(nonAdminDelete.status, 403);
+
+    const nonAdminEmail = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/fake-id/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: '{}',
+    });
+    assert.equal(nonAdminEmail.status, 403);
+
+    // Login as admin
+    const adminLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    assert.equal(adminLogin.status, 200);
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    // Validation & XSS / URL safety checks -> 400
+    const badPayloads = [
+      { title: '   ', content: 'valid content' },
+      { title: 'a'.repeat(81), content: 'valid content' },
+      { title: 'valid title', content: '   ' },
+      { title: 'valid title', content: 'b'.repeat(801) },
+      { title: 'valid title', content: 'valid content', type: 'unknown_type' },
+      { title: 'xss js', content: 'body', linkUrl: 'javascript:alert(1)' },
+      { title: 'xss data', content: 'body', linkUrl: 'data:text/html,<script>alert(1)</script>' },
+      { title: 'bad proto', content: 'body', linkUrl: 'ftp://example.com/file' },
+      { title: 'bad url', content: 'body', linkUrl: 'not-a-url' },
+      { title: 'long url', content: 'body', linkUrl: `https://goprmpt.com/${'x'.repeat(500)}` },
+      { title: 'long linkText', content: 'body', linkText: 't'.repeat(33) },
+      { title: 'bad active', content: 'body', isActive: 'yes' },
+      { title: 'bad pinned', content: 'body', isPinned: 1 },
+      { title: 'zero expiry', content: 'body', expiresAt: 0 },
+      { title: 'neg expiry', content: 'body', expiresAt: -100 },
+      { title: 'str expiry', content: 'body', expiresAt: '2099-01-01' },
+    ];
+    for (const payload of badPayloads) {
+      const res = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify(payload),
+      });
+      assert.equal(res.status, 400, `expected 400 for payload ${JSON.stringify(payload)}`);
+    }
+
+    // Create 5 announcements: normal, pinned, future-expiring, already-expired, inactive
+    const createNotice = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '  普通重要通知  ',
+        content: '  第一行内容\n第二行内容  ',
+        type: 'notice',
+        linkUrl: 'https://goprmpt.com/changelog',
+        linkText: '  查看更新日志  ',
+      }),
+    });
+    assert.equal(createNotice.status, 201);
+    const { announcement: noticeAnn } = await createNotice.json();
+    assert.equal(noticeAnn.title, '普通重要通知');
+    assert.equal(noticeAnn.content, '第一行内容\n第二行内容');
+    assert.equal(noticeAnn.type, 'notice');
+    assert.equal(noticeAnn.linkUrl, 'https://goprmpt.com/changelog');
+    assert.equal(noticeAnn.linkText, '查看更新日志');
+    assert.equal(noticeAnn.isActive, true);
+    assert.equal(noticeAnn.isPinned, false);
+    assert.equal(noticeAnn.expiresAt, null);
+    assert.equal(noticeAnn.emailedAt, null);
+    assert.equal(noticeAnn.emailedCount, 0);
+    assert.equal(typeof noticeAnn.createdAt, 'number');
+    assert.equal(typeof noticeAnn.updatedAt, 'number');
+
+    const createPinned = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '置顶春季活动',
+        content: '限时活动说明',
+        type: 'activity',
+        isPinned: true,
+        isActive: true,
+      }),
+    });
+    assert.equal(createPinned.status, 201);
+    const { announcement: pinnedAnn } = await createPinned.json();
+
+    const futureExpiry = Date.now() + 3 * 24 * 60 * 60 * 1000;
+    const createFuture = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '即将维护提示',
+        content: '本周日凌晨例行维护',
+        type: 'maintenance',
+        expiresAt: futureExpiry,
+      }),
+    });
+    assert.equal(createFuture.status, 201);
+    const { announcement: futureAnn } = await createFuture.json();
+
+    const createExpired = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '已过期活动',
+        content: '不应出现在公开列表',
+        type: 'activity',
+        expiresAt: Date.now() - 10_000,
+      }),
+    });
+    assert.equal(createExpired.status, 201);
+    const { announcement: expiredAnn } = await createExpired.json();
+
+    const createInactive = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '草稿未发布',
+        content: '不应出现在公开列表',
+        isActive: false,
+        isPinned: true,
+      }),
+    });
+    assert.equal(createInactive.status, 201);
+    const { announcement: inactiveAnn } = await createInactive.json();
+
+    // Public active list returns ONLY active & non-expired, pinned first then newest updated
+    const activeRes = await fetch(`${ctx.baseUrl}/user-api/announcements/active`);
+    assert.equal(activeRes.status, 200);
+    const { announcements: activeList } = await activeRes.json();
+    assert.deepEqual(
+      activeList.map((a) => a.id),
+      [pinnedAnn.id, futureAnn.id, noticeAnn.id],
+    );
+
+    // Admin list returns all 5 announcements + emailable count & email status
+    const adminListRes = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(adminListRes.status, 200);
+    const adminListBody = await adminListRes.json();
+    assert.equal(adminListBody.announcements.length, 5);
+    assert.equal(adminListBody.emailableUsersCount, 0);
+    assert.equal(adminListBody.emailEnabled, false);
+
+    // PATCH validation: reject empty patch & javascript: URL & 404 unknown id
+    const emptyPatch = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${noticeAnn.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({}),
+    });
+    assert.equal(emptyPatch.status, 400);
+
+    const xssPatch = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${noticeAnn.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ linkUrl: 'javascript:void(0)' }),
+    });
+    assert.equal(xssPatch.status, 400);
+
+    const missingPatch = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/nonexistent-id`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ title: 'updated' }),
+    });
+    assert.equal(missingPatch.status, 404);
+
+    // PATCH update: unpin pinnedAnn, pin noticeAnn, clear linkUrl, and publish inactiveAnn
+    const unpinRes = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${pinnedAnn.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ isPinned: false, isActive: false }),
+    });
+    assert.equal(unpinRes.status, 200);
+    const { announcement: updatedPinned } = await unpinRes.json();
+    assert.equal(updatedPinned.isPinned, false);
+    assert.equal(updatedPinned.isActive, false);
+
+    const pinNoticeRes = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${noticeAnn.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ title: '已置顶的重要通知', isPinned: true, linkUrl: null, linkText: '' }),
+    });
+    assert.equal(pinNoticeRes.status, 200);
+    const { announcement: updatedNotice } = await pinNoticeRes.json();
+    assert.equal(updatedNotice.title, '已置顶的重要通知');
+    assert.equal(updatedNotice.isPinned, true);
+    assert.equal(updatedNotice.linkUrl, null);
+    assert.equal(updatedNotice.linkText, null);
+
+    // Public active list reflects updates immediately
+    const activeAfterPatch = await fetch(`${ctx.baseUrl}/user-api/announcements/active`);
+    const activeIdsAfterPatch = (await activeAfterPatch.json()).announcements.map((a) => a.id);
+    assert.deepEqual(activeIdsAfterPatch, [noticeAnn.id, futureAnn.id]);
+
+    // DELETE announcement & verify 404 on second delete
+    const delRes = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${expiredAnn.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(delRes.status, 200);
+    assert.deepEqual(await delRes.json(), { ok: true });
+
+    const delAgain = await fetch(`${ctx.baseUrl}/user-api/admin/announcements/${expiredAnn.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(delAgain.status, 404);
+
+    // Confirm admin list now has 4 announcements (inactiveAnn still present)
+    const adminAfterDel = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      headers: { Cookie: adminCookie },
+    });
+    const remainingIds = (await adminAfterDel.json()).announcements.map((a) => a.id);
+    assert.equal(remainingIds.length, 4);
+    assert.ok(remainingIds.includes(inactiveAnn.id));
+    assert.equal(remainingIds.includes(expiredAnn.id), false);
+
+    // Admin console HTML renders the announcements card and valid inline JS
+    const adminHtmlRes = await fetch(`${ctx.baseUrl}/user-api/admin`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(adminHtmlRes.status, 200);
+    const adminHtml = await adminHtmlRes.text();
+    assert.match(adminHtml, /id="announcementsCard"/);
+    assert.match(adminHtml, /站内通知与活动公告/);
+    assert.match(adminHtml, /id="announcementForm"/);
+    assert.equal(adminHtml.includes('—'), false, 'admin UI copy should not contain em dashes');
+    const scriptMatch = adminHtml.match(/<script>([\s\S]*?)<\/script>/);
+    assert.ok(scriptMatch, 'admin console should contain inline script');
+    assert.doesNotThrow(() => new Function(scriptMatch[1]), 'admin inline script should parse cleanly');
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test('announcements public CORS allowlist for goprmpt.com and extension origins', async () => {
+  const ctx = await startTestApp();
+  try {
+    // Allowed: https://goprmpt.com on OPTIONS and GET /user-api/announcements/active
+    const preflightRoot = await fetch(`${ctx.baseUrl}/user-api/announcements/active`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://goprmpt.com' },
+    });
+    assert.equal(preflightRoot.status, 204);
+    assert.equal(preflightRoot.headers.get('access-control-allow-origin'), 'https://goprmpt.com');
+    assert.equal(preflightRoot.headers.get('vary'), 'Origin');
+    assert.equal(preflightRoot.headers.get('access-control-allow-methods'), 'GET, OPTIONS');
+    assert.equal(preflightRoot.headers.get('access-control-allow-headers'), 'Accept');
+    assert.equal(preflightRoot.headers.get('access-control-allow-credentials'), null);
+
+    const getWww = await fetch(`${ctx.baseUrl}/user-api/announcements/active`, {
+      headers: { Origin: 'https://www.goprmpt.com' },
+    });
+    assert.equal(getWww.status, 200);
+    assert.equal(getWww.headers.get('access-control-allow-origin'), 'https://www.goprmpt.com');
+    assert.equal(getWww.headers.get('vary'), 'Origin');
+    assert.equal(getWww.headers.get('access-control-allow-credentials'), null);
+
+    // Rejected origins on /user-api/announcements/active
+    for (const badOrigin of [
+      'http://goprmpt.com',
+      'https://evil.example',
+      'https://goprmpt.com.evil.example',
+      'https://sub.goprmpt.com',
+    ]) {
+      const res = await fetch(`${ctx.baseUrl}/user-api/announcements/active`, {
+        headers: { Origin: badOrigin },
+      });
+      assert.equal(res.status, 200);
+      assert.equal(
+        res.headers.get('access-control-allow-origin'),
+        null,
+        `origin ${badOrigin} must not get ACAO`,
+      );
+    }
+
+    // https://goprmpt.com must NOT get CORS on other routes or non-GET/OPTIONS methods
+    const otherRouteRes = await fetch(`${ctx.baseUrl}/user-api/config`, {
+      headers: { Origin: 'https://goprmpt.com' },
+    });
+    assert.equal(otherRouteRes.status, 200);
+    assert.equal(otherRouteRes.headers.get('access-control-allow-origin'), null);
+
+    const adminRouteRes = await fetch(`${ctx.baseUrl}/user-api/admin/announcements`, {
+      headers: { Origin: 'https://goprmpt.com' },
+    });
+    assert.equal(adminRouteRes.status, 401);
+    assert.equal(adminRouteRes.headers.get('access-control-allow-origin'), null);
+
+    const postActiveRes = await fetch(`${ctx.baseUrl}/user-api/announcements/active`, {
+      method: 'POST',
+      headers: { Origin: 'https://goprmpt.com' },
+    });
+    assert.equal(postActiveRes.status, 404);
+    assert.equal(postActiveRes.headers.get('access-control-allow-origin'), null);
+
+    // Extension origins continue working on /user-api/announcements/active
+    const chromeOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const extRes = await fetch(`${ctx.baseUrl}/user-api/announcements/active`, {
+      headers: { Origin: chromeOrigin },
+    });
+    assert.equal(extRes.status, 200);
+    assert.equal(extRes.headers.get('access-control-allow-origin'), chromeOrigin);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test('announcements Resend test/broadcast email push, HTML escaping, partial failures, and restart persistence', async () => {
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'ann-mail', 'users.db');
+  const env = {
+    USER_SYNC_HOST: '127.0.0.1',
+    USER_SYNC_PORT: '0',
+    USER_SYNC_DB_PATH: dbPath,
+    ADMIN_USERNAME: 'root_admin',
+    ADMIN_PASSWORD: 'AdminPassword123!',
+    RATE_LIMIT_MAX: '50',
+    RATE_LIMIT_WINDOW_MS: '60000',
+  };
+
+  const sentEmails = [];
+  let failRecipientEmail = null;
+  const mockFetch = async (url, init) => {
+    assert.equal(url, 'https://api.resend.com/emails');
+    const payload = JSON.parse(String(init?.body || '{}'));
+    if (failRecipientEmail && payload.to?.includes(failRecipientEmail)) {
+      return new Response(JSON.stringify({ message: 'Simulated bounce' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    sentEmails.push({
+      authHeader: init?.headers?.Authorization || '',
+      payload,
+    });
+    return new Response(JSON.stringify({ id: `re_ann_${sentEmails.length}` }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  let app1 = createApp(loadConfig(env), { fetchImpl: mockFetch });
+  let app2 = null;
+  try {
+    const addr1 = await app1.listen();
+    const base1 = `http://${addr1.host}:${addr1.port}`;
+
+    // Login as admin
+    const adminLogin = await fetch(`${base1}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    // Create announcement with HTML-sensitive characters and CTA link
+    const createRes = await fetch(`${base1}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '春季活动 <Pro 福利>',
+        content: '第一行 <script>alert(1)</script>\n第二行：欢迎参与',
+        type: 'activity',
+        linkUrl: 'https://goprmpt.com/spring?ref=mail',
+        linkText: '立即参与',
+        isPinned: true,
+      }),
+    });
+    assert.equal(createRes.status, 201);
+    const { announcement: ann1 } = await createRes.json();
+
+    // Before Resend configured -> 400
+    const unconfiguredSend = await fetch(
+      `${base1}/user-api/admin/announcements/${ann1.id}/send-email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: '{}',
+      },
+    );
+    assert.equal(unconfiguredSend.status, 400);
+
+    // Configure Resend
+    const mailSave = await fetch(`${base1}/user-api/admin/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        resendApiKey: 're_live_ann_secret_5555',
+        mailFrom: '高词 · GoPrmpt <noreply@goprmpt.com>',
+      }),
+    });
+    assert.equal(mailSave.status, 200);
+
+    // Broadcast when no active bound-email users -> 400
+    const noUsersSend = await fetch(
+      `${base1}/user-api/admin/announcements/${ann1.id}/send-email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: '{}',
+      },
+    );
+    assert.equal(noUsersSend.status, 400);
+    assert.equal((await noUsersSend.json()).error, '当前没有已绑定邮箱的活跃用户可推送');
+
+    // Invalid testTo -> 400 (must NOT broadcast)
+    const badTestTo = await fetch(
+      `${base1}/user-api/admin/announcements/${ann1.id}/send-email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({ testTo: 'invalid-email' }),
+      },
+    );
+    assert.equal(badTestTo.status, 400);
+
+    const emptyTestTo = await fetch(
+      `${base1}/user-api/admin/announcements/${ann1.id}/send-email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({ testTo: '   ' }),
+      },
+    );
+    assert.equal(emptyTestTo.status, 400);
+    assert.equal(sentEmails.length, 0);
+
+    // Valid testTo sends ONLY to [testTo] and does NOT mutate emailedAt / emailedCount
+    const testSend = await fetch(
+      `${base1}/user-api/admin/announcements/${ann1.id}/send-email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({ testTo: 'Preview@Example.com' }),
+      },
+    );
+    assert.equal(testSend.status, 200);
+    assert.deepEqual(await testSend.json(), {
+      ok: true,
+      mode: 'test',
+      sent: 1,
+      failed: 0,
+      total: 1,
+      to: 'preview@example.com',
+    });
+    assert.equal(sentEmails.length, 1);
+    assert.equal(sentEmails[0].authHeader, 'Bearer re_live_ann_secret_5555');
+    assert.deepEqual(sentEmails[0].payload.to, ['preview@example.com']);
+    assert.match(sentEmails[0].payload.subject, /活动公告/);
+    assert.match(sentEmails[0].payload.html, /#FAF9F5/);
+    assert.match(sentEmails[0].payload.html, /#0F766E/);
+    assert.match(sentEmails[0].payload.html, /活动公告/);
+    assert.equal(sentEmails[0].payload.html.includes('<script>'), false);
+    assert.ok(sentEmails[0].payload.html.includes('&lt;script&gt;alert(1)&lt;/script&gt;<br />第二行'));
+    assert.ok(sentEmails[0].payload.html.includes('href="https://goprmpt.com/spring?ref=mail"'));
+    assert.ok(sentEmails[0].payload.html.includes('立即参与'));
+
+    const afterTestCheck = await fetch(`${base1}/user-api/admin/announcements`, {
+      headers: { Cookie: adminCookie },
+    });
+    const annAfterTest = (await afterTestCheck.json()).announcements.find((a) => a.id === ann1.id);
+    assert.equal(annAfterTest.emailedAt, null);
+    assert.equal(annAfterTest.emailedCount, 0);
+
+    // Register 4 users: 2 active with email, 1 active without email, 1 disabled with email
+    await fetch(`${base1}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'u_alpha', email: 'alpha@example.com', password: 'Password123!' }),
+    });
+    await fetch(`${base1}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'u_beta', email: 'beta@example.com', password: 'Password123!' }),
+    });
+    await fetch(`${base1}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'u_noemail', password: 'Password123!' }),
+    });
+    const disabledReg = await fetch(`${base1}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'u_disabled', email: 'disabled@example.com', password: 'Password123!' }),
+    });
+    const { user: disabledUser } = await disabledReg.json();
+    await fetch(`${base1}/user-api/admin/users/${disabledUser.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ disabled: true }),
+    });
+
+    // emailableUsersCount should be exactly 2
+    const beforeBroadcast = await fetch(`${base1}/user-api/admin/announcements`, {
+      headers: { Cookie: adminCookie },
+    });
+    const beforeBroadcastBody = await beforeBroadcast.json();
+    assert.equal(beforeBroadcastBody.emailableUsersCount, 2);
+    assert.equal(beforeBroadcastBody.emailEnabled, true);
+
+    // Broadcast sends sequentially to ONLY alpha and beta
+    sentEmails.length = 0;
+    const broadcastRes = await fetch(
+      `${base1}/user-api/admin/announcements/${ann1.id}/send-email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: '{}',
+      },
+    );
+    assert.equal(broadcastRes.status, 200);
+    const broadcastBody = await broadcastRes.json();
+    assert.equal(broadcastBody.ok, true);
+    assert.equal(broadcastBody.mode, 'broadcast');
+    assert.equal(broadcastBody.sent, 2);
+    assert.equal(broadcastBody.failed, 0);
+    assert.equal(broadcastBody.total, 2);
+    assert.equal(broadcastBody.announcement.emailedCount, 2);
+    assert.equal(typeof broadcastBody.announcement.emailedAt, 'number');
+    assert.deepEqual(
+      sentEmails.map((e) => e.payload.to[0]),
+      ['alpha@example.com', 'beta@example.com'],
+    );
+
+    // Partial failure test on a second announcement without linkUrl (verifies no CTA button)
+    const createRes2 = await fetch(`${base1}/user-api/admin/announcements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        title: '系统维护通知',
+        content: '预计维护 10 分钟',
+        type: 'maintenance',
+      }),
+    });
+    const { announcement: ann2 } = await createRes2.json();
+
+    sentEmails.length = 0;
+    failRecipientEmail = 'beta@example.com';
+    const partialRes = await fetch(
+      `${base1}/user-api/admin/announcements/${ann2.id}/send-email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: '{}',
+      },
+    );
+    assert.equal(partialRes.status, 200);
+    const partialBody = await partialRes.json();
+    assert.equal(partialBody.sent, 1);
+    assert.equal(partialBody.failed, 1);
+    assert.equal(partialBody.total, 2);
+    assert.equal(partialBody.announcement.emailedCount, 1);
+    assert.equal(typeof partialBody.announcement.emailedAt, 'number');
+    assert.equal(sentEmails.length, 1);
+    assert.equal(sentEmails[0].payload.html.includes('查看详情'), false);
+    failRecipientEmail = null;
+
+    // Restart server on the same DB file and verify announcements & emailed stats persist
+    await app1.close();
+    app1 = null;
+
+    app2 = createApp(loadConfig(env), { fetchImpl: mockFetch });
+    const addr2 = await app2.listen();
+    const base2 = `http://${addr2.host}:${addr2.port}`;
+
+    const activeAfterRestart = await fetch(`${base2}/user-api/announcements/active`);
+    assert.equal(activeAfterRestart.status, 200);
+    const { announcements: persisted } = await activeAfterRestart.json();
+    assert.equal(persisted.length, 2);
+    assert.equal(persisted[0].id, ann1.id);
+    assert.equal(persisted[0].emailedCount, 2);
+    assert.equal(persisted[0].emailedAt, broadcastBody.announcement.emailedAt);
+    assert.equal(persisted[0].linkUrl, 'https://goprmpt.com/spring?ref=mail');
+    assert.equal(persisted[1].id, ann2.id);
+    assert.equal(persisted[1].emailedCount, 1);
+    assert.equal(persisted[1].emailedAt, partialBody.announcement.emailedAt);
+  } finally {
+    if (app1) await app1.close();
+    if (app2) await app2.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

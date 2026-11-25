@@ -36,6 +36,22 @@ export interface PushSyncResponse {
   bytes: number
 }
 
+export type AnnouncementType = 'notice' | 'activity' | 'maintenance'
+
+export interface ActiveAnnouncement {
+  id: string
+  title: string
+  content: string
+  type: AnnouncementType
+  linkUrl: string | null
+  linkText: string | null
+  isActive: boolean
+  isPinned: boolean
+  expiresAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
 export class UserSyncError extends Error {
   readonly status: number
   readonly currentVersion?: number
@@ -407,4 +423,72 @@ export async function pushSync(
     },
     fetchImpl,
   )
+}
+
+export function announcementDismissKey(
+  item: Pick<ActiveAnnouncement, 'id' | 'updatedAt'>,
+): string {
+  return `${item.id}:${item.updatedAt}`
+}
+
+export function safeAnnouncementUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null
+    }
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+function normalizeAnnouncementType(raw: unknown): AnnouncementType {
+  if (raw === 'activity' || raw === 'maintenance' || raw === 'notice') {
+    return raw
+  }
+  return 'notice'
+}
+
+function normalizeAnnouncement(raw: unknown): ActiveAnnouncement | null {
+  if (!isPlainObject(raw)) return null
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const title = typeof raw.title === 'string' ? raw.title.trim() : ''
+  if (!id || !title) return null
+  return {
+    id,
+    title,
+    content: typeof raw.content === 'string' ? raw.content : '',
+    type: normalizeAnnouncementType(raw.type),
+    linkUrl: safeAnnouncementUrl(raw.linkUrl),
+    linkText: typeof raw.linkText === 'string' && raw.linkText.trim() ? raw.linkText.trim() : null,
+    isActive: raw.isActive !== false,
+    isPinned: Boolean(raw.isPinned),
+    expiresAt: typeof raw.expiresAt === 'number' && Number.isFinite(raw.expiresAt) ? raw.expiresAt : null,
+    createdAt: typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) ? raw.createdAt : 0,
+    updatedAt: typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt) ? raw.updatedAt : 0,
+  }
+}
+
+export async function getActiveAnnouncements(
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ActiveAnnouncement[]> {
+  const res = await requestJson<{ announcements?: unknown }>(
+    joinUrl(baseUrl, '/announcements/active'),
+    { method: 'GET' },
+    fetchImpl,
+  )
+  if (!isPlainObject(res) || !Array.isArray(res.announcements)) {
+    return []
+  }
+  const items: ActiveAnnouncement[] = []
+  for (const entry of res.announcements) {
+    const normalized = normalizeAnnouncement(entry)
+    if (normalized) items.push(normalized)
+  }
+  return items
 }

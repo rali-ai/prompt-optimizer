@@ -1,3 +1,5 @@
+import { ANNOUNCEMENT_TYPES } from './announcements.js';
+
 function escapeHtml(text) {
   return String(text ?? '')
     .replace(/&/g, '&amp;')
@@ -186,6 +188,100 @@ export function renderAdminHtml({
         </div>
       </section>
 
+      <section class="card announcements-card" id="announcementsCard">
+        <div class="card-head" style="margin-bottom:14px;">
+          <div>
+            <div class="switch-eyebrow">通知与活动发布</div>
+            <h2>站内通知与活动公告</h2>
+            <p class="muted" id="announcementsMetaDesc">发布中的通知会实时展示在工作台与插件中，也可通过 Resend 一键推送给已绑定邮箱的活跃用户。</p>
+          </div>
+          <div class="announcements-head-actions">
+            <span id="activeAnnouncementsBadge" class="badge badge-ok">发布中 0 条</span>
+            <button id="toggleAnnouncementFormBtn" class="btn btn-primary" type="button">发布新通知</button>
+          </div>
+        </div>
+
+        <div id="announcementFormWrap" class="announcement-form-wrap" style="display:none">
+          <div class="announcement-form-head">
+            <strong id="announcementFormTitle">发布新通知</strong>
+            <span class="muted">支持重要通知、活动公告与维护提示，跳转链接仅允许 http 或 https 地址。</span>
+          </div>
+          <form id="announcementForm" class="announcement-form">
+            <div class="announcement-form-row">
+              <label>通知类型
+                <select id="annType" name="type">
+                  ${Object.values(ANNOUNCEMENT_TYPES)
+                    .map(
+                      (item) =>
+                        `<option value="${escapeHtml(item.key)}">${escapeHtml(item.label)}</option>`,
+                    )
+                    .join('')}
+                </select>
+              </label>
+              <label class="ann-title-field">标题（最多 80 字）
+                <input id="annTitle" name="title" type="text" maxlength="80" placeholder="例如：高词春季限时活动开启" required />
+              </label>
+              <label>有效期
+                <select id="annExpiry" name="expiry">
+                  <option value="never">长期有效</option>
+                  <option value="3d">3 天</option>
+                  <option value="7d">7 天</option>
+                  <option value="30d">30 天</option>
+                </select>
+              </label>
+            </div>
+
+            <label>公告正文（最多 800 字，支持换行）
+              <textarea id="annContent" name="content" rows="3" maxlength="800" placeholder="输入面向用户的通知或活动说明内容..." required></textarea>
+            </label>
+
+            <div class="announcement-form-row announcement-link-row">
+              <label>跳转链接（可选）
+                <input id="annLinkUrl" name="linkUrl" type="url" maxlength="500" placeholder="https://goprmpt.com/..." />
+              </label>
+              <label>按钮文案（可选，最多 32 字）
+                <input id="annLinkText" name="linkText" type="text" maxlength="32" placeholder="查看详情" />
+              </label>
+            </div>
+
+            <div class="announcement-form-footer">
+              <div class="announcement-checks">
+                <label class="check-label">
+                  <input id="annIsActive" type="checkbox" checked />
+                  <span>立即发布</span>
+                </label>
+                <label class="check-label">
+                  <input id="annIsPinned" type="checkbox" />
+                  <span>置顶优先</span>
+                </label>
+              </div>
+              <div class="actions">
+                <button id="cancelAnnouncementBtn" class="btn" type="button">取消</button>
+                <button id="saveAnnouncementBtn" class="btn btn-primary" type="submit">保存并发布</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>类型与标记</th>
+                <th>标题与内容</th>
+                <th>状态</th>
+                <th>有效期</th>
+                <th>邮件推送</th>
+                <th>管理操作</th>
+              </tr>
+            </thead>
+            <tbody id="announcementRows">
+              <tr><td colspan="6" class="muted">正在加载通知列表...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="stats-grid" aria-label="运营统计概览">
         <div class="stat-card">
           <div class="stat-label">注册用户总数</div>
@@ -251,6 +347,8 @@ export function renderAdminHtml({
 
     <script>
       const CURRENT_ADMIN_USERNAME = ${JSON.stringify(String(username || ''))};
+      const ANNOUNCEMENT_TYPES_META = ${JSON.stringify(ANNOUNCEMENT_TYPES)};
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
       const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
       const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -276,11 +374,34 @@ export function renderAdminHtml({
       const clearMailKeyBtnEl = document.getElementById('clearMailKeyBtn');
       const sendTestMailBtnEl = document.getElementById('sendTestMailBtn');
       const testMailToInputEl = document.getElementById('testMailToInput');
+      const activeAnnouncementsBadgeEl = document.getElementById('activeAnnouncementsBadge');
+      const announcementsMetaDescEl = document.getElementById('announcementsMetaDesc');
+      const toggleAnnouncementFormBtnEl = document.getElementById('toggleAnnouncementFormBtn');
+      const announcementFormWrapEl = document.getElementById('announcementFormWrap');
+      const announcementFormTitleEl = document.getElementById('announcementFormTitle');
+      const announcementFormEl = document.getElementById('announcementForm');
+      const annTypeEl = document.getElementById('annType');
+      const annTitleEl = document.getElementById('annTitle');
+      const annContentEl = document.getElementById('annContent');
+      const annLinkUrlEl = document.getElementById('annLinkUrl');
+      const annLinkTextEl = document.getElementById('annLinkText');
+      const annExpiryEl = document.getElementById('annExpiry');
+      const annIsActiveEl = document.getElementById('annIsActive');
+      const annIsPinnedEl = document.getElementById('annIsPinned');
+      const saveAnnouncementBtnEl = document.getElementById('saveAnnouncementBtn');
+      const cancelAnnouncementBtnEl = document.getElementById('cancelAnnouncementBtn');
+      const announcementRowsEl = document.getElementById('announcementRows');
       let latestTempPassword = '';
 
       let currentMembershipEnabled = ${enabledFlag ? 'true' : 'false'};
       let allUsers = [];
       let currentFilter = 'all';
+      let allAnnouncements = [];
+      let announcementsLoaded = false;
+      let emailableUsersCount = 0;
+      let announcementEmailEnabled = ${mailEnabledFlag ? 'true' : 'false'};
+      let editingAnnouncementId = null;
+      let editingAnnouncementExpiresAt = null;
 
       function showNotice(text, isError = false) {
         noticeEl.textContent = text;
@@ -338,6 +459,176 @@ export function renderAdminHtml({
         }
         clearMailKeyBtnEl.style.display = enabled ? 'inline-flex' : 'none';
         sendTestMailBtnEl.disabled = !enabled;
+        announcementEmailEnabled = enabled;
+        if (announcementsLoaded) {
+          renderAnnouncements();
+        }
+      }
+
+      function getAnnouncementTypeInfo(type) {
+        return ANNOUNCEMENT_TYPES_META[type] || ANNOUNCEMENT_TYPES_META.notice;
+      }
+
+      function setExpiryOptions(existingExpiresAt) {
+        const keepOpt = annExpiryEl.querySelector('option[value="keep"]');
+        if (existingExpiresAt) {
+          const label = '保持原有效期（' + fmtDate(existingExpiresAt) + '）';
+          if (keepOpt) {
+            keepOpt.textContent = label;
+          } else {
+            const opt = document.createElement('option');
+            opt.value = 'keep';
+            opt.textContent = label;
+            annExpiryEl.insertBefore(opt, annExpiryEl.firstChild);
+          }
+          annExpiryEl.value = 'keep';
+        } else {
+          if (keepOpt) keepOpt.remove();
+          annExpiryEl.value = 'never';
+        }
+      }
+
+      function openAnnouncementForm(item) {
+        if (item) {
+          editingAnnouncementId = item.id;
+          editingAnnouncementExpiresAt = item.expiresAt ?? null;
+          announcementFormTitleEl.textContent = '编辑通知';
+          saveAnnouncementBtnEl.textContent = '保存修改';
+          annTypeEl.value = item.type || 'notice';
+          annTitleEl.value = item.title || '';
+          annContentEl.value = item.content || '';
+          annLinkUrlEl.value = item.linkUrl || '';
+          annLinkTextEl.value = item.linkText || '';
+          annIsActiveEl.checked = Boolean(item.isActive);
+          annIsPinnedEl.checked = Boolean(item.isPinned);
+          setExpiryOptions(editingAnnouncementExpiresAt);
+        } else {
+          editingAnnouncementId = null;
+          editingAnnouncementExpiresAt = null;
+          announcementFormTitleEl.textContent = '发布新通知';
+          saveAnnouncementBtnEl.textContent = '保存并发布';
+          announcementFormEl.reset();
+          annTypeEl.value = 'notice';
+          annIsActiveEl.checked = true;
+          annIsPinnedEl.checked = false;
+          setExpiryOptions(null);
+        }
+        announcementFormWrapEl.style.display = 'block';
+        toggleAnnouncementFormBtnEl.textContent = '收起表单';
+        annTitleEl.focus();
+      }
+
+      function closeAnnouncementForm() {
+        editingAnnouncementId = null;
+        editingAnnouncementExpiresAt = null;
+        announcementFormEl.reset();
+        setExpiryOptions(null);
+        announcementFormWrapEl.style.display = 'none';
+        toggleAnnouncementFormBtnEl.textContent = '发布新通知';
+      }
+
+      function resolveExpiryTimestamp(value) {
+        if (value === 'keep') return editingAnnouncementExpiresAt;
+        if (value === '3d') return Date.now() + 3 * ONE_DAY_MS;
+        if (value === '7d') return Date.now() + 7 * ONE_DAY_MS;
+        if (value === '30d') return Date.now() + 30 * ONE_DAY_MS;
+        return null;
+      }
+
+      function renderAnnouncements() {
+        const now = Date.now();
+        const activeCount = allAnnouncements.filter(
+          (a) => a.isActive && (!a.expiresAt || a.expiresAt > now)
+        ).length;
+        activeAnnouncementsBadgeEl.textContent = '发布中 ' + activeCount + ' 条';
+        activeAnnouncementsBadgeEl.className = activeCount > 0 ? 'badge badge-ok' : 'badge badge-free';
+        announcementsMetaDescEl.textContent =
+          '发布中的通知会实时展示在工作台与插件中。当前已绑定邮箱的活跃用户共 ' +
+          emailableUsersCount +
+          ' 人' +
+          (announcementEmailEnabled ? '，可直接一键邮件推送。' : '（配置上方 Resend 通道后可一键邮件推送）。');
+
+        if (!allAnnouncements.length) {
+          announcementRowsEl.innerHTML =
+            '<tr><td colspan="6" class="muted">暂无通知或活动公告，点击右上角「发布新通知」创建第一条。</td></tr>';
+          return;
+        }
+
+        announcementRowsEl.innerHTML = allAnnouncements.map((a) => {
+          const typeInfo = getAnnouncementTypeInfo(a.type);
+          const isExpired = Boolean(a.expiresAt && a.expiresAt <= now);
+          const typeBadge =
+            '<span class="badge ' + esc(typeInfo.adminBadgeClass) + '">' + esc(typeInfo.label) + '</span>';
+          const pinBadge = a.isPinned
+            ? ' <span class="badge badge-pin">置顶</span>'
+            : '';
+
+          let statusBadge = '<span class="badge badge-ok">发布中</span>';
+          if (!a.isActive) {
+            statusBadge = '<span class="badge badge-free">已下线</span>';
+          } else if (isExpired) {
+            statusBadge = '<span class="badge badge-warn">已过期</span>';
+          }
+
+          const previewText = String(a.content || '').length > 96
+            ? String(a.content).slice(0, 96) + '...'
+            : String(a.content || '');
+          const safeLink =
+            typeof a.linkUrl === 'string' &&
+            (a.linkUrl.startsWith('https://') || a.linkUrl.startsWith('http://'))
+              ? '<div class="ann-link-preview"><a href="' +
+                esc(a.linkUrl) +
+                '" target="_blank" rel="noopener noreferrer">' +
+                esc(a.linkText || a.linkUrl) +
+                '</a></div>'
+              : '';
+
+          const expiryText = a.expiresAt ? fmtDate(a.expiresAt) : '长期有效';
+          const emailStatusHtml = a.emailedAt
+            ? '<span>已推 ' + (a.emailedCount || 0) + ' 人</span><div class="sub">' + fmtDate(a.emailedAt) + '</div>'
+            : '<span class="muted">未推送</span>';
+
+          const emailDisabledAttr = announcementEmailEnabled
+            ? ''
+            : ' disabled title="请先配置并保存 Resend 发信通道"';
+
+          return '<tr>' +
+            '<td class="ann-type-cell">' + typeBadge + pinBadge + '</td>' +
+            '<td class="ann-content-cell">' +
+              '<strong>' + esc(a.title) + '</strong>' +
+              '<div class="ann-preview">' + esc(previewText) + '</div>' +
+              safeLink +
+            '</td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td>' + esc(expiryText) + '</td>' +
+            '<td>' + emailStatusHtml + '</td>' +
+            '<td class="op-cell">' +
+              '<button class="btn btn-sm" data-ann-act="edit" data-id="' + esc(a.id) + '">编辑</button>' +
+              '<button class="btn btn-sm" data-ann-act="toggle-active" data-id="' + esc(a.id) + '">' + (a.isActive ? '下线' : '发布') + '</button>' +
+              '<button class="btn btn-sm" data-ann-act="toggle-pin" data-id="' + esc(a.id) + '">' + (a.isPinned ? '取消置顶' : '置顶') + '</button>' +
+              '<button class="btn btn-sm" data-ann-act="send-email" data-id="' + esc(a.id) + '"' + emailDisabledAttr + '>邮件推送</button>' +
+              '<button class="btn btn-sm btn-danger" data-ann-act="delete" data-id="' + esc(a.id) + '">删除</button>' +
+            '</td>' +
+          '</tr>';
+        }).join('');
+      }
+
+      async function loadAnnouncements() {
+        try {
+          const res = await fetch('/user-api/admin/announcements', { credentials: 'same-origin' });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '加载通知列表失败', true);
+            return;
+          }
+          allAnnouncements = Array.isArray(body.announcements) ? body.announcements : [];
+          announcementsLoaded = true;
+          emailableUsersCount = Number(body.emailableUsersCount || 0);
+          announcementEmailEnabled = Boolean(body.emailEnabled);
+          renderAnnouncements();
+        } catch (err) {
+          showNotice('加载通知列表异常：' + err.message, true);
+        }
       }
 
       function renderStats(users) {
@@ -540,7 +831,7 @@ export function renderAdminHtml({
             showNotice(body.error || '操作失败', true);
           } else {
             showNotice('已更新用户 ' + body.user.username);
-            await loadUsers();
+            await refreshAll();
           }
         } catch (err) {
           showNotice('请求失败：' + err.message, true);
@@ -696,13 +987,196 @@ export function renderAdminHtml({
         }
       });
 
-      document.getElementById('refreshBtn').addEventListener('click', loadUsers);
+      toggleAnnouncementFormBtnEl.addEventListener('click', () => {
+        const isOpen = announcementFormWrapEl.style.display !== 'none';
+        if (isOpen) {
+          closeAnnouncementForm();
+        } else {
+          openAnnouncementForm(null);
+        }
+      });
+
+      cancelAnnouncementBtnEl.addEventListener('click', closeAnnouncementForm);
+
+      announcementFormEl.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = {
+          type: annTypeEl.value,
+          title: annTitleEl.value.trim(),
+          content: annContentEl.value.trim(),
+          linkUrl: annLinkUrlEl.value.trim() || null,
+          linkText: annLinkTextEl.value.trim() || null,
+          isActive: annIsActiveEl.checked,
+          isPinned: annIsPinnedEl.checked,
+          expiresAt: resolveExpiryTimestamp(annExpiryEl.value),
+        };
+        if (!payload.title || !payload.content) {
+          showNotice('请填写公告标题和正文内容', true);
+          return;
+        }
+        saveAnnouncementBtnEl.disabled = true;
+        try {
+          const isEdit = Boolean(editingAnnouncementId);
+          const endpoint = isEdit
+            ? '/user-api/admin/announcements/' + encodeURIComponent(editingAnnouncementId)
+            : '/user-api/admin/announcements';
+          const res = await fetch(endpoint, {
+            method: isEdit ? 'PATCH' : 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '保存通知失败', true);
+            return;
+          }
+          closeAnnouncementForm();
+          showNotice(isEdit ? '通知已更新。' : '新通知已保存。');
+          await loadAnnouncements();
+        } catch (err) {
+          showNotice('网络异常：' + err.message, true);
+        } finally {
+          saveAnnouncementBtnEl.disabled = false;
+        }
+      });
+
+      announcementRowsEl.addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-ann-act]');
+        if (!btn) return;
+        const id = btn.dataset.id;
+        const act = btn.dataset.annAct;
+        const item = allAnnouncements.find((a) => a.id === id);
+        if (!item) return;
+
+        if (act === 'edit') {
+          openAnnouncementForm(item);
+          return;
+        }
+
+        if (act === 'delete') {
+          if (!window.confirm('确定要删除通知「' + item.title + '」吗？删除后无法恢复。')) {
+            return;
+          }
+          btn.disabled = true;
+          try {
+            const res = await fetch('/user-api/admin/announcements/' + encodeURIComponent(id), {
+              method: 'DELETE',
+              credentials: 'same-origin',
+            });
+            const body = await res.json();
+            if (!res.ok) {
+              showNotice(body.error || '删除失败', true);
+            } else {
+              if (editingAnnouncementId === id) {
+                closeAnnouncementForm();
+              }
+              showNotice('已删除通知「' + item.title + '」。');
+              await loadAnnouncements();
+            }
+          } catch (err) {
+            showNotice('请求失败：' + err.message, true);
+          } finally {
+            btn.disabled = false;
+          }
+          return;
+        }
+
+        if (act === 'send-email') {
+          if (!announcementEmailEnabled) {
+            showNotice('请先在上方配置并保存 Resend 发信通道。', true);
+            return;
+          }
+          if (emailableUsersCount <= 0) {
+            showNotice('当前没有已绑定邮箱的活跃用户可推送。', true);
+            return;
+          }
+          if (
+            !window.confirm(
+              '确定通过 Resend 向当前 ' +
+                emailableUsersCount +
+                ' 位已绑定邮箱的活跃用户推送通知「' +
+                item.title +
+                '」吗？'
+            )
+          ) {
+            return;
+          }
+          btn.disabled = true;
+          try {
+            const res = await fetch(
+              '/user-api/admin/announcements/' + encodeURIComponent(id) + '/send-email',
+              {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+              }
+            );
+            const body = await res.json();
+            if (!res.ok) {
+              showNotice(body.error || '邮件推送失败', true);
+            } else {
+              showNotice(
+                '邮件推送完成：成功 ' +
+                  body.sent +
+                  ' 封' +
+                  (body.failed ? '，失败 ' + body.failed + ' 封' : '') +
+                  '（共 ' +
+                  body.total +
+                  ' 人）。'
+              );
+              await loadAnnouncements();
+            }
+          } catch (err) {
+            showNotice('请求失败：' + err.message, true);
+          } finally {
+            btn.disabled = false;
+          }
+          return;
+        }
+
+        let patch = null;
+        if (act === 'toggle-active') {
+          patch = { isActive: !item.isActive };
+        } else if (act === 'toggle-pin') {
+          patch = { isPinned: !item.isPinned };
+        }
+        if (!patch) return;
+
+        btn.disabled = true;
+        try {
+          const res = await fetch('/user-api/admin/announcements/' + encodeURIComponent(id), {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+          });
+          const body = await res.json();
+          if (!res.ok) {
+            showNotice(body.error || '更新通知状态失败', true);
+          } else {
+            showNotice('已更新通知「' + body.announcement.title + '」。');
+            await loadAnnouncements();
+          }
+        } catch (err) {
+          showNotice('请求失败：' + err.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      async function refreshAll() {
+        await Promise.all([loadUsers(), loadAnnouncements()]);
+      }
+
+      document.getElementById('refreshBtn').addEventListener('click', refreshAll);
       document.getElementById('logoutBtn').addEventListener('click', async () => {
         await fetch('/user-api/logout', { method: 'POST', credentials: 'same-origin' });
         location.reload();
       });
 
-      loadUsers();
+      refreshAll();
     </script>`
       : `
     <div class="login-wrap">
@@ -1065,6 +1539,8 @@ export function renderAdminHtml({
     .badge-neutral { background: #F4F4F5; color: var(--muted); }
     .badge-ok { background: var(--ok-soft); color: var(--ok); }
     .badge-danger { background: var(--danger-soft); color: var(--danger); }
+    .badge-warn { background: #FEF3C7; color: #92400E; }
+    .badge-pin { background: var(--copper-soft); color: #9A3412; }
 
     .notice { padding: 11px 14px; border-radius: 12px; font-size: 13px; font-weight: 500; }
     .notice-ok { background: var(--ok-soft); color: #115E59; border: 1px solid rgba(15, 118, 110, 0.25); }
@@ -1114,18 +1590,83 @@ export function renderAdminHtml({
     .login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
     .login-eyebrow { font-size: 12px; font-weight: 600; color: var(--accent); }
     label { display: block; margin: 14px 0; font-size: 13px; font-weight: 500; color: var(--ink); }
-    input[type="text"], input[type="password"], input:not([type]) {
+    input[type="text"], input[type="password"], input[type="url"], input[type="email"]:not(.search-input), input:not([type]), select, textarea {
       width: 100%;
       margin-top: 6px;
       padding: 9px 12px;
       border: 1px solid var(--border);
       border-radius: 10px;
       font-size: 14px;
+      font-family: inherit;
       background: var(--bg);
       color: var(--ink);
       outline: none;
     }
-    input:focus { border-color: var(--accent); background: #FFFFFF; }
+    textarea { resize: vertical; line-height: 1.55; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); background: #FFFFFF; }
+    .announcements-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .announcement-form-wrap {
+      margin-bottom: 16px;
+      padding: 16px 18px;
+      border-radius: 14px;
+      background: #F7F5EE;
+      border: 1px solid var(--border-strong);
+    }
+    .announcement-form-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+      font-size: 13px;
+    }
+    .announcement-form label { margin: 0 0 12px; }
+    .announcement-form-row {
+      display: grid;
+      grid-template-columns: 160px minmax(0, 1fr) 180px;
+      gap: 12px;
+      align-items: end;
+    }
+    .announcement-link-row { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+    .announcement-form-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding-top: 4px;
+    }
+    .announcement-checks { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+    .announcement-form .check-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      cursor: pointer;
+      user-select: none;
+    }
+    .check-label input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--accent);
+    }
+    .ann-type-cell { white-space: nowrap; }
+    .ann-content-cell { min-width: 240px; max-width: 420px; }
+    .ann-preview {
+      margin-top: 4px;
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .ann-link-preview { margin-top: 4px; font-size: 12px; }
+    .ann-link-preview a { color: var(--accent); font-weight: 500; text-decoration: none; }
+    .ann-link-preview a:hover { text-decoration: underline; }
+    @media (max-width: 900px) {
+      .announcement-form-row, .announcement-link-row { grid-template-columns: 1fr; }
+    }
     .login-footer { margin-top: 16px; text-align: center; font-size: 13px; }
     .login-footer a { color: var(--accent); text-decoration: none; font-weight: 500; }
     .login-footer a:hover { text-decoration: underline; }

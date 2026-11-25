@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { hashPassword } from './crypto.js';
+import { serializeAnnouncement } from './announcements.js';
 
 export const USERNAME_REGEX = /^[a-z0-9_.-]{3,32}$/;
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -92,6 +93,24 @@ export function openDatabase(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS idx_reset_codes_email_created
       ON password_reset_codes(email, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS announcements (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'notice' CHECK (type IN ('notice', 'activity', 'maintenance')),
+      link_url TEXT,
+      link_text TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+      is_pinned INTEGER NOT NULL DEFAULT 0 CHECK (is_pinned IN (0, 1)),
+      expires_at INTEGER,
+      emailed_at INTEGER,
+      emailed_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_announcements_active_sort
+      ON announcements(is_active, is_pinned DESC, updated_at DESC);
   `);
 
   const userColumns = db.prepare('PRAGMA table_info(users)').all();
@@ -184,6 +203,43 @@ export function openDatabase(dbPath) {
     UPDATE users
     SET password_hash = ?, updated_at = ?
     WHERE id = ?
+  `);
+  const stmtListActiveAnnouncements = db.prepare(`
+    SELECT * FROM announcements
+    WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > ?)
+    ORDER BY is_pinned DESC, updated_at DESC, rowid DESC
+    LIMIT ?
+  `);
+  const stmtListAllAnnouncements = db.prepare(`
+    SELECT * FROM announcements
+    ORDER BY is_pinned DESC, updated_at DESC, rowid DESC
+  `);
+  const stmtFindAnnouncementById = db.prepare('SELECT * FROM announcements WHERE id = ?');
+  const stmtInsertAnnouncement = db.prepare(`
+    INSERT INTO announcements (
+      id, title, content, type, link_url, link_text,
+      is_active, is_pinned, expires_at, emailed_at, emailed_count,
+      created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?)
+  `);
+  const stmtUpdateAnnouncement = db.prepare(`
+    UPDATE announcements
+    SET title = ?, content = ?, type = ?, link_url = ?, link_text = ?,
+        is_active = ?, is_pinned = ?, expires_at = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  const stmtDeleteAnnouncement = db.prepare('DELETE FROM announcements WHERE id = ?');
+  const stmtRecordAnnouncementEmailed = db.prepare(`
+    UPDATE announcements
+    SET emailed_at = ?, emailed_count = ?
+    WHERE id = ?
+  `);
+  const stmtListEmailableActiveUsers = db.prepare(`
+    SELECT id, username, email
+    FROM users
+    WHERE disabled = 0 AND email IS NOT NULL AND email != ''
+    ORDER BY created_at ASC
   `);
 
   return {
@@ -380,6 +436,91 @@ export function openDatabase(dbPath) {
 
     markResetCodesUsed(userId) {
       stmtInvalidateUserResetCodes.run(Date.now(), userId);
+    },
+
+    listActiveAnnouncements(now = Date.now(), limit = 10) {
+      const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 10;
+      return stmtListActiveAnnouncements.all(now, safeLimit).map(serializeAnnouncement);
+    },
+
+    listAllAnnouncements() {
+      return stmtListAllAnnouncements.all().map(serializeAnnouncement);
+    },
+
+    findAnnouncementById(id) {
+      return serializeAnnouncement(stmtFindAnnouncementById.get(id) || null);
+    },
+
+    createAnnouncement(input) {
+      const now = Date.now();
+      const id = crypto.randomUUID();
+      stmtInsertAnnouncement.run(
+        id,
+        input.title,
+        input.content,
+        input.type ?? 'notice',
+        input.linkUrl ?? null,
+        input.linkText ?? null,
+        input.isActive === false ? 0 : 1,
+        input.isPinned ? 1 : 0,
+        input.expiresAt ?? null,
+        now,
+        now,
+      );
+      return serializeAnnouncement(stmtFindAnnouncementById.get(id));
+    },
+
+    updateAnnouncement(id, patch) {
+      const existing = stmtFindAnnouncementById.get(id);
+      if (!existing) return null;
+
+      const nextTitle = patch.title !== undefined ? patch.title : existing.title;
+      const nextContent = patch.content !== undefined ? patch.content : existing.content;
+      const nextType = patch.type !== undefined ? patch.type : existing.type;
+      const nextLinkUrl = patch.linkUrl !== undefined ? patch.linkUrl : existing.link_url;
+      const nextLinkText = patch.linkText !== undefined ? patch.linkText : existing.link_text;
+      const nextIsActive =
+        patch.isActive !== undefined ? (patch.isActive ? 1 : 0) : existing.is_active;
+      const nextIsPinned =
+        patch.isPinned !== undefined ? (patch.isPinned ? 1 : 0) : existing.is_pinned;
+      const nextExpiresAt =
+        patch.expiresAt !== undefined ? patch.expiresAt : existing.expires_at;
+      const now = Date.now();
+
+      stmtUpdateAnnouncement.run(
+        nextTitle,
+        nextContent,
+        nextType,
+        nextLinkUrl,
+        nextLinkText,
+        nextIsActive,
+        nextIsPinned,
+        nextExpiresAt,
+        now,
+        id,
+      );
+      return serializeAnnouncement(stmtFindAnnouncementById.get(id));
+    },
+
+    deleteAnnouncement(id) {
+      const result = stmtDeleteAnnouncement.run(id);
+      return Number(result?.changes || 0) > 0;
+    },
+
+    recordAnnouncementEmailed(id, count) {
+      const existing = stmtFindAnnouncementById.get(id);
+      if (!existing) return null;
+      const safeCount = Number.isInteger(count) && count >= 0 ? count : 0;
+      stmtRecordAnnouncementEmailed.run(Date.now(), safeCount, id);
+      return serializeAnnouncement(stmtFindAnnouncementById.get(id));
+    },
+
+    listEmailableActiveUsers() {
+      return stmtListEmailableActiveUsers.all().map((row) => ({
+        id: row.id,
+        username: row.username,
+        email: row.email,
+      }));
     },
   };
 }
