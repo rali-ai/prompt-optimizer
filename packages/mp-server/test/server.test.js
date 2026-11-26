@@ -3,6 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { createApp } from '../src/app.js'
+import { loadConfig } from '../src/config.js'
 import { WechatError } from '../src/wechat.js'
 import { LlmError } from '../src/llm.js'
 
@@ -276,4 +277,49 @@ test('unknown routes answer a JSON 404', async (t) => {
   const res = await fetch(app.url + '/api/mp/nothing')
   assert.equal(res.status, 404)
   assert.equal((await res.json()).error.code, 'not_found')
+})
+
+test('L3: dev mode generates ephemeral random sessionSecret per startup instead of hardcoded fallback', () => {
+  const cfg1 = loadConfig({ MP_DEV: '1', LLM_FAKE: '1' })
+  const cfg2 = loadConfig({ MP_DEV: '1', LLM_FAKE: '1' })
+  assert.notEqual(cfg1.sessionSecret, 'dev-only-session-secret')
+  assert.equal(cfg1.sessionSecret.length, 64)
+  assert.notEqual(cfg1.sessionSecret, cfg2.sessionSecret)
+  assert.equal(cfg1.limits.loginPerWindow, 20)
+  assert.equal(cfg1.limits.loginWindowMs, 15 * 60 * 1000)
+  assert.equal(cfg1.limits.loginMaxEntries, 5000)
+})
+
+test('L3: login enforces bounded per-IP rate limiting and resets after window', async (t) => {
+  const app = await start({
+    limits: { loginPerWindow: 2, loginWindowMs: 60000, loginMaxEntries: 2 }
+  })
+  t.after(app.close)
+
+  const loginWithIp = async (ip, code = 'u1') => {
+    const res = await fetch(app.url + '/api/mp/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Real-Ip': ip },
+      body: JSON.stringify({ code })
+    })
+    return { status: res.status, retryAfter: res.headers.get('retry-after'), body: await res.json() }
+  }
+
+  assert.equal((await loginWithIp('198.51.100.1')).status, 200)
+  assert.equal((await loginWithIp('198.51.100.1')).status, 200)
+  const blocked = await loginWithIp('198.51.100.1')
+  assert.equal(blocked.status, 429)
+  assert.equal(blocked.body.error.code, 'rate_limited')
+  assert.ok(Number(blocked.retryAfter) >= 1)
+
+  // Separate IP succeeds independently
+  assert.equal((await loginWithIp('198.51.100.2')).status, 200)
+
+  // Window reset allows first IP again
+  app.clock.now += 60000
+  assert.equal((await loginWithIp('198.51.100.1')).status, 200)
+
+  // Bounded maxEntries (2): filling with 2 newer IPs evicts oldest without crashing
+  assert.equal((await loginWithIp('198.51.100.3')).status, 200)
+  assert.equal((await loginWithIp('198.51.100.4')).status, 200)
 })

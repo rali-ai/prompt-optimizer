@@ -36,8 +36,11 @@ export function createLlm({ baseUrl, apiKey, model, timeoutMs, fetch = globalThi
       if (error.name === 'TimeoutError') throw new LlmError('timeout', '模型响应超时')
       throw new LlmError('upstream', '连接模型服务失败：' + error.message)
     }
+    if (!res.ok) {
+      await res.body?.cancel?.().catch(() => {})
+      throw new LlmError('upstream', `模型服务返回 HTTP ${res.status}`)
+    }
     const body = await res.text()
-    if (!res.ok) throw new LlmError('upstream', `模型服务返回 HTTP ${res.status}：${body.slice(0, 200)}`)
     let data
     try {
       data = JSON.parse(body)

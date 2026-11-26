@@ -1,11 +1,16 @@
 // HTTP 层：路由、请求体读取与校验、错误转中文 JSON。业务依赖（微信、模型、令牌、限流）全部由参数注入，测试里换成假的。
 import http from 'node:http'
+import net from 'node:net'
 
 import { buildMessages, LANGS, MODE_IDS } from './templates.js'
 import { LlmError } from './llm.js'
 import { WechatError } from './wechat.js'
 import { createTokens } from './token.js'
 import { createLimiter } from './limits.js'
+
+const DEFAULT_LOGIN_RATE_LIMIT_MAX = 20
+const DEFAULT_LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000
+const DEFAULT_LOGIN_RATE_LIMIT_MAX_ENTRIES = 5000
 
 // 错误码 → [HTTP 状态, 给用户看的中文说明]。小程序端按 code 分支，message 直接展示。
 const ERRORS = {
@@ -29,18 +34,84 @@ const ERRORS = {
 export const ERROR_CODES = Object.keys(ERRORS)
 
 class HttpError extends Error {
-  constructor(code, message) {
+  constructor(code, message, headers = null) {
     super(message || ERRORS[code][1])
     this.code = code
+    this.headers = headers
   }
 }
 
 const MODES = new Set([...MODE_IDS, 'iterate'])
 
-function send(res, status, body) {
+function send(res, status, body, extraHeaders = null) {
   const text = JSON.stringify(body)
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(text) })
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(text),
+    ...(extraHeaders || {})
+  })
   res.end(text)
+}
+
+function normalizeIp(raw) {
+  if (typeof raw !== 'string') return ''
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if (/^::ffff:/i.test(trimmed)) {
+    const mapped = trimmed.slice(7)
+    if (net.isIPv4(mapped)) return mapped
+  }
+  return net.isIP(trimmed) !== 0 ? trimmed : ''
+}
+
+function getClientIp(req) {
+  const realIpHeader = req.headers['x-real-ip']
+  const rawRealIp = Array.isArray(realIpHeader) ? realIpHeader[0] : realIpHeader
+  const realIp = normalizeIp(rawRealIp)
+  if (realIp) return realIp
+  const remote = req.socket?.remoteAddress
+  return normalizeIp(remote) || remote || 'unknown'
+}
+
+function createBoundedIpRateLimiter({ max, windowMs, maxEntries }, now) {
+  const cap = Number.isInteger(maxEntries) && maxEntries > 0 ? maxEntries : DEFAULT_LOGIN_RATE_LIMIT_MAX_ENTRIES
+  const limit = Number.isInteger(max) && max > 0 ? max : DEFAULT_LOGIN_RATE_LIMIT_MAX
+  const windowDuration = Number.isInteger(windowMs) && windowMs > 0 ? windowMs : DEFAULT_LOGIN_RATE_LIMIT_WINDOW_MS
+  const buckets = new Map()
+
+  function pruneExpired(t) {
+    for (const [key, entry] of buckets.entries()) {
+      if (entry.resetAt <= t) buckets.delete(key)
+    }
+  }
+
+  return {
+    consume(key) {
+      const t = now()
+      let entry = buckets.get(key)
+      if (entry && entry.resetAt <= t) {
+        buckets.delete(key)
+        entry = undefined
+      }
+      if (!entry) {
+        if (buckets.size >= cap) {
+          pruneExpired(t)
+          while (buckets.size >= cap) {
+            const oldest = buckets.keys().next().value
+            if (oldest === undefined) break
+            buckets.delete(oldest)
+          }
+        }
+        entry = { count: 0, resetAt: t + windowDuration }
+        buckets.set(key, entry)
+      }
+      entry.count += 1
+      return {
+        allowed: entry.count <= limit,
+        retryAfterSec: Math.max(1, Math.ceil((entry.resetAt - t) / 1000))
+      }
+    }
+  }
 }
 
 function readJson(req, maxBytes) {
@@ -104,6 +175,14 @@ function bearer(req) {
 export function createApp({ config, wechat, llm, now = Date.now, log = console.error }) {
   const tokens = createTokens(config.sessionSecret, config.sessionTtlSec, now)
   const limiter = createLimiter(config.limits, now)
+  const loginIpLimiter = createBoundedIpRateLimiter(
+    {
+      max: config.limits.loginPerWindow,
+      windowMs: config.limits.loginWindowMs,
+      maxEntries: config.limits.loginMaxEntries
+    },
+    now
+  )
   const { maxBodyBytes, maxInputChars } = config.limits
 
   async function check(openid, content, riskyCode) {
@@ -121,6 +200,12 @@ export function createApp({ config, wechat, llm, now = Date.now, log = console.e
   }
 
   async function login(req) {
+    const ipLimit = loginIpLimiter.consume(getClientIp(req))
+    if (!ipLimit.allowed) {
+      throw new HttpError('rate_limited', '登录请求太频繁了，请稍后再试', {
+        'Retry-After': String(ipLimit.retryAfterSec)
+      })
+    }
     const body = await readJson(req, maxBodyBytes)
     const code = text(body.code).trim()
     if (!code || code.length > 128) throw new HttpError('bad_request', '缺少登录凭证 code')
@@ -177,7 +262,12 @@ export function createApp({ config, wechat, llm, now = Date.now, log = console.e
       const known = error instanceof HttpError
       if (!known) log('[internal]', error)
       const code = known ? error.code : 'internal'
-      send(res, ERRORS[code][0], { error: { code, message: known ? error.message : ERRORS.internal[1] } })
+      send(
+        res,
+        ERRORS[code][0],
+        { error: { code, message: known ? error.message : ERRORS.internal[1] } },
+        known ? error.headers : null
+      )
     }
   })
   server.requestTimeout = config.limits.requestTimeoutMs

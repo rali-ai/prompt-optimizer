@@ -32,16 +32,13 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { ListToolsRequestSchema, CallToolRequestSchema, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { CoreServicesManager } from './adapters/core-services.js';
 import { loadConfig, type MCPServerConfig } from './config/environment.js';
 import * as logger from './utils/logging.js';
 import { ParameterValidator } from './adapters/parameter-adapter.js';
 import { getTemplateOptions, getDefaultTemplateId } from './config/templates.js';
-import { registerHealthzRoute } from './health.js';
-import { randomUUID } from 'node:crypto';
-import express from 'express';
+import { createMcpHttpApp } from './http-app.js';
 
 // 创建服务器实例的工厂函数
 async function createServerInstance(config: MCPServerConfig) {
@@ -344,7 +341,7 @@ async function setupServerHandlers(server: Server, coreServices: CoreServicesMan
         isError: true,
         content: [{
           type: "text",
-          text: `Tool execution error: ${(error as Error).message}`
+          text: "Tool execution failed. Please check your parameters or try again later."
         }]
       };
     }
@@ -376,89 +373,15 @@ async function main() {
     // 启动传输层
     if (transport === 'http') {
       logger.info('Starting HTTP server with session management...');
-      // 使用 Express 和会话管理支持多客户端连接
-      const app = express();
-      app.use(express.json());
-      registerHealthzRoute(app, coreServices);
-      logger.info('Express app configured');
-
-      // 存储每个会话的传输实例
-      const transports: { [sessionId: string]: StreamableHTTPServerTransport } = {};
-
-      // 处理 POST 请求（客户端到服务器通信）
-      app.post('/mcp', async (req, res) => {
-        // 检查现有会话ID
-        const sessionId = req.headers['mcp-session-id'] as string | undefined;
-        let httpTransport: StreamableHTTPServerTransport;
-
-        if (sessionId && transports[sessionId]) {
-          // 重用现有传输
-          httpTransport = transports[sessionId];
-        } else if (!sessionId && isInitializeRequest(req.body)) {
-          // 新的初始化请求 - 为每个会话创建独立的服务器实例
-          httpTransport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-            onsessioninitialized: (sessionId) => {
-              // 存储传输实例
-              transports[sessionId] = httpTransport;
-            },
-            // MCP 协议不需要复杂的 CORS 配置，允许所有来源
-            allowedOrigins: ['*'],
-            enableDnsRebindingProtection: false
-          });
-
-          // 清理传输实例
-          httpTransport.onclose = () => {
-            if (httpTransport.sessionId) {
-              delete transports[httpTransport.sessionId];
-            }
-          };
-
-          // 为每个会话创建独立的服务器实例
+      const { app } = createMcpHttpApp({
+        port,
+        env: process.env,
+        healthProvider: coreServices,
+        createSessionServer: async () => {
           const { server } = await createServerInstance(config);
           await setupServerHandlers(server, coreServices);
-
-          // 连接到 MCP 服务器
-          await server.connect(httpTransport);
-        } else {
-          // 无效请求
-          res.status(400).json({
-            jsonrpc: '2.0',
-            error: {
-              code: -32000,
-              message: 'Bad Request: No valid session ID provided',
-            },
-            id: null,
-          });
-          return;
+          return server;
         }
-
-        // 处理请求
-        await httpTransport.handleRequest(req, res, req.body);
-      });
-
-      // 处理 GET 请求（服务器到客户端通知，通过 SSE）
-      app.get('/mcp', async (req, res) => {
-        const sessionId = req.headers['mcp-session-id'] as string | undefined;
-        if (!sessionId || !transports[sessionId]) {
-          res.status(400).send('Invalid or missing session ID');
-          return;
-        }
-
-        const httpTransport = transports[sessionId];
-        await httpTransport.handleRequest(req, res);
-      });
-
-      // 处理 DELETE 请求（会话终止）
-      app.delete('/mcp', async (req, res) => {
-        const sessionId = req.headers['mcp-session-id'] as string | undefined;
-        if (!sessionId || !transports[sessionId]) {
-          res.status(400).send('Invalid or missing session ID');
-          return;
-        }
-
-        const httpTransport = transports[sessionId];
-        await httpTransport.handleRequest(req, res);
       });
 
       logger.info('Setting up HTTP server listener...');
@@ -510,7 +433,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// 导出 main 函数供外部调用
-export { main };
+// 导出 main 与核心工厂函数供外部调用及测试
+export { main, setupServerHandlers, createMcpHttpApp };
 
 // 创建一个单独的启动文件，避免在构建时执行

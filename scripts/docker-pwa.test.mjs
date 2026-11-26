@@ -158,7 +158,10 @@ test('Docker serves a public PWA shell without caching configuration, APIs or au
     function assertSafetyHeaders(response) {
       assert.equal(response.headers.get('x-frame-options'), 'SAMEORIGIN')
       assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
-      assert.ok(response.headers.get('content-security-policy'))
+      const csp = response.headers.get('content-security-policy')
+      assert.ok(csp)
+      assert.match(csp, /(?:^|;\s*)script-src\s+'self'(?:;|$)/)
+      assert.doesNotMatch(csp, /(?:^|;\s*)default-src[^;]*\bhttp:/)
       assert.equal(response.headers.get('referrer-policy'), 'no-referrer-when-downgrade')
     }
 
@@ -215,10 +218,16 @@ test('Docker serves a public PWA shell without caching configuration, APIs or au
         assert.equal(response.status, 200, resource)
         assert.match(response.headers.get('content-type'), /(?:application|text)\/javascript/, resource)
       }
-      for (const [resource, method] of [['/mcp', 'GET'], ['/mcp/result.js', 'GET'], ['/mcp', 'OPTIONS'], ['/healthz', 'GET']]) {
+      const healthz = await probe(open, '/healthz')
+      assert.equal(healthz.response.status, 200, 'GET /healthz returns direct health check')
+      assert.equal(healthz.body, '{"ok":true}')
+      assert.equal(healthz.response.headers.get('cache-control'), 'no-store', 'GET /healthz')
+      assert.equal(healthz.response.headers.get('x-content-type-options'), 'nosniff', 'GET /healthz')
+      for (const [resource, method] of [['/mcp', 'GET'], ['/mcp/result.js', 'GET'], ['/mcp', 'OPTIONS']]) {
         const { response } = await probe(open, resource, { method })
-        assert.equal(response.status, method === 'OPTIONS' ? 204 : 502, `${method} ${resource} preserves proxy routing`)
+        assert.equal(response.status, 502, `${method} ${resource} preserves proxy routing`)
         assert.equal(response.headers.get('cache-control'), 'no-store', `${method} ${resource}`)
+        assert.notEqual(response.headers.get('access-control-allow-origin'), '*', `${method} ${resource} must not emit wildcard CORS`)
       }
       const authorized = (await probe(open, '/index.html', { headers: { Authorization: authorization } })).response
       assert.equal(authorized.headers.get('cache-control'), 'no-store')
@@ -272,6 +281,21 @@ test('Docker serves a public PWA shell without caching configuration, APIs or au
         assert.equal(isPublicShellResponse(response), false, resource)
         assertSafetyHeaders(response)
       }
+      const anonymousMcp = (await probe(basic, '/mcp')).response
+      assert.equal(anonymousMcp.status, 401, '/mcp requires Basic Auth when enabled')
+      assert.match(anonymousMcp.headers.get('www-authenticate'), /^Basic /, '/mcp')
+      assert.equal(anonymousMcp.headers.get('cache-control'), 'no-store', '/mcp')
+      assert.notEqual(anonymousMcp.headers.get('access-control-allow-origin'), '*', '/mcp')
+
+      const authenticatedMcp = (await probe(basic, '/mcp', { headers: { Authorization: authorization } })).response
+      assert.equal(authenticatedMcp.status, 502, 'authenticated /mcp reaches proxy upstream')
+      assert.equal(authenticatedMcp.headers.get('cache-control'), 'no-store', 'authenticated /mcp')
+      assert.notEqual(authenticatedMcp.headers.get('access-control-allow-origin'), '*', 'authenticated /mcp')
+
+      const basicHealthz = await probe(basic, '/healthz')
+      assert.equal(basicHealthz.response.status, 200, '/healthz stays reachable without Basic Auth')
+      assert.equal(basicHealthz.body, '{"ok":true}')
+      assert.equal(basicHealthz.response.headers.get('cache-control'), 'no-store', '/healthz')
     })
   } finally {
     const cleanupErrors = []

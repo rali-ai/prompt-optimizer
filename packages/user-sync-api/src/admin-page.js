@@ -10,6 +10,15 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+export function safeScriptJson(val) {
+  return JSON.stringify(val ?? null)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 const BRAND_LOGO_SVG = `<svg width="30" height="30" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <defs>
     <linearGradient id="gp-admin-jade" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
@@ -42,10 +51,12 @@ export function renderAdminHtml({
   emailResetEnabled = false,
   resendKeyHint = '',
   mailFrom = '高词 · GoPrmpt <noreply@goprmpt.com>',
+  scriptNonce = '',
 }) {
   const title = '高词 · GoPrmpt 用户与会员管理后台';
   const enabledFlag = Boolean(membershipEnabled);
   const mailEnabledFlag = Boolean(emailResetEnabled);
+  const scriptNonceAttr = scriptNonce ? ` nonce="${escapeHtml(scriptNonce)}"` : '';
   const credits = {
     free: Number(monthlyCredits?.free ?? DEFAULT_MONTHLY_CREDITS.free),
     standard: Number(monthlyCredits?.standard ?? DEFAULT_MONTHLY_CREDITS.standard),
@@ -608,10 +619,10 @@ export function renderAdminHtml({
       </section>
     </div>
 
-    <script>
-      const CURRENT_ADMIN_USERNAME = ${JSON.stringify(String(username || ''))};
-      const ANNOUNCEMENT_TYPES_META = ${JSON.stringify(ANNOUNCEMENT_TYPES)};
-      const TIER_META_MAP = ${JSON.stringify(TIER_META)};
+    <script${scriptNonceAttr}>
+      const CURRENT_ADMIN_USERNAME = ${safeScriptJson(String(username || ''))};
+      const ANNOUNCEMENT_TYPES_META = ${safeScriptJson(ANNOUNCEMENT_TYPES)};
+      const TIER_META_MAP = ${safeScriptJson(TIER_META)};
       const ONE_DAY_MS = 24 * 60 * 60 * 1000;
       const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
       const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
@@ -715,7 +726,7 @@ export function renderAdminHtml({
       const closeAnnCommentsBtnEl = document.getElementById('closeAnnCommentsBtn');
 
       let latestTempPassword = '';
-      let currentMembershipEnabled = ${enabledFlag ? 'true' : 'false'};
+      let currentMembershipEnabled = ${safeScriptJson(enabledFlag)};
       let allUsers = [];
       let currentFilter = 'all';
       let allPlatformModels = [];
@@ -725,7 +736,7 @@ export function renderAdminHtml({
       let allAnnouncements = [];
       let announcementsLoaded = false;
       let emailableUsersCount = 0;
-      let announcementEmailEnabled = ${mailEnabledFlag ? 'true' : 'false'};
+      let announcementEmailEnabled = ${safeScriptJson(mailEnabledFlag)};
       let editingAnnouncementId = null;
       let editingAnnouncementExpiresAt = null;
       let activeCommentsAnnouncementId = null;
@@ -2421,7 +2432,7 @@ export function renderAdminHtml({
         </div>
       </section>
     </div>
-    <script>
+    <script${scriptNonceAttr}>
       const form = document.getElementById('loginForm');
       const notice = document.getElementById('loginNotice');
       function showLoginNotice(msg, isError) {

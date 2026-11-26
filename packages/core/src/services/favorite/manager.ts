@@ -30,6 +30,35 @@ import {
   switchPromptAssetCurrentVersion,
 } from '../prompt-model/favorite';
 
+const CATEGORY_NAME_MAX_LENGTH = 50;
+
+/**
+ * 清洗并校验收藏分类名称：去除首尾空白、ASCII 控制字符和尖括号，限制长度 1..50
+ */
+export function sanitizeCategoryName(name: string): string {
+  if (typeof name !== 'string') {
+    throw new FavoriteValidationError('Category name cannot be empty');
+  }
+  let cleaned = '';
+  for (const char of name) {
+    const code = char.charCodeAt(0);
+    if ((code >= 0x00 && code <= 0x1f) || code === 0x7f || char === '<' || char === '>') {
+      continue;
+    }
+    cleaned += char;
+  }
+  const sanitized = cleaned.trim();
+  if (!sanitized) {
+    throw new FavoriteValidationError('Category name cannot be empty');
+  }
+  if (sanitized.length > CATEGORY_NAME_MAX_LENGTH) {
+    throw new FavoriteValidationError(
+      `Category name length must be between 1 and ${CATEGORY_NAME_MAX_LENGTH} characters`
+    );
+  }
+  return sanitized;
+}
+
 /**
  * 收藏管理器实现
  */
@@ -654,15 +683,14 @@ export class FavoriteManager implements IFavoriteManager {
   async addCategory(category: Omit<FavoriteCategory, 'id' | 'createdAt'>): Promise<string> {
     await this.ensureInitialized();
 
-    if (!category.name?.trim()) {
-      throw new FavoriteValidationError('Category name cannot be empty');
-    }
+    const sanitizedName = sanitizeCategoryName(category.name);
 
     const now = Date.now();
     const id = `cat_${now}_${Math.random().toString(36).substr(2, 9)}`;
 
     const newCategory: FavoriteCategory = {
       ...category,
+      name: sanitizedName,
       id,
       createdAt: now,
       sortOrder: category.sortOrder || 0
@@ -672,9 +700,9 @@ export class FavoriteManager implements IFavoriteManager {
       await this.storageProvider.updateData(this.STORAGE_KEYS.CATEGORIES, (categories: FavoriteCategory[] | null) => {
         const categoriesList = categories || [];
         // 检查是否已存在同名分类
-        const existing = categoriesList.find(c => c.name === category.name);
+        const existing = categoriesList.find(c => c.name === sanitizedName);
         if (existing) {
-          throw new FavoriteValidationError(`Category already exists: ${category.name}`);
+          throw new FavoriteValidationError(`Category already exists: ${sanitizedName}`);
         }
         return [...categoriesList, newCategory];
       });
@@ -690,6 +718,13 @@ export class FavoriteManager implements IFavoriteManager {
   }
 
   async updateCategory(id: string, updates: Partial<FavoriteCategory>): Promise<void> {
+    await this.ensureInitialized();
+
+    const normalizedUpdates: Partial<FavoriteCategory> = { ...updates };
+    if (Object.prototype.hasOwnProperty.call(updates, 'name')) {
+      normalizedUpdates.name = sanitizeCategoryName(updates.name as string);
+    }
+
     try {
       await this.storageProvider.updateData(this.STORAGE_KEYS.CATEGORIES, (categories: FavoriteCategory[] | null) => {
         const categoriesList = categories || [];
@@ -700,7 +735,7 @@ export class FavoriteManager implements IFavoriteManager {
 
         categoriesList[index] = {
           ...categoriesList[index],
-          ...updates
+          ...normalizedUpdates
         };
 
         return categoriesList;
@@ -1299,10 +1334,11 @@ export class FavoriteManager implements IFavoriteManager {
         (raw.parentId !== undefined && typeof raw.parentId !== 'string')) {
         throw new FavoriteValidationError('Invalid imported category');
       }
+      const sanitizedName = sanitizeCategoryName(raw.name);
       const id = textId(raw.id) ?? newId('cat', categoryIds);
       if (importedCategories.has(id)) throw new FavoriteValidationError(`Duplicate category ID: ${id}`);
       importedCategories.set(id, {
-        id, name: raw.name.trim(),
+        id, name: sanitizedName,
         ...(typeof raw.description === 'string' ? { description: raw.description } : {}),
         ...(typeof raw.color === 'string' ? { color: raw.color } : {}),
         ...(textId(raw.parentId) ? { parentId: raw.parentId } : {}),

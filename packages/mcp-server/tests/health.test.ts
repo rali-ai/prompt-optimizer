@@ -77,20 +77,10 @@ describe('MCP health route', () => {
     const response = await fetch(running.url);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      initialized: true,
-      services: {
-        modelManager: true,
-        llmService: true,
-        languageService: true,
-        templateManager: true,
-        historyManager: true,
-        promptService: true
-      }
-    });
+    expect(await response.json()).toEqual({ ok: true });
   });
 
-  it('returns 503 when any required service is unhealthy', async () => {
+  it('returns 503 with minimal body when any required service is unhealthy', async () => {
     const provider: TestHealthProvider = {
       getHealthStatus: vi.fn().mockResolvedValue({
         initialized: true,
@@ -107,18 +97,12 @@ describe('MCP health route', () => {
     const response = await fetch(running.url);
 
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      initialized: true,
-      services: {
-        modelManager: true,
-        llmService: false
-      }
-    });
+    expect(await response.json()).toEqual({ ok: false });
   });
 
-  it('returns 503 when the health provider throws', async () => {
+  it('returns 503 without leaking error message when the health provider throws', async () => {
     const provider: TestHealthProvider = {
-      getHealthStatus: vi.fn().mockRejectedValue(new Error('boom'))
+      getHealthStatus: vi.fn().mockRejectedValue(new Error('secret-internal-boom'))
     };
 
     const running = await startHealthServer(provider);
@@ -127,10 +111,8 @@ describe('MCP health route', () => {
     const response = await fetch(running.url);
 
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      initialized: false,
-      services: {},
-      error: 'boom'
-    });
+    const body = await response.json();
+    expect(body).toEqual({ ok: false });
+    expect(JSON.stringify(body)).not.toContain('secret-internal-boom');
   });
 });

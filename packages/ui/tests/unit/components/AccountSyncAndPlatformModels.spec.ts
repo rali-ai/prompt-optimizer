@@ -233,6 +233,138 @@ describe('AccountSyncButton credits card and platform model sync', () => {
       window.removeEventListener(MODELS_SYNCED_EVENT, syncedListener)
     }
   })
+
+  it('requires a 6-digit verification code when changing email and emailVerificationRequired is enabled', async () => {
+    const requests: Array<{ url: string; method: string; body?: unknown }> = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method || 'GET'
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined
+        requests.push({ url, method, body })
+
+        if (url.endsWith('/config')) {
+          return jsonResponse({
+            membershipEnabled: true,
+            registrationEnabled: true,
+            emailResetEnabled: true,
+            emailVerificationRequired: true,
+          })
+        }
+        if (url.endsWith('/me')) {
+          return jsonResponse({
+            user: {
+              id: 'u-email',
+              username: 'alice',
+              email: 'old@example.com',
+              role: 'user',
+              tier: 'free',
+              effectiveTier: 'free',
+              tierExpiresAt: null,
+              creditBalance: 0,
+              disabled: false,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          })
+        }
+        if (url.endsWith('/sync')) {
+          return jsonResponse({ version: 0, updatedAt: null, data: null })
+        }
+        if (url.endsWith('/credits')) {
+          return jsonResponse({
+            balance: 0,
+            tier: 'free',
+            effectiveTier: 'free',
+            tierExpiresAt: null,
+            monthlyAllowance: 0,
+            currentMonth: '2026-11',
+            grantedThisMonth: 0,
+            monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
+            ledger: [],
+          })
+        }
+        if (url.endsWith('/platform-models')) {
+          return jsonResponse({ models: [] })
+        }
+        if (url.endsWith('/me/email/request-code') && method === 'POST') {
+          return jsonResponse({ ok: true, message: '验证码已发送' })
+        }
+        if (url.endsWith('/me/profile') && method === 'PATCH') {
+          return jsonResponse({
+            user: {
+              id: 'u-email',
+              username: 'alice',
+              email: (body as { email: string | null }).email,
+              role: 'user',
+              tier: 'free',
+              effectiveTier: 'free',
+              tierExpiresAt: null,
+              creditBalance: 0,
+              disabled: false,
+              createdAt: 1,
+              updatedAt: 2,
+            },
+          })
+        }
+        return jsonResponse({}, 404)
+      }),
+    )
+
+    const wrapper = mount(AccountSyncButton, {
+      props: { baseUrl: '/user-api' },
+      global: { provide: { services: ref(null) } },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="header-account-sync"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="account-sync-security-toggle"]').trigger('click')
+    await flushPromises()
+
+    // Same email -> verification input stays hidden
+    expect(wrapper.find('[data-testid="account-sync-email-verify-code"]').exists()).toBe(false)
+
+    // Changing to a new email reveals the verification code bar
+    await wrapper.get('[data-testid="account-sync-profile-email"] input').setValue('new@example.com')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="account-sync-email-verify-code"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="account-sync-email-verify-send"]').exists()).toBe(true)
+
+    // Saving without a 6-digit code fails validation and does not call PATCH /me/profile
+    await wrapper.get('[data-testid="account-sync-save-email"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="account-sync-feedback"]').text()).toContain('6')
+    expect(requests.some((r) => r.url.endsWith('/me/profile'))).toBe(false)
+
+    // Request verification code
+    await wrapper.get('[data-testid="account-sync-email-verify-send"]').trigger('click')
+    await flushPromises()
+    const codeReq = requests.find((r) => r.url.endsWith('/me/email/request-code'))
+    expect(codeReq).toEqual({
+      url: '/user-api/me/email/request-code',
+      method: 'POST',
+      body: { email: 'new@example.com' },
+    })
+    expect(wrapper.get('[data-testid="account-sync-email-verify-send"]').text()).toContain('60s')
+
+    // Submit with valid 6-digit code
+    await wrapper.get('[data-testid="account-sync-email-verify-code"] input').setValue('123456')
+    await wrapper.get('[data-testid="account-sync-save-email"]').trigger('click')
+    await flushPromises()
+
+    const profileReq = requests.find((r) => r.url.endsWith('/me/profile'))
+    expect(profileReq).toEqual({
+      url: '/user-api/me/profile',
+      method: 'PATCH',
+      body: { email: 'new@example.com', verificationCode: '123456' },
+    })
+    expect(wrapper.find('[data-testid="account-sync-email-verify-code"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
 })
 
 describe('TextModelList platform badges and BYOK promo links', () => {

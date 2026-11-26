@@ -1,16 +1,97 @@
 export const config = {
   matcher: [
     /*
-     * 匹配除以下静态资源之外的所有路径。
-     * /api/auth 在 middleware 内按完整 pathname 精确放行，避免相似前缀绕过认证。
-     * - 静态文件 (以 . 结尾)
-     * - 其他静态资源
+     * 匹配除明确静态资源路径之外的所有请求，避免 /api/x.y 或 /api/v1.0/models
+     * 因路径包含点号而绕过认证。/api/auth 在 middleware 内按完整 pathname 精确放行。
      */
-    '/((?!_next/static|_next/image|favicon.ico|assets/|.*\\.).*)'
+    '/((?!_next/static|_next/image|favicon\\.ico$|manifest\\.webmanifest$|robots\\.txt$|assets/|pwa/).*)'
   ],
 };
 
-export default function middleware(request) {
+const SESSION_COOKIE_NAME = 'vercel_access_token';
+const textEncoder = new TextEncoder();
+let warnedMissingAccessPassword = false;
+
+function readCookie(cookieHeader, name) {
+  if (!cookieHeader) return null;
+  for (const part of cookieHeader.split(';')) {
+    const trimmed = part.trim();
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex <= 0) continue;
+    if (trimmed.slice(0, eqIndex).trim() === name) {
+      return trimmed.slice(eqIndex + 1).trim();
+    }
+  }
+  return null;
+}
+
+function decodeBase64Url(input) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(input)) {
+    return null;
+  }
+  const base64 = input.replace(/-/g, '+').replace(/_/g, '/') + '=';
+  let binary;
+  try {
+    binary = atob(base64);
+  } catch {
+    return null;
+  }
+  if (binary.length !== 32) {
+    return null;
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function verifySessionToken(token, secret, nowMs = Date.now()) {
+  if (typeof token !== 'string' || !secret) {
+    return false;
+  }
+
+  const parts = token.split('.');
+  if (parts.length !== 4) {
+    return false;
+  }
+
+  const [version, expStr, nonce, sigB64Url] = parts;
+  if (version !== 'v1') {
+    return false;
+  }
+  if (!/^\d{1,16}$/.test(expStr)) {
+    return false;
+  }
+  const expMs = Number(expStr);
+  if (!Number.isFinite(expMs) || expMs <= nowMs) {
+    return false;
+  }
+  if (!/^[0-9a-f]{32}$/.test(nonce)) {
+    return false;
+  }
+
+  const sigBytes = decodeBase64Url(sigB64Url);
+  if (!sigBytes) {
+    return false;
+  }
+
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      textEncoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+    const payload = `${version}.${expStr}.${nonce}`;
+    return await crypto.subtle.verify('HMAC', key, sigBytes, textEncoder.encode(payload));
+  } catch {
+    return false;
+  }
+}
+
+export default async function middleware(request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
 
@@ -21,31 +102,33 @@ export default function middleware(request) {
 
   // 访问环境变量
   const accessPassword = process.env.ACCESS_PASSWORD;
-  
-  // 如果没有设置密码，直接允许访问
+
+  // 未配置 ACCESS_PASSWORD 时按 REQUIRE_ACCESS_PASSWORD 显式处理
   if (!accessPassword) {
-    return; // 什么都不返回，表示继续处理请求
+    if (process.env.REQUIRE_ACCESS_PASSWORD === '1') {
+      return new Response('Service Unavailable: ACCESS_PASSWORD is required', {
+        status: 503,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+    if (!warnedMissingAccessPassword) {
+      warnedMissingAccessPassword = true;
+      console.warn('[middleware] ACCESS_PASSWORD is not set; password protection is disabled.');
+    }
+    return;
   }
 
-  // 检查认证状态
+  // 检查 HMAC-SHA256 签名会话 Cookie（拒绝明文密码与过期/伪造令牌）
   const cookieHeader = request.headers.get('cookie');
-  let authenticated = false;
-  
-  if (cookieHeader) {
-    const cookies = cookieHeader.split(';');
-    const accessTokenCookie = cookies.find(cookie => 
-      cookie.trim().startsWith('vercel_access_token=')
-    );
-    
-    if (accessTokenCookie) {
-      const accessToken = accessTokenCookie.split('=')[1];
-      authenticated = accessToken === accessPassword;
-    }
-  }
-  
-  // 如果已认证，允许访问
+  const accessToken = readCookie(cookieHeader, SESSION_COOKIE_NAME);
+  const sessionSecret = process.env.ACCESS_SESSION_SECRET || accessPassword;
+  const authenticated = accessToken ? await verifySessionToken(accessToken, sessionSecret) : false;
+
   if (authenticated) {
-    return; // 什么都不返回，表示继续处理请求
+    return;
   }
 
   // 获取浏览器语言设置

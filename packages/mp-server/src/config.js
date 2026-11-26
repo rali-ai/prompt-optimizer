@@ -1,4 +1,5 @@
 // 环境变量 → 配置对象。只在启动时读一次，缺项或格式不对直接报错退出，不带病运行。
+import crypto from 'node:crypto'
 
 const int = (env, name, fallback) => {
   const raw = env[name]
@@ -18,7 +19,10 @@ const required = (env, name) => {
 export function loadConfig(env) {
   const dev = env.MP_DEV === '1'
   const llmFake = env.LLM_FAKE === '1'
-  const sessionSecret = dev ? env.SESSION_SECRET || 'dev-only-session-secret' : required(env, 'SESSION_SECRET')
+  const rawSecret = (env.SESSION_SECRET || '').trim()
+  const sessionSecret = dev
+    ? rawSecret || crypto.randomBytes(32).toString('hex')
+    : required(env, 'SESSION_SECRET')
   if (sessionSecret.length < 32 && !dev) throw new Error('SESSION_SECRET 至少 32 个字符')
   return {
     port: int(env, 'PORT', 8787),
@@ -41,7 +45,10 @@ export function loadConfig(env) {
       perDay: int(env, 'DAILY_QUOTA', 50),
       maxInputChars: int(env, 'MAX_INPUT_CHARS', 3000),
       maxBodyBytes: int(env, 'MAX_BODY_BYTES', 32 * 1024),
-      requestTimeoutMs: int(env, 'REQUEST_TIMEOUT_MS', 90000)
+      requestTimeoutMs: int(env, 'REQUEST_TIMEOUT_MS', 90000),
+      loginPerWindow: int(env, 'LOGIN_RATE_LIMIT_MAX', 20),
+      loginWindowMs: int(env, 'LOGIN_RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000),
+      loginMaxEntries: int(env, 'LOGIN_RATE_LIMIT_MAX_ENTRIES', 5000)
     }
   }
 }

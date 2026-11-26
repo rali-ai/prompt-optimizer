@@ -27,10 +27,12 @@ function hmacSign(data, secret) {
   return crypto.createHmac('sha256', secret).update(data).digest('base64url');
 }
 
-export function createSessionToken({ userId, role }, secret, ttlMs) {
+export function createSessionToken({ userId, role, tokenVersion = 1 }, secret, ttlMs) {
+  const tv = Number.isInteger(tokenVersion) && tokenVersion >= 1 ? tokenVersion : 1;
   const payload = {
     uid: userId,
     role,
+    tv,
     exp: Date.now() + ttlMs,
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -59,7 +61,11 @@ export function verifySessionToken(token, secret) {
       return null;
     }
     if (parsed.exp <= Date.now()) return null;
-    return { userId: parsed.uid, role: parsed.role || 'user' };
+    return {
+      userId: parsed.uid,
+      role: parsed.role || 'user',
+      tokenVersion: typeof parsed.tv === 'number' ? parsed.tv : 1,
+    };
   } catch {
     return null;
   }

@@ -24,10 +24,18 @@ build
 *.swo
 **/eslint.config.*
 
-# 环境文件
+# 环境文件与密钥/持久化数据
 .env
 .env.*
 !.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/.secret
+**/users.db
+**/users.db-*
 
 # 日志文件
 npm-debug.log*

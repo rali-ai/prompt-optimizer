@@ -165,5 +165,32 @@ describe('category parent selection', () => {
     expect((await manager.getCategories()).find(category => category.id === childId)?.parentId).toBe(parentId)
     expect(wrapper.emitted('category-updated')).toBeUndefined()
   })
+
+  it('renders legacy malicious category names as literal text in delete confirmation without HTML injection', async () => {
+    const xssName = '<img src=x onerror=alert(1)>'
+    const rawCategories = JSON.parse((await storage.getItem('favorite_categories')) || '[]')
+    rawCategories.push({
+      id: 'cat-legacy-xss',
+      name: xssName,
+      createdAt: Date.now(),
+      sortOrder: 99,
+    })
+    await storage.setItem('favorite_categories', JSON.stringify(rawCategories))
+
+    wrapper.unmount()
+    const favoriteManager = platform === 'desktop' ? new FavoriteManagerElectronProxy() : manager
+    wrapper = mount(CategoryManager, {
+      attachTo: document.body,
+      global: { provide: { services: shallowRef({ favoriteManager }) } },
+    })
+    await flushPromises()
+
+    await openAction(xssName, 'Delete')
+    const strong = wrapper.find('strong')
+    expect(strong.exists()).toBe(true)
+    expect(strong.text()).toBe(xssName)
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(document.body.querySelector('img')).toBeNull()
+  })
 })
 })

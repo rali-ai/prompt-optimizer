@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
+import net from 'node:net';
+import { DEFAULT_ALLOWED_EXTENSION_IDS } from './config.js';
 import {
   SESSION_COOKIE_NAME,
   buildClearSessionCookie,
@@ -25,6 +27,7 @@ import {
   DEFAULT_MAIL_FROM,
   maskApiKey,
   sendAnnouncementEmail,
+  sendEmailVerifyCodeEmail,
   sendPasswordResetEmail,
   sendTestEmail,
 } from './mailer.js';
@@ -62,7 +65,7 @@ const MAX_ADMIN_BODY_BYTES = 64 * 1024;
 const MAX_COMMENT_BODY_BYTES = 3 * 1024 * 1024;
 const MAX_AI_PROXY_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_SYNC_BODY_BYTES = MAX_SYNC_BYTES + 256 * 1024;
-const EXTENSION_ORIGIN_REGEX = /^(chrome|moz)-extension:\/\/[a-zA-Z0-9._-]+$/;
+const EXTENSION_ORIGIN_CAPTURE_REGEX = /^(chrome|moz)-extension:\/\/([a-zA-Z0-9._-]+)$/;
 const PUBLIC_ANNOUNCEMENT_ALLOWED_ORIGINS = new Set([
   'https://goprmpt.com',
   'https://www.goprmpt.com',
@@ -71,33 +74,6 @@ const PUBLIC_ANNOUNCEMENT_COMMENTS_PATH_REGEX = /^\/user-api\/announcements\/[^/
 const PUBLIC_ANNOUNCEMENT_COMMENT_IMAGE_PATH_REGEX =
   /^\/user-api\/announcements\/comment-images\/[^/]+$/;
 const COMMENT_IMAGE_ID_REGEX = /^[a-zA-Z0-9-]+$/;
-
-function getAllowedExtensionOrigin(req) {
-  const origin = req.headers.origin;
-  if (typeof origin !== 'string') return null;
-  return EXTENSION_ORIGIN_REGEX.test(origin) ? origin : null;
-}
-
-function isExtensionClient(req) {
-  if (getAllowedExtensionOrigin(req)) return true;
-  const clientType = req.headers['x-client-type'];
-  return typeof clientType === 'string' && clientType.trim().toLowerCase() === 'extension';
-}
-
-function applyExtensionCors(req, res) {
-  const allowedOrigin = getAllowedExtensionOrigin(req);
-  if (!allowedOrigin) return false;
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Client-Type');
-  res.setHeader(
-    'Access-Control-Expose-Headers',
-    'X-GoPrmpt-Credits-Remaining, X-GoPrmpt-Credits-Cost, X-GoPrmpt-Requested-Model, X-GoPrmpt-Actual-Model, X-GoPrmpt-Failover',
-  );
-  res.setHeader('Access-Control-Max-Age', '86400');
-  return true;
-}
 
 function applyPublicAnnouncementCors(req, res, pathname, method) {
   const isCommentImagePath = PUBLIC_ANNOUNCEMENT_COMMENT_IMAGE_PATH_REGEX.test(pathname);
@@ -151,25 +127,95 @@ function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.end(body);
 }
 
-function sendHtml(res, statusCode, html, headOnly = false) {
+function sendHtml(res, statusCode, html, headOnly = false, extraHeaders = {}) {
   res.writeHead(statusCode, {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
     'Content-Length': Buffer.byteLength(html, 'utf8'),
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    ...extraHeaders,
   });
   res.end(headOnly ? undefined : html);
 }
 
-function getClientIp(req) {
-  const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.trim()) {
-    return xff.split(',')[0].trim();
+function normalizeIp(raw) {
+  if (typeof raw !== 'string') return '';
+  let candidate = raw.trim();
+  if (!candidate) return '';
+  if (candidate.startsWith('[')) {
+    const endBracket = candidate.indexOf(']');
+    if (endBracket > 1) {
+      candidate = candidate.slice(1, endBracket);
+    }
+  } else {
+    const ipv4WithPort = candidate.match(/^(\d+\.\d+\.\d+\.\d+):\d+$/);
+    if (ipv4WithPort) {
+      candidate = ipv4WithPort[1];
+    }
   }
-  const realIp = req.headers['x-real-ip'];
-  if (typeof realIp === 'string' && realIp.trim()) {
-    return realIp.trim();
+  const zoneIdx = candidate.indexOf('%');
+  if (zoneIdx > 0) {
+    candidate = candidate.slice(0, zoneIdx);
   }
-  return req.socket?.remoteAddress || 'unknown';
+  if (/^::ffff:/i.test(candidate)) {
+    const mapped = candidate.slice(7);
+    if (net.isIPv4(mapped)) {
+      return mapped;
+    }
+  }
+  return net.isIP(candidate) !== 0 ? candidate : '';
+}
+
+function isPrivateOrLoopbackIp(ip) {
+  if (net.isIPv4(ip)) {
+    const parts = ip.split('.').map(Number);
+    const [a, b] = parts;
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    return false;
+  }
+  if (net.isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    if (lower === '::1' || lower === '::' || lower === '0:0:0:0:0:0:0:1') return true;
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true;
+    if (/^fe[89ab]/.test(lower)) return true;
+    return false;
+  }
+  return true;
+}
+
+export function getClientIp(req) {
+  const realIpHeader = req.headers['x-real-ip'];
+  const rawRealIp = Array.isArray(realIpHeader) ? realIpHeader[0] : realIpHeader;
+  const realIp = normalizeIp(rawRealIp);
+  if (realIp) {
+    return realIp;
+  }
+
+  const xffHeader = req.headers['x-forwarded-for'];
+  const rawXff = Array.isArray(xffHeader) ? xffHeader.join(',') : xffHeader;
+  if (typeof rawXff === 'string' && rawXff.trim()) {
+    const validIps = rawXff
+      .split(',')
+      .map((entry) => normalizeIp(entry))
+      .filter(Boolean);
+    for (let i = validIps.length - 1; i >= 0; i -= 1) {
+      if (!isPrivateOrLoopbackIp(validIps[i])) {
+        return validIps[i];
+      }
+    }
+    if (validIps.length > 0) {
+      return validIps[validIps.length - 1];
+    }
+  }
+
+  const remote = req.socket?.remoteAddress;
+  return normalizeIp(remote) || remote || 'unknown';
 }
 
 function isSecureRequest(req, cookieSecure) {
@@ -182,6 +228,18 @@ function isSecureRequest(req, cookieSecure) {
 }
 
 function readJsonBody(req, maxBytes) {
+  const contentLengthHeader = req.headers['content-length'];
+  if (contentLengthHeader !== undefined) {
+    const declaredLength = Number(
+      Array.isArray(contentLengthHeader) ? contentLengthHeader[0] : contentLengthHeader,
+    );
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      req.removeAllListeners('data');
+      req.pause();
+      return Promise.reject(new PayloadError('请求体超过大小限制', 413));
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const chunks = [];
     let total = 0;
@@ -194,8 +252,11 @@ function readJsonBody(req, maxBytes) {
     };
 
     req.on('data', (chunk) => {
+      if (settled) return;
       total += chunk.length;
       if (total > maxBytes) {
+        chunks.length = 0;
+        req.removeAllListeners('data');
         req.pause();
         fail(new PayloadError('请求体超过大小限制', 413));
         return;
@@ -269,6 +330,13 @@ function hashResetCode(secret, userId, email, code) {
   return crypto
     .createHmac('sha256', secret)
     .update(`${userId}:${email}:${code}`)
+    .digest('hex');
+}
+
+function hashEmailVerifyCode(secret, userId, email, code) {
+  return crypto
+    .createHmac('sha256', secret)
+    .update(`email-verify:${userId}:${email}:${code}`)
     .digest('hex');
 }
 
@@ -348,10 +416,89 @@ export function createApp(config, options = {}) {
     });
   }
 
+  const allowedExtensionIds = Array.isArray(config.allowedExtensionIds)
+    ? config.allowedExtensionIds.map((id) => String(id).trim().toLowerCase()).filter(Boolean)
+    : DEFAULT_ALLOWED_EXTENSION_IDS;
+  const allowedExtensionIdSet = new Set(allowedExtensionIds);
+
+  function getAllowedExtensionOrigin(req) {
+    const origin = req.headers.origin;
+    if (typeof origin !== 'string') return null;
+    const match = origin.match(EXTENSION_ORIGIN_CAPTURE_REGEX);
+    if (!match) return null;
+    const extId = match[2].toLowerCase();
+    return allowedExtensionIdSet.has(extId) ? origin : null;
+  }
+
+  function isExtensionClient(req) {
+    return Boolean(getAllowedExtensionOrigin(req));
+  }
+
+  function applyExtensionCors(req, res) {
+    const allowedOrigin = getAllowedExtensionOrigin(req);
+    if (!allowedOrigin) return false;
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Client-Type');
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'X-GoPrmpt-Credits-Remaining, X-GoPrmpt-Credits-Cost, X-GoPrmpt-Requested-Model, X-GoPrmpt-Actual-Model, X-GoPrmpt-Failover',
+    );
+    res.setHeader('Access-Control-Max-Age', '86400');
+    return true;
+  }
+
+  const maxEntries = config.rateLimitMaxEntries || 10000;
   const authRateLimiter = createRateLimiter({
     max: config.rateLimitMax,
     windowMs: config.rateLimitWindowMs,
+    maxEntries,
   });
+  const loginAccountRateLimiter = createRateLimiter({
+    max: config.loginAccountRateLimitMax || 10,
+    windowMs: config.loginAccountRateLimitWindowMs || 15 * 60 * 1000,
+    maxEntries,
+  });
+  const aiRateLimiter = createRateLimiter({
+    max: config.aiRateLimitMax || 30,
+    windowMs: config.aiRateLimitWindowMs || 60 * 1000,
+    maxEntries,
+  });
+  const aiFreeRateLimiter = createRateLimiter({
+    max: config.aiFreeRateLimitMax || 10,
+    windowMs: config.aiFreeRateLimitWindowMs || 60 * 1000,
+    maxEntries,
+  });
+  const syncRateLimiter = createRateLimiter({
+    max: config.syncRateLimitMax || 30,
+    windowMs: config.syncRateLimitWindowMs || 60 * 1000,
+    maxEntries,
+  });
+  const adminRateLimiter = createRateLimiter({
+    max: config.adminRateLimitMax || 60,
+    windowMs: config.adminRateLimitWindowMs || 60 * 1000,
+    maxEntries,
+  });
+  const adminSensitiveRateLimiter = createRateLimiter({
+    max: config.adminSensitiveRateLimitMax || 10,
+    windowMs: config.adminSensitiveRateLimitWindowMs || 5 * 60 * 1000,
+    maxEntries,
+  });
+
+  function consumeLimitOrSend429(limiter, key, res, message = '请求过于频繁，请稍后再试') {
+    const result = limiter.consume(key);
+    if (!result.allowed) {
+      sendJson(
+        res,
+        429,
+        { error: message },
+        { 'Retry-After': String(result.retryAfterSec) },
+      );
+      return false;
+    }
+    return true;
+  }
 
   function authenticate(req) {
     let token = extractBearerToken(req);
@@ -364,6 +511,9 @@ export function createApp(config, options = {}) {
     if (!claims) return null;
     const row = db.findUserById(claims.userId);
     if (!row) return null;
+    if (Number(claims.tokenVersion) !== Number(row.token_version || 1)) {
+      return null;
+    }
     return row;
   }
 
@@ -387,27 +537,36 @@ export function createApp(config, options = {}) {
       sendJson(res, 403, { error: '需要管理员权限' });
       return null;
     }
+    const method = (req.method || 'GET').toUpperCase();
+    if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
+      if (!consumeLimitOrSend429(adminRateLimiter, userRow.id, res)) {
+        return null;
+      }
+    }
     return userRow;
+  }
+
+  function checkAdminSensitiveRateLimit(adminRow, res) {
+    return consumeLimitOrSend429(
+      adminSensitiveRateLimiter,
+      adminRow.id,
+      res,
+      '敏感管理操作过于频繁，请稍后再试',
+    );
   }
 
   function checkRateLimit(req, res) {
     const ip = getClientIp(req);
-    const result = authRateLimiter.consume(ip);
-    if (!result.allowed) {
-      sendJson(
-        res,
-        429,
-        { error: '请求过于频繁，请稍后再试' },
-        { 'Retry-After': String(result.retryAfterSec) },
-      );
-      return false;
-    }
-    return true;
+    return consumeLimitOrSend429(authRateLimiter, ip, res);
   }
 
   function issueSession(req, userRow) {
     const token = createSessionToken(
-      { userId: userRow.id, role: userRow.role },
+      {
+        userId: userRow.id,
+        role: userRow.role,
+        tokenVersion: Number(userRow.token_version || 1),
+      },
       config.secret,
       config.sessionTtlMs,
     );
@@ -593,6 +752,7 @@ export function createApp(config, options = {}) {
         membershipEnabled: isMembershipEnabled(),
         registrationEnabled: true,
         emailResetEnabled: mail.enabled,
+        emailVerificationRequired: mail.enabled,
         monthlyCredits: db.getMonthlyCredits(),
       });
     }
@@ -658,6 +818,9 @@ export function createApp(config, options = {}) {
     if (method === 'POST' && pathname === '/user-api/ai/v1/chat/completions') {
       const userRow = requireActiveUser(req, res);
       if (!userRow) return;
+      if (!consumeLimitOrSend429(aiRateLimiter, userRow.id, res, '模型调用过于频繁，请稍后再试')) {
+        return;
+      }
       const body = await readJsonBody(req, MAX_AI_PROXY_BODY_BYTES);
       const modelId = typeof body.model === 'string' ? body.model.trim() : '';
       if (!modelId) {
@@ -678,6 +841,17 @@ export function createApp(config, options = {}) {
       }
 
       const creditCost = Number(primaryModel.credit_cost || 0);
+      if (
+        creditCost === 0 &&
+        !consumeLimitOrSend429(
+          aiFreeRateLimiter,
+          `${userRow.id}:${primaryModel.id}`,
+          res,
+          '免费模型调用过于频繁，请稍后再试',
+        )
+      ) {
+        return;
+      }
       const debit = db.debitUserCreditsAtomic(userRow.id, creditCost, {
         modelId: primaryModel.id,
         note: `调用 ${primaryModel.name}`,
@@ -931,13 +1105,26 @@ export function createApp(config, options = {}) {
       let userRow = identifier.includes('@')
         ? db.findUserByEmail(identifier)
         : db.findUserByUsername(identifier);
+      const accountKey = userRow ? `uid:${userRow.id}` : `id:${identifier}`;
+      const accountCheck = loginAccountRateLimiter.check(accountKey);
+      if (!accountCheck.allowed) {
+        return sendJson(
+          res,
+          429,
+          { error: '该账号登录失败次数过多，请稍后再试' },
+          { 'Retry-After': String(accountCheck.retryAfterSec) },
+        );
+      }
+
       if (!userRow || !verifyPassword(password, userRow.password_hash)) {
+        loginAccountRateLimiter.consume(accountKey);
         return sendJson(res, 401, { error: '用户名或密码错误' });
       }
       if (userRow.disabled) {
         return sendJson(res, 403, { error: '账号已被停用' });
       }
 
+      loginAccountRateLimiter.clear(accountKey);
       const granted = db.ensureMonthlyCreditGrant(userRow.id);
       userRow = granted?.user || userRow;
 
@@ -948,6 +1135,10 @@ export function createApp(config, options = {}) {
     }
 
     if (method === 'POST' && pathname === '/user-api/logout') {
+      const userRow = authenticate(req);
+      if (userRow) {
+        db.bumpUserTokenVersion(userRow.id);
+      }
       const clearCookie = buildClearSessionCookie({
         secure: isSecureRequest(req, config.cookieSecure),
       });
@@ -1067,6 +1258,73 @@ export function createApp(config, options = {}) {
       return sendJson(res, 200, { user: serializeUser(freshUser) });
     }
 
+    if (method === 'POST' && pathname === '/user-api/me/email/request-code') {
+      if (!checkRateLimit(req, res)) return;
+      const userRow = requireActiveUser(req, res);
+      if (!userRow) return;
+      const mail = resolveMailConfig();
+      if (!mail.enabled) {
+        return sendJson(res, 503, { error: '暂未配置邮件发信服务，无法发送邮箱验证码' });
+      }
+      const body = await readJsonBody(req, MAX_AUTH_BODY_BYTES);
+      const email = validateOptionalEmail(body.email);
+      if (!email) {
+        throw new PayloadError('请输入有效的邮箱地址', 400);
+      }
+      if (email === (userRow.email || null)) {
+        return sendJson(res, 400, { error: '该邮箱已绑定到当前账号，无需重复验证' });
+      }
+      const owner = db.findUserByEmail(email);
+      if (owner && owner.id !== userRow.id) {
+        return sendJson(res, 409, { error: '该邮箱已被其他账号使用' });
+      }
+
+      const now = Date.now();
+      const cooldownMs = config.passwordResetCooldownMs || 60 * 1000;
+      const recent = db.getLatestActiveEmailVerifyCode(userRow.id, null, now);
+      if (recent && now - recent.created_at < cooldownMs) {
+        const waitSec = Math.max(1, Math.ceil((cooldownMs - (now - recent.created_at)) / 1000));
+        return sendJson(
+          res,
+          429,
+          { error: `发送过于频繁，请 ${waitSec} 秒后再试` },
+          { 'Retry-After': String(waitSec) },
+        );
+      }
+
+      const code = String(crypto.randomInt(100000, 1000000));
+      const ttlMs = config.passwordResetTtlMs || 15 * 60 * 1000;
+      const expiresMinutes = Math.max(1, Math.round(ttlMs / 60000));
+      try {
+        await sendEmailVerifyCodeEmail({
+          apiKey: mail.apiKey,
+          from: mail.from,
+          to: email,
+          username: userRow.username,
+          code,
+          expiresMinutes,
+          fetchImpl,
+        });
+      } catch (err) {
+        console.error('[user-sync-api] email verify code failed:', err?.message || err);
+        return sendJson(res, 502, {
+          error: '验证码邮件发送失败，请稍后重试或联系管理员检查发信配置',
+        });
+      }
+
+      db.createEmailVerifyCode({
+        userId: userRow.id,
+        email,
+        codeHash: hashEmailVerifyCode(config.secret, userRow.id, email, code),
+        ttlMs,
+      });
+
+      return sendJson(res, 200, {
+        ok: true,
+        message: '6 位邮箱验证码已发送，请查收邮件（含垃圾箱）',
+      });
+    }
+
     if (method === 'PATCH' && pathname === '/user-api/me/profile') {
       const userRow = requireActiveUser(req, res);
       if (!userRow) return;
@@ -1081,6 +1339,32 @@ export function createApp(config, options = {}) {
           return sendJson(res, 409, { error: '该邮箱已被其他账号使用' });
         }
       }
+      const currentEmail = userRow.email || null;
+      const isBindingOrChangingEmail = Boolean(email && email !== currentEmail);
+      const mail = resolveMailConfig();
+      if (isBindingOrChangingEmail && mail.enabled) {
+        const verificationCode =
+          typeof body.verificationCode === 'string' ? body.verificationCode.trim() : '';
+        if (!/^\d{6}$/.test(verificationCode)) {
+          throw new PayloadError('请先获取并输入 6 位邮箱验证码', 400);
+        }
+        const record = db.getLatestActiveEmailVerifyCode(userRow.id, email, Date.now());
+        if (!record || record.attempts >= MAX_RESET_ATTEMPTS) {
+          return sendJson(res, 400, {
+            error: '邮箱验证码无效、已过期或错误次数过多，请重新获取',
+          });
+        }
+        const expectedHash = hashEmailVerifyCode(
+          config.secret,
+          userRow.id,
+          email,
+          verificationCode,
+        );
+        if (!timingSafeHexEqual(record.code_hash, expectedHash)) {
+          db.incrementEmailVerifyCodeAttempts(record.id);
+          return sendJson(res, 400, { error: '邮箱验证码不正确，请检查后重试' });
+        }
+      }
       let updated;
       try {
         updated = db.updateUserEmail(userRow.id, email);
@@ -1089,6 +1373,9 @@ export function createApp(config, options = {}) {
           return sendJson(res, 409, { error: '该邮箱已被其他账号使用' });
         }
         throw err;
+      }
+      if (isBindingOrChangingEmail && mail.enabled) {
+        db.markEmailVerifyCodesUsed(userRow.id);
       }
       return sendJson(res, 200, { user: serializeUser(updated) });
     }
@@ -1126,6 +1413,9 @@ export function createApp(config, options = {}) {
     if (method === 'PUT' && pathname === '/user-api/sync') {
       const userRow = requireActiveUser(req, res);
       if (!userRow) return;
+      if (!consumeLimitOrSend429(syncRateLimiter, userRow.id, res, '云同步过于频繁，请稍后再试')) {
+        return;
+      }
       const body = await readJsonBody(req, MAX_SYNC_BODY_BYTES);
       if (body.expectedVersion !== undefined && body.expectedVersion !== null) {
         if (!Number.isInteger(body.expectedVersion) || body.expectedVersion < 0) {
@@ -1159,6 +1449,7 @@ export function createApp(config, options = {}) {
       const authenticated = Boolean(userRow && !userRow.disabled);
       const isAdmin = Boolean(authenticated && userRow.role === 'admin');
       const settings = buildAdminSettingsPayload();
+      const scriptNonce = crypto.randomBytes(16).toString('base64');
       const html = renderAdminHtml({
         authenticated,
         isAdmin,
@@ -1168,8 +1459,22 @@ export function createApp(config, options = {}) {
         emailResetEnabled: settings.emailResetEnabled,
         resendKeyHint: settings.resendKeyHint,
         mailFrom: settings.mailFrom,
+        scriptNonce,
       });
-      return sendHtml(res, 200, html, method === 'HEAD');
+      const csp = [
+        "default-src 'self'",
+        `script-src 'nonce-${scriptNonce}'`,
+        "style-src 'unsafe-inline'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+      ].join('; ');
+      return sendHtml(res, 200, html, method === 'HEAD', {
+        'Content-Security-Policy': csp,
+      });
     }
 
     if (method === 'GET' && pathname === '/user-api/admin/settings') {
@@ -1238,6 +1543,7 @@ export function createApp(config, options = {}) {
     if (method === 'POST' && pathname === '/user-api/admin/test-email') {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
+      if (!checkAdminSensitiveRateLimit(adminRow, res)) return;
       const mail = resolveMailConfig();
       if (!mail.enabled) {
         return sendJson(res, 400, { error: '请先配置并保存 Resend API Key 与发件人地址' });
@@ -1405,6 +1711,7 @@ export function createApp(config, options = {}) {
     if (method === 'POST' && adminPlatformModelTestMatch) {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
+      if (!checkAdminSensitiveRateLimit(adminRow, res)) return;
       const id = decodePathParam(adminPlatformModelTestMatch[1]);
       const row = db.findPlatformModelRawById(id);
       if (!row) {
@@ -1531,6 +1838,7 @@ export function createApp(config, options = {}) {
     if (method === 'POST' && adminAnnouncementEmailMatch) {
       const adminRow = requireAdmin(req, res);
       if (!adminRow) return;
+      if (!checkAdminSensitiveRateLimit(adminRow, res)) return;
       const id = decodePathParam(adminAnnouncementEmailMatch[1]);
       const announcement = db.findAnnouncementById(id);
       if (!announcement) {
@@ -1642,7 +1950,21 @@ export function createApp(config, options = {}) {
     handleRequest(req, res).catch((err) => {
       if (err instanceof PayloadError) {
         if (!res.headersSent) {
-          return sendJson(res, err.statusCode, { error: err.message });
+          const extraHeaders = err.statusCode === 413 ? { Connection: 'close' } : {};
+          if (err.statusCode === 413) {
+            const destroyTimer = setTimeout(() => {
+              if (!req.destroyed) req.destroy();
+            }, 1000);
+            destroyTimer.unref();
+            res.once('finish', () => {
+              clearTimeout(destroyTimer);
+              if (!req.destroyed) req.destroy();
+            });
+          }
+          return sendJson(res, err.statusCode, { error: err.message }, extraHeaders);
+        }
+        if (err.statusCode === 413 && !req.destroyed) {
+          req.destroy();
         }
         return;
       }
@@ -1657,6 +1979,12 @@ export function createApp(config, options = {}) {
     server,
     db,
     authRateLimiter,
+    loginAccountRateLimiter,
+    aiRateLimiter,
+    aiFreeRateLimiter,
+    syncRateLimiter,
+    adminRateLimiter,
+    adminSensitiveRateLimiter,
     listen() {
       return new Promise((resolve, reject) => {
         server.once('error', reject);

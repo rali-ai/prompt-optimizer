@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
-import { createApp } from '../src/server.js';
+import { createApp, getClientIp } from '../src/server.js';
+import { createRateLimiter } from '../src/rate-limit.js';
+import { renderAdminHtml, safeScriptJson } from '../src/admin-page.js';
 import {
   ALLOWED_COMMENT_IMAGE_MIMES,
   MAX_COMMENT_IMAGE_BYTES,
@@ -68,6 +71,7 @@ test('healthz, default config (MEMBERSHIP_ENABLED=false), and auto-persisted .se
       membershipEnabled: false,
       registrationEnabled: true,
       emailResetEnabled: false,
+      emailVerificationRequired: false,
       monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
     });
   } finally {
@@ -332,11 +336,11 @@ test('admin bootstrap, non-admin 403, PATCH tier/disabled, and disabled user 403
     assert.equal(patchBody.user.tierExpiresAt, expiresAt);
     assert.equal(patchBody.user.disabled, true);
 
-    // Disabled user cannot access /me or login
+    // Disabled user's pre-disable session is revoked (401) and fresh login is rejected (403)
     const bobMe = await fetch(`${ctx.baseUrl}/user-api/me`, {
       headers: { Cookie: userCookie },
     });
-    assert.equal(bobMe.status, 403);
+    assert.equal(bobMe.status, 401);
 
     const bobLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
       method: 'POST',
@@ -451,6 +455,7 @@ test('admin membership toggle persists across restarts and updates /config and /
       membershipEnabled: true,
       registrationEnabled: true,
       emailResetEnabled: false,
+      emailVerificationRequired: false,
       monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
     });
     const usersAfterEnable = await fetch(`${base1}/user-api/admin/users`, {
@@ -477,6 +482,7 @@ test('admin membership toggle persists across restarts and updates /config and /
       membershipEnabled: true,
       registrationEnabled: true,
       emailResetEnabled: false,
+      emailVerificationRequired: false,
       monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
     });
 
@@ -500,6 +506,7 @@ test('admin membership toggle persists across restarts and updates /config and /
       membershipEnabled: false,
       registrationEnabled: true,
       emailResetEnabled: false,
+      emailVerificationRequired: false,
       monthlyCredits: { free: 0, standard: 100, pro: 500, internal: 1000 },
     });
   } finally {
@@ -619,13 +626,25 @@ test('optional email registration, profile update, self password change, admin p
     });
     assert.equal(badPwd.status, 401);
 
-    // Self password change: valid -> 200 and new password logs in
+    // Self password change: valid -> 200, revokes old session, issues new valid session
     const okPwd = await fetch(`${baseUrl}/user-api/me/password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: carolCookie },
       body: JSON.stringify({ currentPassword: 'Password123!', newPassword: 'NewPassword456!' }),
     });
     assert.equal(okPwd.status, 200);
+    const carolFreshCookie = extractCookieHeader(okPwd);
+    assert.ok(carolFreshCookie.startsWith('goprmpt_session='));
+
+    const oldCarolMe = await fetch(`${baseUrl}/user-api/me`, {
+      headers: { Cookie: carolCookie },
+    });
+    assert.equal(oldCarolMe.status, 401);
+
+    const freshCarolMe = await fetch(`${baseUrl}/user-api/me`, {
+      headers: { Cookie: carolFreshCookie },
+    });
+    assert.equal(freshCarolMe.status, 200);
 
     const carolNewLogin = await fetch(`${baseUrl}/user-api/login`, {
       method: 'POST',
@@ -637,7 +656,7 @@ test('optional email registration, profile update, self password change, admin p
     // Non-admin reset-password -> 403
     const nonAdminReset = await fetch(`${baseUrl}/user-api/admin/users/${dave.id}/reset-password`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Cookie: carolCookie },
+      headers: { 'Content-Type': 'application/json', Cookie: carolFreshCookie },
       body: '{}',
     });
     assert.equal(nonAdminReset.status, 403);
@@ -890,7 +909,7 @@ test('Resend mail config via admin UI, test-email, password-reset request/confir
 test('browser extension CORS allowlist and Bearer token bidirectional sync (web origin stays cookie-only)', async () => {
   const ctx = await startTestApp();
   try {
-    const extOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const extOrigin = 'chrome-extension://ijhpdghdlhlfolpnbkjojglpolngpajc';
 
     // Preflight from Chrome/Edge extension origin -> 204 with exact ACAO
     const preflight = await fetch(`${ctx.baseUrl}/user-api/sync`, {
@@ -1250,7 +1269,7 @@ test('announcements CRUD, validation/XSS rejection, non-admin 403, active/pinned
     assert.match(adminHtml, /站内通知与活动公告/);
     assert.match(adminHtml, /id="announcementForm"/);
     assert.equal(adminHtml.includes('—'), false, 'admin UI copy should not contain em dashes');
-    const scriptMatch = adminHtml.match(/<script>([\s\S]*?)<\/script>/);
+    const scriptMatch = adminHtml.match(/<script(?:\s+nonce="[^"]+")?>([\s\S]*?)<\/script>/);
     assert.ok(scriptMatch, 'admin console should contain inline script');
     assert.doesNotThrow(() => new Function(scriptMatch[1]), 'admin inline script should parse cleanly');
   } finally {
@@ -1320,7 +1339,7 @@ test('announcements public CORS allowlist for goprmpt.com and extension origins'
     assert.equal(postActiveRes.headers.get('access-control-allow-origin'), null);
 
     // Extension origins continue working on /user-api/announcements/active
-    const chromeOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const chromeOrigin = 'chrome-extension://ijhpdghdlhlfolpnbkjojglpolngpajc';
     const extRes = await fetch(`${ctx.baseUrl}/user-api/announcements/active`, {
       headers: { Origin: chromeOrigin },
     });
@@ -2233,7 +2252,7 @@ test('platform models CRUD, key masking, test endpoint, tier gate 403, 402 credi
 
     // Non-streaming proxy merges defaultParams, forces upstream model, deducts 10 credits & returns headers
     upstreamCalls.length = 0;
-    const extOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const extOrigin = 'chrome-extension://ijhpdghdlhlfolpnbkjojglpolngpajc';
     const chatRes = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -2503,7 +2522,7 @@ test('domestic model presets GET/PATCH, promo links with query params, XSS rejec
     assert.match(html, /调积分/);
     assert.equal(html.includes('普通用户'), false, 'admin user table should not render conflicting 普通用户 badge next to membership tier');
     assert.equal(html.includes('—'), false, 'admin UI copy should not contain em dashes');
-    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    const scriptMatch = html.match(/<script(?:\s+nonce="[^"]+")?>([\s\S]*?)<\/script>/);
     assert.ok(scriptMatch);
     assert.doesNotThrow(() => new Function(scriptMatch[1]));
 
@@ -2672,7 +2691,7 @@ test('announcement comments public read/CORS, member posting/validation, delete 
     assert.equal(anonPost.headers.get('access-control-allow-origin'), null);
     assert.equal((await anonPost.json()).error, '请先注册并登录会员账号后再发表评论');
 
-    // Disabled user POST -> 403
+    // Disabled user's pre-disable session is revoked -> 401
     const disabledPost = await fetch(
       `${ctx.baseUrl}/user-api/announcements/${activeAnn.id}/comments`,
       {
@@ -2681,7 +2700,7 @@ test('announcement comments public read/CORS, member posting/validation, delete 
         body: JSON.stringify({ content: '停用账号评论' }),
       },
     );
-    assert.equal(disabledPost.status, 403);
+    assert.equal(disabledPost.status, 401);
 
     // POST to inactive or nonexistent announcement -> 404
     const draftPost = await fetch(
@@ -2895,7 +2914,7 @@ test('announcement comments public read/CORS, member posting/validation, delete 
     assert.match(html, /https:\/\/api\.siliconflow\.cn\/v1/);
     assert.match(html, /deepseek-ai\/DeepSeek-V3/);
     assert.equal(html.includes('—'), false, 'admin UI copy should not contain em dashes');
-    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    const scriptMatch = html.match(/<script(?:\s+nonce="[^"]+")?>([\s\S]*?)<\/script>/);
     assert.ok(scriptMatch);
     assert.doesNotThrow(() => new Function(scriptMatch[1]));
   } finally {
@@ -3249,7 +3268,7 @@ test('platform model quota failover, cooldown skip, single credit charge, ledger
     behaviorByUpstreamModel.set('up-c', 'ok');
     upstreamCalls.length = 0;
 
-    const extOrigin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+    const extOrigin = 'chrome-extension://ijhpdghdlhlfolpnbkjojglpolngpajc';
     const res1 = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -3605,7 +3624,7 @@ test('platform model quota failover, cooldown skip, single credit charge, ledger
     assert.match(html, /额度\/异常冷却中/);
     assert.match(html, /恢复可用/);
     assert.equal(html.includes('—'), false, 'admin UI copy should not contain em dashes');
-    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    const scriptMatch = html.match(/<script(?:\s+nonce="[^"]+")?>([\s\S]*?)<\/script>/);
     assert.ok(scriptMatch);
     assert.doesNotThrow(() => new Function(scriptMatch[1]), 'admin inline script should parse cleanly');
   } finally {
@@ -3929,10 +3948,915 @@ test('announcement comments emoji roundtrip, 2MB image-only validation/serving, 
     assert.match(html, /isSafeCommentImageUrl/);
     assert.match(html, /评论图片附件/);
     assert.equal(html.includes('—'), false, 'admin UI copy should not contain em dashes');
-    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    const scriptMatch = html.match(/<script(?:\s+nonce="[^"]+")?>([\s\S]*?)<\/script>/);
     assert.ok(scriptMatch);
     assert.doesNotThrow(() => new Function(scriptMatch[1]), 'admin inline script should parse cleanly');
   } finally {
     await ctx.cleanup();
+  }
+});
+
+test('H4: client IP anti-spoofing (X-Real-Ip > rightmost public XFF), bounded rate-limit Map, and per-account login lockout', async () => {
+  // 1. Direct getClientIp precedence & private IP skipping
+  assert.equal(
+    getClientIp({
+      headers: {
+        'x-real-ip': '198.51.100.10',
+        'x-forwarded-for': '1.2.3.4, 203.0.113.5',
+      },
+      socket: { remoteAddress: '127.0.0.1' },
+    }),
+    '198.51.100.10',
+  );
+  assert.equal(
+    getClientIp({
+      headers: {
+        'x-forwarded-for': '1.2.3.4, 198.51.100.77, 172.18.0.2, 10.0.0.5',
+      },
+      socket: { remoteAddress: '127.0.0.1' },
+    }),
+    '198.51.100.77',
+  );
+  assert.equal(
+    getClientIp({
+      headers: {
+        'x-forwarded-for': '192.168.1.10, 127.0.0.1',
+      },
+      socket: { remoteAddress: '::ffff:127.0.0.1' },
+    }),
+    '127.0.0.1',
+  );
+  assert.equal(
+    getClientIp({
+      headers: { 'x-forwarded-for': 'not-an-ip' },
+      socket: { remoteAddress: '::ffff:127.0.0.1' },
+    }),
+    '127.0.0.1',
+  );
+
+  // 2. Bounded rate limiter Map never exceeds maxEntries and prunes expired first
+  const bounded = createRateLimiter({ max: 2, windowMs: 30, maxEntries: 3 });
+  bounded.consume('k1');
+  bounded.consume('k2');
+  bounded.consume('k3');
+  assert.equal(bounded.size(), 3);
+  bounded.consume('k4');
+  assert.equal(bounded.size(), 3);
+  // k1 was oldest and got evicted, so k1 starts fresh (remaining = 1)
+  const k1Fresh = bounded.consume('k1');
+  assert.equal(k1Fresh.allowed, true);
+  assert.equal(k1Fresh.remaining, 1);
+  assert.equal(bounded.size(), 3);
+
+  await new Promise((r) => setTimeout(r, 40));
+  bounded.consume('k5');
+  assert.equal(bounded.size(), 1);
+
+  // 3. HTTP-level spoofed XFF cannot bypass IP rate limit, and per-account lockout triggers across distributed IPs
+  const ctx = await startTestApp({
+    RATE_LIMIT_MAX: '2',
+    RATE_LIMIT_WINDOW_MS: '60000',
+    LOGIN_ACCOUNT_RATE_LIMIT_MAX: '3',
+    LOGIN_ACCOUNT_RATE_LIMIT_WINDOW_MS: '60000',
+  });
+  try {
+    // Rotating spoofed first XFF IP while X-Real-Ip stays same -> hits IP limit on 3rd call
+    for (let i = 0; i < 2; i += 1) {
+      const r = await fetch(`${ctx.baseUrl}/user-api/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Real-Ip': '198.51.100.42',
+          'X-Forwarded-For': `11.22.33.${i + 1}, 198.51.100.42`,
+        },
+        body: JSON.stringify({ username: 'ghost_user_a', password: 'WrongPassword!' }),
+      });
+      assert.equal(r.status, 401);
+    }
+    const blockedByRealIp = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Real-Ip': '198.51.100.42',
+        'X-Forwarded-For': '99.88.77.66, 198.51.100.42',
+      },
+      body: JSON.stringify({ username: 'ghost_user_a', password: 'WrongPassword!' }),
+    });
+    assert.equal(blockedByRealIp.status, 429);
+
+    // Without X-Real-Ip, rotating spoofed leftmost XFF with same rightmost public IP + private proxy -> hits IP limit
+    for (let i = 0; i < 2; i += 1) {
+      const r = await fetch(`${ctx.baseUrl}/user-api/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': `55.66.77.${i + 1}, 203.0.113.88, 172.18.0.3`,
+        },
+        body: JSON.stringify({ username: 'ghost_user_b', password: 'WrongPassword!' }),
+      });
+      assert.equal(r.status, 401);
+    }
+    const blockedByRightmostXff = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '8.8.8.8, 203.0.113.88, 10.0.0.2',
+      },
+      body: JSON.stringify({ username: 'ghost_user_b', password: 'WrongPassword!' }),
+    });
+    assert.equal(blockedByRightmostXff.status, 429);
+
+    // Register real user with email using a fresh IP
+    const reg = await fetch(`${ctx.baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Real-Ip': '198.51.100.200',
+      },
+      body: JSON.stringify({
+        username: 'locktarget',
+        email: 'locktarget@example.com',
+        password: 'ValidPassword123!',
+      }),
+    });
+    assert.equal(reg.status, 201);
+
+    // 2 failed logins from different IPs, then 1 successful login clears account failure counter
+    for (let i = 1; i <= 2; i += 1) {
+      const fail = await fetch(`${ctx.baseUrl}/user-api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Real-Ip': `203.0.113.${10 + i}` },
+        body: JSON.stringify({ username: 'locktarget', password: 'WrongPassword!' }),
+      });
+      assert.equal(fail.status, 401);
+    }
+    const okLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Real-Ip': '203.0.113.15' },
+      body: JSON.stringify({ username: 'locktarget', password: 'ValidPassword123!' }),
+    });
+    assert.equal(okLogin.status, 200);
+
+    // Now 3 failed logins across 3 distinct IPs lock out the account even when switching to email alias
+    for (let i = 1; i <= 3; i += 1) {
+      const fail = await fetch(`${ctx.baseUrl}/user-api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Real-Ip': `203.0.113.${20 + i}` },
+        body: JSON.stringify({ username: 'locktarget', password: 'WrongPassword!' }),
+      });
+      assert.equal(fail.status, 401);
+    }
+    const accountLocked = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Real-Ip': '203.0.113.99' },
+      body: JSON.stringify({ username: 'locktarget@example.com', password: 'ValidPassword123!' }),
+    });
+    assert.equal(accountLocked.status, 429);
+    assert.ok(Number(accountLocked.headers.get('retry-after')) >= 1);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test('M6: session token revocation via token_version on logout, password change, password reset, admin reset, and disable', async () => {
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'm6', 'users.db');
+  const sentEmails = [];
+  const mockFetch = async (_url, init) => {
+    sentEmails.push(JSON.parse(init.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: `re_${sentEmails.length}` }),
+    };
+  };
+  const config = loadConfig({
+    USER_SYNC_HOST: '127.0.0.1',
+    USER_SYNC_PORT: '0',
+    USER_SYNC_DB_PATH: dbPath,
+    ADMIN_USERNAME: 'root_admin',
+    ADMIN_PASSWORD: 'AdminPassword123!',
+    RESEND_API_KEY: 're_test_m6_key',
+    MAIL_FROM: '高词 · GoPrmpt <noreply@goprmpt.com>',
+    RATE_LIMIT_MAX: '50',
+    RATE_LIMIT_WINDOW_MS: '60000',
+  });
+  const app = createApp(config, { fetchImpl: mockFetch });
+  const { host, port } = await app.listen();
+  const baseUrl = `http://${host}:${port}`;
+  const extOrigin = 'chrome-extension://ijhpdghdlhlfolpnbkjojglpolngpajc';
+
+  try {
+    // Register user & obtain both Cookie and Extension Bearer token
+    const reg = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'm6user',
+        email: 'm6user@example.com',
+        password: 'Password123!',
+      }),
+    });
+    assert.equal(reg.status, 201);
+    const cookie1 = extractCookieHeader(reg);
+    const { user } = await reg.json();
+
+    const extLogin1 = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: extOrigin },
+      body: JSON.stringify({ username: 'm6user', password: 'Password123!' }),
+    });
+    assert.equal(extLogin1.status, 200);
+    const bearer1 = (await extLogin1.json()).token;
+    assert.ok(bearer1);
+
+    // 1. Logout bumps token_version -> both Cookie and stolen Bearer immediately return 401
+    const logoutRes = await fetch(`${baseUrl}/user-api/logout`, {
+      method: 'POST',
+      headers: { Cookie: cookie1 },
+    });
+    assert.equal(logoutRes.status, 200);
+    assert.equal((await fetch(`${baseUrl}/user-api/me`, { headers: { Cookie: cookie1 } })).status, 401);
+    assert.equal(
+      (await fetch(`${baseUrl}/user-api/me`, { headers: { Authorization: `Bearer ${bearer1}` } })).status,
+      401,
+    );
+
+    // 2. Self password change revokes old tokens and returns a new working token
+    const login2 = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: extOrigin },
+      body: JSON.stringify({ username: 'm6user', password: 'Password123!' }),
+    });
+    const cookie2 = extractCookieHeader(login2);
+    const bearer2 = (await login2.json()).token;
+
+    const changePwd = await fetch(`${baseUrl}/user-api/me/password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: extOrigin,
+        Authorization: `Bearer ${bearer2}`,
+      },
+      body: JSON.stringify({ currentPassword: 'Password123!', newPassword: 'Password456!' }),
+    });
+    assert.equal(changePwd.status, 200);
+    const cookie3 = extractCookieHeader(changePwd);
+    const bearer3 = (await changePwd.json()).token;
+    assert.ok(bearer3 && bearer3 !== bearer2);
+
+    assert.equal((await fetch(`${baseUrl}/user-api/me`, { headers: { Cookie: cookie2 } })).status, 401);
+    assert.equal(
+      (await fetch(`${baseUrl}/user-api/me`, { headers: { Authorization: `Bearer ${bearer2}` } })).status,
+      401,
+    );
+    assert.equal((await fetch(`${baseUrl}/user-api/me`, { headers: { Cookie: cookie3 } })).status, 200);
+    assert.equal(
+      (await fetch(`${baseUrl}/user-api/me`, { headers: { Authorization: `Bearer ${bearer3}` } })).status,
+      200,
+    );
+
+    // 3. Password reset confirm revokes active tokens immediately
+    const reqReset = await fetch(`${baseUrl}/user-api/password-reset/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'm6user@example.com' }),
+    });
+    assert.equal(reqReset.status, 200);
+    const resetCode = sentEmails[0].text.match(/(\d{6})/)[1];
+
+    const confirmReset = await fetch(`${baseUrl}/user-api/password-reset/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'm6user@example.com',
+        code: resetCode,
+        newPassword: 'Password789!',
+      }),
+    });
+    assert.equal(confirmReset.status, 200);
+    assert.equal((await fetch(`${baseUrl}/user-api/me`, { headers: { Cookie: cookie3 } })).status, 401);
+
+    // 4. Admin reset-password revokes target user's active session immediately
+    const login4 = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'm6user', password: 'Password789!' }),
+    });
+    const cookie4 = extractCookieHeader(login4);
+
+    const adminLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    const adminReset = await fetch(`${baseUrl}/user-api/admin/users/${user.id}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ password: 'TempPassword123!' }),
+    });
+    assert.equal(adminReset.status, 200);
+    assert.equal((await fetch(`${baseUrl}/user-api/me`, { headers: { Cookie: cookie4 } })).status, 401);
+
+    // 5. Admin disabling user revokes token_version so even after re-enabling, old token stays 401
+    const login5 = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'm6user', password: 'TempPassword123!' }),
+    });
+    const cookie5 = extractCookieHeader(login5);
+
+    const disableRes = await fetch(`${baseUrl}/user-api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ disabled: true }),
+    });
+    assert.equal(disableRes.status, 200);
+    assert.equal((await fetch(`${baseUrl}/user-api/me`, { headers: { Cookie: cookie5 } })).status, 401);
+
+    const reenableRes = await fetch(`${baseUrl}/user-api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ disabled: false }),
+    });
+    assert.equal(reenableRes.status, 200);
+    // Pre-disable cookie STILL fails with 401!
+    assert.equal((await fetch(`${baseUrl}/user-api/me`, { headers: { Cookie: cookie5 } })).status, 401);
+  } finally {
+    await app.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('M7: AI, 0-credit free model, sync, admin & sensitive admin rate limits plus 413 oversized body Connection: close', async () => {
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'm7', 'users.db');
+  const mockFetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    text: async () => JSON.stringify({ choices: [{ message: { content: 'ok' } }] }),
+    json: async () => ({ id: 'mail_1', choices: [{ message: { content: 'ok' } }] }),
+  });
+
+  const config = loadConfig({
+    USER_SYNC_HOST: '127.0.0.1',
+    USER_SYNC_PORT: '0',
+    USER_SYNC_DB_PATH: dbPath,
+    ADMIN_USERNAME: 'root_admin',
+    ADMIN_PASSWORD: 'AdminPassword123!',
+    RESEND_API_KEY: 're_test_m7_key',
+    RATE_LIMIT_MAX: '50',
+    AI_RATE_LIMIT_MAX: '4',
+    AI_FREE_RATE_LIMIT_MAX: '2',
+    SYNC_RATE_LIMIT_MAX: '2',
+    ADMIN_RATE_LIMIT_MAX: '10',
+    ADMIN_SENSITIVE_RATE_LIMIT_MAX: '2',
+  });
+  const app = createApp(config, { fetchImpl: mockFetch });
+  const { host, port } = await app.listen();
+  const baseUrl = `http://${host}:${port}`;
+
+  try {
+    const adminLogin = await fetch(`${baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    // Create 1 free (0-credit) model and 1 paid (1-credit) model
+    const freeModelRes = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        id: 'free-model',
+        name: 'Free Model',
+        baseUrl: 'https://mock.example/v1',
+        apiKey: 'sk-free-123',
+        upstreamModel: 'free-up',
+        creditCost: 0,
+        minTier: 'free',
+      }),
+    });
+    assert.equal(freeModelRes.status, 201);
+
+    const paidModelRes = await fetch(`${baseUrl}/user-api/admin/platform-models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({
+        id: 'paid-model',
+        name: 'Paid Model',
+        baseUrl: 'https://mock.example/v1',
+        apiKey: 'sk-paid-123',
+        upstreamModel: 'paid-up',
+        creditCost: 1,
+        minTier: 'free',
+      }),
+    });
+    assert.equal(paidModelRes.status, 201);
+
+    // Register normal user and give credits
+    const reg = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'm7user', password: 'Password123!' }),
+    });
+    const userCookie = extractCookieHeader(reg);
+    const { user } = await reg.json();
+
+    const addCreds = await fetch(`${baseUrl}/user-api/admin/users/${user.id}/credits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ delta: 50, note: 'test' }),
+    });
+    assert.equal(addCreds.status, 200);
+
+    // 1. 0-credit model hits aiFreeRateLimitMax (2) on 3rd call, while paid model still works until aiRateLimitMax (4)
+    for (let i = 0; i < 2; i += 1) {
+      const r = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+        body: JSON.stringify({ model: 'free-model', messages: [{ role: 'user', content: 'hi' }] }),
+      });
+      assert.equal(r.status, 200);
+    }
+    const freeBlocked = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ model: 'free-model', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    assert.equal(freeBlocked.status, 429);
+    assert.ok(Number(freeBlocked.headers.get('retry-after')) >= 1);
+
+    // 4th overall AI call (paid model) succeeds, 5th overall AI call hits per-user aiRateLimitMax (4)
+    const paidOk = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ model: 'paid-model', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    assert.equal(paidOk.status, 200);
+    const aiOverallBlocked = await fetch(`${baseUrl}/user-api/ai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ model: 'paid-model', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    assert.equal(aiOverallBlocked.status, 429);
+
+    // 2. PUT /user-api/sync hits syncRateLimitMax (2) on 3rd call
+    for (let i = 0; i < 2; i += 1) {
+      const r = await fetch(`${baseUrl}/user-api/sync`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+        body: JSON.stringify({ data: { favorites: [{ id: `f-${i}` }] } }),
+      });
+      assert.equal(r.status, 200);
+    }
+    const syncBlocked = await fetch(`${baseUrl}/user-api/sync`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: userCookie },
+      body: JSON.stringify({ data: { favorites: [] } }),
+    });
+    assert.equal(syncBlocked.status, 429);
+    assert.ok(Number(syncBlocked.headers.get('retry-after')) >= 1);
+
+    // 3. Admin sensitive routes hit adminSensitiveRateLimitMax (2) on 3rd call
+    for (let i = 0; i < 2; i += 1) {
+      const r = await fetch(`${baseUrl}/user-api/admin/test-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({ to: 'admin@example.com' }),
+      });
+      assert.equal(r.status, 200);
+    }
+    const sensitiveBlocked = await fetch(`${baseUrl}/user-api/admin/platform-models/free-model/test`, {
+      method: 'POST',
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(sensitiveBlocked.status, 429);
+
+    // 4. General mutating admin routes hit adminRateLimitMax (10)
+    // Already used 6 mutating admin calls (2 models + 1 credits + 2 test-email + 1 model test) -> 4 left
+    for (let i = 0; i < 4; i += 1) {
+      const r = await fetch(`${baseUrl}/user-api/admin/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({ membershipEnabled: false }),
+      });
+      assert.equal(r.status, 200);
+    }
+    const adminBlocked = await fetch(`${baseUrl}/user-api/admin/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+      body: JSON.stringify({ membershipEnabled: false }),
+    });
+    assert.equal(adminBlocked.status, 429);
+
+    // 5. Oversized Content-Length -> immediate 413 with Connection: close
+    const declaredBig = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: host,
+          port,
+          path: '/user-api/login',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': String(32 * 1024),
+          },
+        },
+        (res) => {
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () =>
+            resolve({
+              status: res.statusCode,
+              connection: res.headers.connection,
+              body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+            }),
+          );
+        },
+      );
+      req.on('error', () => {
+        // ECONNRESET after server closes socket on 413 is expected if response already received
+      });
+      req.write('{"username":"a","password":"');
+      req.end();
+      setTimeout(() => reject(new Error('declared 413 timed out')), 3000).unref();
+    });
+    assert.equal(declaredBig.status, 413);
+    assert.equal(declaredBig.connection, 'close');
+    assert.match(declaredBig.body.error, /大小限制/);
+
+    // 6. Streaming chunked oversized body (no Content-Length) -> 413 with Connection: close without hanging
+    const chunkedBig = await new Promise((resolve, reject) => {
+      let resolved = false;
+      const req = http.request(
+        {
+          hostname: host,
+          port,
+          path: '/user-api/login',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Transfer-Encoding': 'chunked',
+          },
+        },
+        (res) => {
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () => {
+            resolved = true;
+            resolve({
+              status: res.statusCode,
+              connection: res.headers.connection,
+              body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+            });
+          });
+        },
+      );
+      req.on('error', (err) => {
+        if (!resolved) reject(err);
+      });
+      req.write(`{"pad":"${'x'.repeat(20 * 1024)}"}`);
+      req.end();
+      setTimeout(() => {
+        if (!resolved) reject(new Error('chunked 413 timed out'));
+      }, 3000).unref();
+    });
+    assert.equal(chunkedBig.status, 413);
+    assert.equal(chunkedBig.connection, 'close');
+  } finally {
+    await app.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('M8: pinned extension CORS allowlist rejects rogue extensions from CORS and Bearer token issuance', async () => {
+  const ctx = await startTestApp({
+    ALLOWED_EXTENSION_IDS: 'ijhpdghdlhlfolpnbkjojglpolngpajc,customallowedext0123456789abcdef',
+  });
+  try {
+    const allowedChrome = 'chrome-extension://ijhpdghdlhlfolpnbkjojglpolngpajc';
+    const allowedMoz = 'moz-extension://customallowedext0123456789abcdef';
+    const rogueExt = 'chrome-extension://evilrogueextensionid000000000000';
+
+    // Allowlisted Chrome & Firefox origins receive CORS
+    const okChrome = await fetch(`${ctx.baseUrl}/user-api/config`, {
+      headers: { Origin: allowedChrome },
+    });
+    assert.equal(okChrome.headers.get('access-control-allow-origin'), allowedChrome);
+
+    const okMoz = await fetch(`${ctx.baseUrl}/user-api/config`, {
+      headers: { Origin: allowedMoz },
+    });
+    assert.equal(okMoz.headers.get('access-control-allow-origin'), allowedMoz);
+
+    // Rogue extension gets NO CORS header
+    const rogueCors = await fetch(`${ctx.baseUrl}/user-api/config`, {
+      headers: { Origin: rogueExt },
+    });
+    assert.equal(rogueCors.headers.get('access-control-allow-origin'), null);
+
+    // Rogue extension registering or logging in (even with forged X-Client-Type: extension) gets NO Bearer token
+    const rogueReg = await fetch(`${ctx.baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: rogueExt,
+        'X-Client-Type': 'extension',
+      },
+      body: JSON.stringify({ username: 'm8user', password: 'Password123!' }),
+    });
+    assert.equal(rogueReg.status, 201);
+    assert.equal(rogueReg.headers.get('access-control-allow-origin'), null);
+    assert.equal('token' in (await rogueReg.json()), false);
+
+    const rogueLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: rogueExt,
+        'X-Client-Type': 'extension',
+      },
+      body: JSON.stringify({ username: 'm8user', password: 'Password123!' }),
+    });
+    assert.equal(rogueLogin.status, 200);
+    assert.equal(rogueLogin.headers.get('access-control-allow-origin'), null);
+    assert.equal('token' in (await rogueLogin.json()), false);
+
+    // Allowlisted extension login gets CORS + Bearer token
+    const goodExtLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: allowedChrome,
+      },
+      body: JSON.stringify({ username: 'm8user', password: 'Password123!' }),
+    });
+    assert.equal(goodExtLogin.status, 200);
+    assert.equal(goodExtLogin.headers.get('access-control-allow-origin'), allowedChrome);
+    assert.equal(typeof (await goodExtLogin.json()).token, 'string');
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test('L1: admin HTML security headers, per-request CSP nonce, and safeScriptJson escaping', async () => {
+  // 1. safeScriptJson escapes <, >, &, U+2028, U+2029 so script breakout is impossible
+  const malicious = '</script><script>alert(1)</script>&\u2028\u2029';
+  const encoded = safeScriptJson(malicious);
+  assert.equal(encoded.includes('<'), false);
+  assert.equal(encoded.includes('>'), false);
+  assert.equal(encoded.includes('&'), false);
+  assert.equal(encoded.includes('\u2028'), false);
+  assert.equal(encoded.includes('\u2029'), false);
+  assert.equal(JSON.parse(encoded), malicious);
+
+  const renderedWithEvilUsername = renderAdminHtml({
+    authenticated: true,
+    isAdmin: true,
+    username: '</script><script>alert(1)</script>',
+    membershipEnabled: false,
+    scriptNonce: 'testNonce123',
+  });
+  const scriptBlock = renderedWithEvilUsername.match(/<script nonce="testNonce123">([\s\S]*?)<\/script>/);
+  assert.ok(scriptBlock);
+  assert.equal(scriptBlock[1].includes('</script>'), false);
+
+  // 2. Live HTTP /user-api/admin responses carry strict security headers & rotating per-request nonces
+  const ctx = await startTestApp();
+  try {
+    const res1 = await fetch(`${ctx.baseUrl}/user-api/admin`);
+    assert.equal(res1.status, 200);
+    assert.equal(res1.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(res1.headers.get('x-frame-options'), 'DENY');
+    assert.equal(res1.headers.get('referrer-policy'), 'no-referrer');
+    const csp1 = res1.headers.get('content-security-policy') || '';
+    assert.match(csp1, /object-src 'none'/);
+    assert.match(csp1, /base-uri 'none'/);
+    assert.match(csp1, /frame-ancestors 'none'/);
+    assert.match(csp1, /connect-src 'self'/);
+    const nonceMatch1 = csp1.match(/script-src 'nonce-([^']+)'/);
+    assert.ok(nonceMatch1);
+    const html1 = await res1.text();
+    assert.ok(html1.includes(`<script nonce="${nonceMatch1[1]}">`));
+
+    const adminLogin = await fetch(`${ctx.baseUrl}/user-api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'root_admin', password: 'AdminPassword123!' }),
+    });
+    const adminCookie = extractCookieHeader(adminLogin);
+
+    const res2 = await fetch(`${ctx.baseUrl}/user-api/admin`, {
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(res2.status, 200);
+    assert.equal(res2.headers.get('x-frame-options'), 'DENY');
+    const csp2 = res2.headers.get('content-security-policy') || '';
+    const nonceMatch2 = csp2.match(/script-src 'nonce-([^']+)'/);
+    assert.ok(nonceMatch2);
+    assert.notEqual(nonceMatch1[1], nonceMatch2[1], 'nonce must rotate per request');
+    const html2 = await res2.text();
+    assert.ok(html2.includes(`<script nonce="${nonceMatch2[1]}">`));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test('L2: email verification code required for binding/changing email when mail is enabled', async () => {
+  const tmpDir = makeTempDir();
+  const dbPath = path.join(tmpDir, 'l2', 'users.db');
+  const sentEmails = [];
+  const mockFetch = async (_url, init) => {
+    sentEmails.push(JSON.parse(init.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: `re_l2_${sentEmails.length}` }),
+    };
+  };
+
+  const config = loadConfig({
+    USER_SYNC_HOST: '127.0.0.1',
+    USER_SYNC_PORT: '0',
+    USER_SYNC_DB_PATH: dbPath,
+    ADMIN_USERNAME: 'root_admin',
+    ADMIN_PASSWORD: 'AdminPassword123!',
+    RESEND_API_KEY: 're_test_l2_key',
+    MAIL_FROM: '高词 · GoPrmpt <noreply@goprmpt.com>',
+    PASSWORD_RESET_COOLDOWN_MS: '60000',
+    RATE_LIMIT_MAX: '50',
+  });
+  const app = createApp(config, { fetchImpl: mockFetch });
+  const { host, port } = await app.listen();
+  const baseUrl = `http://${host}:${port}`;
+
+  try {
+    // 1. /config reports emailVerificationRequired: true when mail is enabled
+    const cfg = await (await fetch(`${baseUrl}/user-api/config`)).json();
+    assert.equal(cfg.emailVerificationRequired, true);
+
+    // Register two users: taken_user (has email) and bind_user (no email)
+    const regTaken = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'taken_user',
+        email: 'taken@example.com',
+        password: 'Password123!',
+      }),
+    });
+    assert.equal(regTaken.status, 201);
+
+    const regBind = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'bind_user', password: 'Password123!' }),
+    });
+    assert.equal(regBind.status, 201);
+    const bindCookie = extractCookieHeader(regBind);
+
+    // 2. Binding new email without verificationCode -> 400
+    const noCodeRes = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({ email: 'newaddr@example.com' }),
+    });
+    assert.equal(noCodeRes.status, 400);
+
+    // 3. Requesting code for already-taken email -> 409 and sends NO email
+    const takenReq = await fetch(`${baseUrl}/user-api/me/email/request-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({ email: 'taken@example.com' }),
+    });
+    assert.equal(takenReq.status, 409);
+    assert.equal(sentEmails.length, 0);
+
+    // 4. Requesting code for available email -> 200 and sends 6-digit code
+    const reqCode = await fetch(`${baseUrl}/user-api/me/email/request-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({ email: 'NewAddr@Example.com' }),
+    });
+    assert.equal(reqCode.status, 200);
+    assert.equal(sentEmails.length, 1);
+    assert.deepEqual(sentEmails[0].to, ['newaddr@example.com']);
+    const code = sentEmails[0].text.match(/(\d{6})/)[1];
+
+    // 5. Immediate repeat request hits cooldown -> 429 + Retry-After
+    const cooldownRes = await fetch(`${baseUrl}/user-api/me/email/request-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({ email: 'other@example.com' }),
+    });
+    assert.equal(cooldownRes.status, 429);
+    assert.ok(Number(cooldownRes.headers.get('retry-after')) >= 1);
+
+    // 6. Wrong code fails 400; valid code for wrong email fails 400; valid code for target email succeeds 200
+    const wrongCode = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({
+        email: 'newaddr@example.com',
+        verificationCode: code === '000000' ? '111111' : '000000',
+      }),
+    });
+    assert.equal(wrongCode.status, 400);
+
+    const mismatchEmail = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({ email: 'another@example.com', verificationCode: code }),
+    });
+    assert.equal(mismatchEmail.status, 400);
+
+    const okBind = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({ email: 'newaddr@example.com', verificationCode: code }),
+    });
+    assert.equal(okBind.status, 200);
+    assert.equal((await okBind.json()).user.email, 'newaddr@example.com');
+
+    // 7. Keeping same email or unbinding (email: null) works without verificationCode
+    const sameEmailRes = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({ email: 'newaddr@example.com' }),
+    });
+    assert.equal(sameEmailRes.status, 200);
+
+    const unbindRes = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({ email: null }),
+    });
+    assert.equal(unbindRes.status, 200);
+    assert.equal((await unbindRes.json()).user.email, null);
+
+    // 8. Reusing the already-used code to re-bind fails -> 400
+    const replayRes = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: bindCookie },
+      body: JSON.stringify({ email: 'newaddr@example.com', verificationCode: code }),
+    });
+    assert.equal(replayRes.status, 400);
+
+    // 9. 5 failed verification attempts lock out the active code even if the 6th attempt sends the right code
+    const lockUserReg = await fetch(`${baseUrl}/user-api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'l2_lock_user', password: 'Password123!' }),
+    });
+    const lockUserCookie = extractCookieHeader(lockUserReg);
+    const lockReq = await fetch(`${baseUrl}/user-api/me/email/request-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: lockUserCookie },
+      body: JSON.stringify({ email: 'lockcheck@example.com' }),
+    });
+    assert.equal(lockReq.status, 200);
+    const lockCode = sentEmails[sentEmails.length - 1].text.match(/(\d{6})/)[1];
+    const wrongCandidate = lockCode === '123456' ? '654321' : '123456';
+    for (let i = 0; i < 5; i += 1) {
+      const bad = await fetch(`${baseUrl}/user-api/me/profile`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Cookie: lockUserCookie },
+        body: JSON.stringify({ email: 'lockcheck@example.com', verificationCode: wrongCandidate }),
+      });
+      assert.equal(bad.status, 400);
+    }
+    const lockedOut = await fetch(`${baseUrl}/user-api/me/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: lockUserCookie },
+      body: JSON.stringify({ email: 'lockcheck@example.com', verificationCode: lockCode }),
+    });
+    assert.equal(lockedOut.status, 400);
+
+    // 10. When mail is unconfigured, request-code returns 503
+    const noMailCtx = await startTestApp({ RESEND_API_KEY: '' });
+    try {
+      const regNoMail = await fetch(`${noMailCtx.baseUrl}/user-api/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'nomail_user', password: 'Password123!' }),
+      });
+      const noMailCookie = extractCookieHeader(regNoMail);
+      const req503 = await fetch(`${noMailCtx.baseUrl}/user-api/me/email/request-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: noMailCookie },
+        body: JSON.stringify({ email: 'nomail@example.com' }),
+      });
+      assert.equal(req503.status, 503);
+    } finally {
+      await noMailCtx.cleanup();
+    }
+  } finally {
+    await app.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

@@ -3,9 +3,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-const target = process.argv[2] || path.join('packages', 'extension', 'dist')
+const targets = process.argv.slice(2)
+if (targets.length === 0) {
+  targets.push(path.join('packages', 'extension', 'dist'))
+}
 const rootDir = process.cwd()
-const targetPath = path.resolve(rootDir, target)
+const targetPaths = targets.map((target) => path.resolve(rootDir, target))
 
 const TEXT_EXTENSIONS = new Set([
   '.css',
@@ -32,12 +35,36 @@ const SECRET_PATTERNS = [
     regex: /\bxai-[A-Za-z0-9_-]{12,}\b/g,
   },
   {
+    name: 'AWS presigned signature (X-Amz-Signature)',
+    regex: /X-Amz-Signature=[0-9a-fA-F]{32,}/g,
+    allow: (value) => value.startsWith('X-Amz-Signature=REDACTED_'),
+  },
+  {
+    name: 'AWS presigned security token (X-Amz-Security-Token)',
+    regex: /X-Amz-Security-Token=[A-Za-z0-9%+/=._-]{40,}/g,
+    allow: (value) => value.startsWith('X-Amz-Security-Token=REDACTED_'),
+  },
+  {
     name: 'UUID-like secret',
     regex: /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g,
-    allow: (value) =>
-      value === '00000000-0000-0000-0000-000000000000' ||
-      value === '10000000-1000-4000-8000-100000000000' ||
-      value === 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+    allow: (value, text, index) => {
+      if (
+        value === '00000000-0000-0000-0000-000000000000' ||
+        value === '10000000-1000-4000-8000-100000000000' ||
+        value === 'ffffffff-ffff-ffff-ffff-ffffffffffff'
+      ) {
+        return true
+      }
+      const before = text.slice(Math.max(0, index - 24), index)
+      if (/chatcmpl-$/.test(before)) {
+        return true
+      }
+      const after = text.slice(index + value.length, index + value.length + 50)
+      return (
+        /\\?"id\\?"\s*:\s*\\?"$/.test(before) &&
+        /^\\?"\s*,\s*\\?"object\\?"\s*:\s*\\?"chat\.completion/.test(after)
+      )
+    },
   },
 ]
 
@@ -105,9 +132,11 @@ function findLine(text, index) {
   return text.slice(0, index).split(/\r?\n/u).length
 }
 
-if (!fs.existsSync(targetPath)) {
-  console.error(`Extension release scan target does not exist: ${targetPath}`)
-  process.exit(1)
+for (const targetPath of targetPaths) {
+  if (!fs.existsSync(targetPath)) {
+    console.error(`Extension release scan target does not exist: ${targetPath}`)
+    process.exit(1)
+  }
 }
 
 const envValues = [
@@ -116,7 +145,7 @@ const envValues = [
 ]
 
 const findings = []
-const files = listFiles(targetPath).filter(isTextFile)
+const files = [...new Set(targetPaths.flatMap((targetPath) => listFiles(targetPath).filter(isTextFile)))]
 
 for (const file of files) {
   const relativeFile = path.relative(rootDir, file)
@@ -137,10 +166,11 @@ for (const file of files) {
   for (const pattern of SECRET_PATTERNS) {
     for (const match of text.matchAll(pattern.regex)) {
       const value = match[0]
-      if (pattern.allow?.(value)) continue
+      const index = match.index ?? 0
+      if (pattern.allow?.(value, text, index)) continue
       findings.push({
         file: relativeFile,
-        line: findLine(text, match.index ?? 0),
+        line: findLine(text, index),
         type: pattern.name,
         value: mask(value),
       })

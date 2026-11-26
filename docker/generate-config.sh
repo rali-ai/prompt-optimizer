@@ -1,75 +1,52 @@
 #!/bin/sh
+set -eu
 
-# 配置文件路径
-CONFIG_FILE="/usr/share/nginx/html/config.js"
-
-echo "========================================="
-echo "开始生成运行时配置文件..."
-echo "目标文件: $CONFIG_FILE"
-echo "========================================="
-
-# 检查目标目录是否存在
+# 运行时配置文件路径（仅注入显式白名单内的非敏感环境变量）
+CONFIG_FILE="${CONFIG_FILE:-/usr/share/nginx/html/config.js}"
 TARGET_DIR=$(dirname "$CONFIG_FILE")
+
 if [ ! -d "$TARGET_DIR" ]; then
-    echo "ERROR: 目标目录不存在: $TARGET_DIR"
-    mkdir -p "$TARGET_DIR" || echo "ERROR: 无法创建目录"
+    mkdir -p "$TARGET_DIR"
 fi
 
-# 构建包含全部 VITE_* 变量的运行时配置（同时注入带前缀与不带前缀的键）
-CONFIG_BODY=""
-COUNT=0
+CONFIG_FILE="$CONFIG_FILE" node -e '
+const fs = require("node:fs");
 
-# 显示所有VITE_*环境变量用于调试
-echo "扫描VITE_*环境变量..."
-env | grep '^VITE_' || echo "未找到任何VITE_*变量"
-echo "========================================="
+const ALLOWLIST = [
+  "VITE_ENABLE_PROMPT_GARDEN_IMPORT",
+  "VITE_PROMPT_GARDEN_BASE_URL",
+  "VITE_GOOGLE_DRIVE_CLIENT_ID",
+  "VITE_APP_VERSION",
+];
 
-# 遍历所有以 VITE_ 开头的环境变量
-for var in $(env | grep '^VITE_[A-Za-z0-9_]*=' | cut -d= -f1 | sort); do
-  value=$(printenv "$var" 2>/dev/null)
-  if [ -n "$value" ]; then
-    # 去除 VITE_ 前缀得到无前缀键名
-    no_prefix_key=$(echo "$var" | sed 's/^VITE_//')
-    # 简单转义（反斜杠与双引号）
-    escaped_value=$(printf '%s' "$value" | sed 's/\\/\\\\/g; s/"/\\"/g')
+const runtimeConfig = {};
+let injectedCount = 0;
 
-    # 追加属性：无前缀副本 与 带前缀副本
-    if [ -n "$CONFIG_BODY" ]; then
-      CONFIG_BODY="${CONFIG_BODY},
-"
-    fi
-    CONFIG_BODY="${CONFIG_BODY}  ${no_prefix_key}: \"${escaped_value}\",
-  ${var}: \"${escaped_value}\""
+for (const key of ALLOWLIST) {
+  const value = process.env[key];
+  if (typeof value === "string" && value.length > 0) {
+    runtimeConfig[key.replace(/^VITE_/, "")] = value;
+    runtimeConfig[key] = value;
+    injectedCount += 1;
+  }
+}
 
-    COUNT=$((COUNT + 1))
-    echo "Found VITE var: $var"
-  fi
-done
+const serialized = JSON.stringify(runtimeConfig, null, 2)
+  .replace(/</g, "\\u003c")
+  .replace(/\u2028/g, "\\u2028")
+  .replace(/\u2029/g, "\\u2029");
 
-# 生成配置文件（运行时在浏览器环境可读）
-cat > "$CONFIG_FILE" << EOF
-// 此文件由容器启动时生成，用于在运行时向前端注入环境变量
-// 同时提供带前缀与不带前缀的两个副本，方便不同读取策略
-window.runtime_config = Object.assign({}, (window.runtime_config || {}), {
-${CONFIG_BODY}
-});
-console.log("运行时配置已加载，共注入 ${COUNT} 个 VITE_* 变量（双份键）");
-EOF
+const content = [
+  "// 此文件由容器启动时生成，仅注入白名单内的非敏感前端运行时配置",
+  `window.runtime_config = Object.assign({}, (window.runtime_config || {}), ${serialized});`,
+  "",
+].join("\n");
 
-echo "========================================="
-echo "配置文件已生成: $CONFIG_FILE"
-echo "已注入 VITE_* 变量数量: $COUNT"
-echo "========================================="
+fs.writeFileSync(process.env.CONFIG_FILE, content, "utf8");
+console.log(`Runtime config generated (${injectedCount} allowlisted keys injected).`);
+'
 
-# 验证文件是否成功生成
-if [ -f "$CONFIG_FILE" ]; then
-    echo "✅ 配置文件生成成功"
-    echo "文件大小: $(wc -c < "$CONFIG_FILE") bytes"
-    echo "前10行内容:"
-    head -n 10 "$CONFIG_FILE"
-else
-    echo "❌ ERROR: 配置文件生成失败!"
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERROR: Failed to generate runtime config: $CONFIG_FILE" >&2
     exit 1
 fi
-
-echo "========================================="

@@ -73,6 +73,9 @@ function migrateUsersTableIfNeeded(db) {
     const lastGrantAmountExpr = existingCols.has('last_credit_grant_amount')
       ? 'COALESCE(last_credit_grant_amount, 0)'
       : '0';
+    const tokenVersionExpr = existingCols.has('token_version')
+      ? 'COALESCE(token_version, 1)'
+      : '1';
 
     db.exec('PRAGMA foreign_keys = OFF;');
     db.exec('BEGIN IMMEDIATE;');
@@ -91,12 +94,13 @@ function migrateUsersTableIfNeeded(db) {
           credit_balance INTEGER NOT NULL DEFAULT 0,
           last_credit_grant_month TEXT,
           last_credit_grant_amount INTEGER NOT NULL DEFAULT 0,
+          token_version INTEGER NOT NULL DEFAULT 1,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL
         );
         INSERT INTO users_new (
           id, username, email, password_hash, role, tier, tier_expires_at, disabled,
-          credit_balance, last_credit_grant_month, last_credit_grant_amount,
+          credit_balance, last_credit_grant_month, last_credit_grant_amount, token_version,
           created_at, updated_at
         )
         SELECT
@@ -111,6 +115,7 @@ function migrateUsersTableIfNeeded(db) {
           ${creditBalanceExpr},
           ${lastGrantMonthExpr},
           ${lastGrantAmountExpr},
+          ${tokenVersionExpr},
           created_at,
           updated_at
         FROM users;
@@ -146,6 +151,9 @@ function migrateUsersTableIfNeeded(db) {
   }
   if (!colNames.has('last_credit_grant_amount')) {
     db.exec('ALTER TABLE users ADD COLUMN last_credit_grant_amount INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!colNames.has('token_version')) {
+    db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1');
   }
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
@@ -198,6 +206,7 @@ export function openDatabase(dbPath) {
       credit_balance INTEGER NOT NULL DEFAULT 0,
       last_credit_grant_month TEXT,
       last_credit_grant_amount INTEGER NOT NULL DEFAULT 0,
+      token_version INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -237,6 +246,19 @@ export function openDatabase(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS idx_reset_codes_email_created
       ON password_reset_codes(email, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS email_verify_codes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      email TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_email_verify_codes_user_email_created
+      ON email_verify_codes(user_id, email, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS announcements (
       id TEXT PRIMARY KEY,
@@ -364,6 +386,32 @@ export function openDatabase(dbPath) {
     SET attempts = attempts + 1
     WHERE id = ?
   `);
+  const stmtGetLatestEmailVerifyCode = db.prepare(`
+    SELECT * FROM email_verify_codes
+    WHERE user_id = ? AND email = ? AND used_at IS NULL AND expires_at > ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `);
+  const stmtGetLatestEmailVerifyCodeForUser = db.prepare(`
+    SELECT * FROM email_verify_codes
+    WHERE user_id = ? AND used_at IS NULL AND expires_at > ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `);
+  const stmtInvalidateUserEmailVerifyCodes = db.prepare(`
+    UPDATE email_verify_codes
+    SET used_at = ?
+    WHERE user_id = ? AND used_at IS NULL
+  `);
+  const stmtInsertEmailVerifyCode = db.prepare(`
+    INSERT INTO email_verify_codes (id, user_id, email, code_hash, attempts, expires_at, used_at, created_at)
+    VALUES (?, ?, ?, ?, 0, ?, NULL, ?)
+  `);
+  const stmtIncrementEmailVerifyAttempts = db.prepare(`
+    UPDATE email_verify_codes
+    SET attempts = attempts + 1
+    WHERE id = ?
+  `);
   const stmtInsertUser = db.prepare(`
     INSERT INTO users (id, username, email, password_hash, role, tier, tier_expires_at, disabled, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 'free', NULL, 0, ?, ?)
@@ -403,7 +451,7 @@ export function openDatabase(dbPath) {
   `);
   const stmtUpdateUserAdmin = db.prepare(`
     UPDATE users
-    SET tier = ?, tier_expires_at = ?, disabled = ?, updated_at = ?
+    SET tier = ?, tier_expires_at = ?, disabled = ?, token_version = token_version + ?, updated_at = ?
     WHERE id = ?
   `);
   const stmtUpdateUserEmail = db.prepare(`
@@ -413,7 +461,12 @@ export function openDatabase(dbPath) {
   `);
   const stmtUpdateUserPassword = db.prepare(`
     UPDATE users
-    SET password_hash = ?, updated_at = ?
+    SET password_hash = ?, token_version = token_version + 1, updated_at = ?
+    WHERE id = ?
+  `);
+  const stmtBumpUserTokenVersion = db.prepare(`
+    UPDATE users
+    SET token_version = token_version + 1, updated_at = ?
     WHERE id = ?
   `);
   const stmtUpdateUserCreditGrant = db.prepare(`
@@ -733,6 +786,13 @@ export function openDatabase(dbPath) {
       return stmtFindById.get(userId);
     },
 
+    bumpUserTokenVersion(userId) {
+      const existing = stmtFindById.get(userId);
+      if (!existing) return null;
+      stmtBumpUserTokenVersion.run(Date.now(), userId);
+      return stmtFindById.get(userId);
+    },
+
     bootstrapAdmin({ username, password }) {
       const normalized = normalizeUsername(username);
       if (!normalized || !password) return null;
@@ -810,9 +870,17 @@ export function openDatabase(dbPath) {
         patch.tierExpiresAt !== undefined ? patch.tierExpiresAt : existing.tier_expires_at;
       const nextDisabled =
         patch.disabled !== undefined ? (patch.disabled ? 1 : 0) : existing.disabled;
+      const bumpTokenVersion = patch.disabled === true ? 1 : 0;
       const now = Date.now();
 
-      stmtUpdateUserAdmin.run(nextTier, nextTierExpiresAt, nextDisabled, now, userId);
+      stmtUpdateUserAdmin.run(
+        nextTier,
+        nextTierExpiresAt,
+        nextDisabled,
+        bumpTokenVersion,
+        now,
+        userId,
+      );
       return stmtFindById.get(userId);
     },
 
@@ -1087,6 +1155,41 @@ export function openDatabase(dbPath) {
 
     markResetCodesUsed(userId) {
       stmtInvalidateUserResetCodes.run(Date.now(), userId);
+    },
+
+    getLatestActiveEmailVerifyCode(userId, email = null, now = Date.now()) {
+      if (!userId) return null;
+      if (email) {
+        return stmtGetLatestEmailVerifyCode.get(userId, email, now) || null;
+      }
+      return stmtGetLatestEmailVerifyCodeForUser.get(userId, now) || null;
+    },
+
+    createEmailVerifyCode({ userId, email, codeHash, ttlMs }) {
+      const now = Date.now();
+      const id = crypto.randomUUID();
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        stmtInvalidateUserEmailVerifyCodes.run(now, userId);
+        stmtInsertEmailVerifyCode.run(id, userId, email, codeHash, now + ttlMs, now);
+        db.exec('COMMIT');
+        return { id, expiresAt: now + ttlMs, createdAt: now };
+      } catch (err) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          // ignore
+        }
+        throw err;
+      }
+    },
+
+    incrementEmailVerifyCodeAttempts(id) {
+      stmtIncrementEmailVerifyAttempts.run(id);
+    },
+
+    markEmailVerifyCodesUsed(userId) {
+      stmtInvalidateUserEmailVerifyCodes.run(Date.now(), userId);
     },
 
     listActiveAnnouncements(now = Date.now(), limit = 10) {

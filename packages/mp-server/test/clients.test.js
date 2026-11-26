@@ -90,11 +90,21 @@ test('the model client posts an OpenAI-compatible request and cleans the reply',
   assert.deepEqual(calls[0].body, { model: 'deepseek-chat', messages, stream: false })
 })
 
-test('the model client reports HTTP errors, empty replies and timeouts by kind', async () => {
-  const replies = [{ status: 500, error: 'down' }, { choices: [{ message: { content: '  ' } }] }]
+test('the model client reports HTTP errors, empty replies and timeouts by kind without leaking upstream body', async () => {
+  const replies = [
+    { status: 500, error: 'down: secret-upstream-body-sk-live-999999' },
+    { choices: [{ message: { content: '  ' } }] }
+  ]
   const { fetch } = fakeFetch((call, n) => replies[n - 1])
   const llm = createLlm({ baseUrl: 'https://x/v1', apiKey: 'k', model: 'm', timeoutMs: 1000, fetch })
-  await assert.rejects(llm.complete([]), (e) => e instanceof LlmError && e.kind === 'upstream')
+  await assert.rejects(
+    llm.complete([]),
+    (e) =>
+      e instanceof LlmError &&
+      e.kind === 'upstream' &&
+      e.message === '模型服务返回 HTTP 500' &&
+      !e.message.includes('secret-upstream-body')
+  )
   await assert.rejects(llm.complete([]), (e) => e instanceof LlmError && e.kind === 'empty')
 
   const slow = createLlm({

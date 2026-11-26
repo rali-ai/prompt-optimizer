@@ -47,7 +47,13 @@ COPY docker/generate-auth.sh /docker-entrypoint.d/30-generate-auth.sh
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/start-services.sh /start-services.sh
 COPY docker/auth-api.mjs /app/auth-api/server.mjs
-COPY packages/user-sync-api /app/user-sync-api
+COPY packages/user-sync-api/package.json /app/user-sync-api/
+COPY packages/user-sync-api/src /app/user-sync-api/src
+
+# 防止敏感 .env 文件意外进入镜像
+RUN test ! -f /app/user-sync-api/.env \
+    && test ! -f /app/packages/user-sync-api/.env \
+    && test -z "$(find /app/user-sync-api /app/packages/user-sync-api -maxdepth 2 -type f \( -name '.env' -o \( -name '.env.*' ! -name '.env.example' \) \))"
 
 # 持久化数据（访问密码文件 /data/auth/.htpasswd 与用户云同步库 /data/user-sync/users.db）
 VOLUME /data

@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA87PEGQpf/Xv9eoXF15dXiiJyTObeGH4GgKRi1ntDnD76nNY+e4CqjEy7oe7cqxUYW/ik71IptIUlK6/GofTX399dTmGfI50sL1v/uV4o6+OOiMcPTtn28pMNaBukOsHBGzAvlFlHqV9i4p6v+BePCFllxqIHN+rvd13msiP8HHl4rGDcWsYW1zbxkx1XFebv3VPFUx+Aauv3TkeSkTLr9tI1OXd3R8Qtj7YWyatoVuhkxtbseKTIIGBINI0/CWvC1SUrhNQzkc0nbCwpFdOix0qfQ3Ye73pbqN4Y8CWVbkBSn4GmRBrmDPho9hrMJVJrL0+QtAXANoF3vozXsY6gJwIDAQAB",
   "default_locale": "zh_CN",
   "name": "__MSG_extName__",
   "version": "2.16.0",
@@ -26,7 +27,8 @@
   },
   "permissions": [
     "contextMenus",
-    "sidePanel"
+    "sidePanel",
+    "storage"
   ],
   "host_permissions": [
     "https://goprmpt.net/*",
@@ -35,7 +37,7 @@
   "homepage_url": "https://goprmpt.com",
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline';",
-    "sandbox": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' https: blob:; style-src 'unsafe-inline' https:; img-src https: data: blob:; font-src https: data:; media-src https: data: blob:; connect-src https: http: wss: ws:; frame-src about:; worker-src blob:; base-uri 'none'; form-action 'none'"
+    "sandbox": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline' https:; img-src https: data: blob:; font-src https: data:; media-src data: blob:; connect-src 'none'; frame-src about:; worker-src blob:; base-uri 'none'; form-action 'none'"
   },
   "sandbox": {
     "pages": [

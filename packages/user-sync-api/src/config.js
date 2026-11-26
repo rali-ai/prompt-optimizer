@@ -9,9 +9,22 @@ function parseBool(value, fallback = false) {
   return normalized === '1' || normalized === 'true' || normalized === 'yes';
 }
 
+export const DEFAULT_ALLOWED_EXTENSION_IDS = ['ijhpdghdlhlfolpnbkjojglpolngpajc'];
+
 function parsePositiveInt(value, fallback) {
   const num = Number(value);
   return Number.isInteger(num) && num > 0 ? num : fallback;
+}
+
+function parseAllowedExtensionIds(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return [...DEFAULT_ALLOWED_EXTENSION_IDS];
+  }
+  const parsed = value
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  return parsed.length > 0 ? Array.from(new Set(parsed)) : [...DEFAULT_ALLOWED_EXTENSION_IDS];
 }
 
 export function resolveSecret(envSecret, dbPath) {
@@ -49,6 +62,26 @@ export function loadConfig(env = process.env) {
     adminPassword: env.ADMIN_PASSWORD || '',
     rateLimitMax: parsePositiveInt(env.RATE_LIMIT_MAX, 20),
     rateLimitWindowMs: parsePositiveInt(env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
+    rateLimitMaxEntries: parsePositiveInt(env.RATE_LIMIT_MAX_ENTRIES, 10000),
+    loginAccountRateLimitMax: parsePositiveInt(env.LOGIN_ACCOUNT_RATE_LIMIT_MAX, 10),
+    loginAccountRateLimitWindowMs: parsePositiveInt(
+      env.LOGIN_ACCOUNT_RATE_LIMIT_WINDOW_MS,
+      15 * 60 * 1000,
+    ),
+    aiRateLimitMax: parsePositiveInt(env.AI_RATE_LIMIT_MAX, 30),
+    aiRateLimitWindowMs: parsePositiveInt(env.AI_RATE_LIMIT_WINDOW_MS, 60 * 1000),
+    aiFreeRateLimitMax: parsePositiveInt(env.AI_FREE_RATE_LIMIT_MAX, 10),
+    aiFreeRateLimitWindowMs: parsePositiveInt(env.AI_FREE_RATE_LIMIT_WINDOW_MS, 60 * 1000),
+    syncRateLimitMax: parsePositiveInt(env.SYNC_RATE_LIMIT_MAX, 30),
+    syncRateLimitWindowMs: parsePositiveInt(env.SYNC_RATE_LIMIT_WINDOW_MS, 60 * 1000),
+    adminRateLimitMax: parsePositiveInt(env.ADMIN_RATE_LIMIT_MAX, 60),
+    adminRateLimitWindowMs: parsePositiveInt(env.ADMIN_RATE_LIMIT_WINDOW_MS, 60 * 1000),
+    adminSensitiveRateLimitMax: parsePositiveInt(env.ADMIN_SENSITIVE_RATE_LIMIT_MAX, 10),
+    adminSensitiveRateLimitWindowMs: parsePositiveInt(
+      env.ADMIN_SENSITIVE_RATE_LIMIT_WINDOW_MS,
+      5 * 60 * 1000,
+    ),
+    allowedExtensionIds: parseAllowedExtensionIds(env.ALLOWED_EXTENSION_IDS),
     sessionTtlMs: parsePositiveInt(env.SESSION_TTL_MS, 30 * 24 * 60 * 60 * 1000),
     resendApiKey: (env.RESEND_API_KEY && env.RESEND_API_KEY.trim()) || '',
     mailFrom: (env.MAIL_FROM && env.MAIL_FROM.trim()) || DEFAULT_MAIL_FROM,

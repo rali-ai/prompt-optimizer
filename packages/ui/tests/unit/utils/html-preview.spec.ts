@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { buildHtmlPreviewContent, buildHtmlPreviewDocument, extractHtmlCandidate, htmlSourceAsMarkdown } from '../../../src/utils/html-preview'
+import { buildHtmlPreviewContent, buildHtmlPreviewDocument, extractHtmlCandidate, HTML_PREVIEW_CSP, htmlSourceAsMarkdown } from '../../../src/utils/html-preview'
 import { mount } from '@vue/test-utils'
 import MarkdownRenderer from '../../../src/components/MarkdownRenderer.vue'
 import { prepareMarkdownOutput } from '../../../src/utils/markdown-output'
@@ -75,8 +75,30 @@ describe('HTML preview extraction', () => {
     expect(child).toBe(buildHtmlPreviewContent(html, ''))
     expect(child.replace(/<script data-preview-monitor>[\s\S]*?<\/script>/u, '')).toBe(html)
     expect(document.querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-scripts')
-    expect(document.querySelector('meta[http-equiv]')?.getAttribute('content')).toContain('connect-src https: http: wss: ws:')
+    expect(document.querySelector('meta[http-equiv]')?.getAttribute('content')).toBe(HTML_PREVIEW_CSP)
     expect(document.querySelectorAll('script')).toHaveLength(1)
+  })
+
+  it('tightens HTML_PREVIEW_CSP to block remote scripts, network requests, and cleartext protocols', () => {
+    const directives = Object.fromEntries(
+      HTML_PREVIEW_CSP.split(';')
+        .map(part => part.trim())
+        .filter(Boolean)
+        .map(part => {
+          const [name, ...values] = part.split(/\s+/u)
+          return [name, values]
+        }),
+    )
+
+    expect(directives['default-src']).toEqual(["'none'"])
+    expect(directives['script-src']).toEqual(["'unsafe-inline'", 'blob:'])
+    expect(directives['script-src']).not.toContain('https:')
+    expect(directives['script-src']).not.toContain('http:')
+    expect(directives['connect-src']).toEqual(["'none'"])
+    expect(directives['media-src']).toEqual(['data:', 'blob:'])
+    expect(directives['base-uri']).toEqual(["'none'"])
+    expect(directives['form-action']).toEqual(["'none'"])
+    expect(HTML_PREVIEW_CSP).not.toMatch(/\b(?:http|ws|wss):/iu)
   })
 
   it.each([

@@ -30,9 +30,9 @@ services:
       # - MCP_DEFAULT_LANGUAGE=${MCP_DEFAULT_LANGUAGE:-zh}
       # - MCP_DEFAULT_MODEL_PROVIDER=${MCP_DEFAULT_MODEL_PROVIDER:-openai}
 
-      # Basic认证配置（可选）
+      # Basic认证配置（可选；留空则不启用，请勿使用 123456 等弱口令）
       - ACCESS_USERNAME=${ACCESS_USERNAME:-admin}
-      - ACCESS_PASSWORD=${ACCESS_PASSWORD:-123456}
+      - ACCESS_PASSWORD=${ACCESS_PASSWORD:-}
     volumes:
       # 持久化访问密码文件；ACCESS_PASSWORD 只在首次启动时写入，之后可在网站内修改
       - prompt-optimizer-dev-data:/data

@@ -11,6 +11,7 @@ export interface UserSyncConfig {
   membershipEnabled: boolean
   registrationEnabled: boolean
   emailResetEnabled?: boolean
+  emailVerificationRequired?: boolean
   monthlyCredits?: MonthlyCreditsConfig
 }
 
@@ -195,8 +196,86 @@ export function resolvePlatformAiBaseUrl(baseUrl?: string): string {
   return `${normalizedPath}/ai/v1`
 }
 
-function readStoredToken(): string {
-  if (!isExtensionRuntime()) return ''
+interface ChromeStorageArea {
+  get: (
+    keys: string | string[],
+    callback?: (items: Record<string, unknown>) => void,
+  ) => Promise<Record<string, unknown>> | void
+  set: (items: Record<string, unknown>, callback?: () => void) => Promise<void> | void
+  remove: (keys: string | string[], callback?: () => void) => Promise<void> | void
+}
+
+let cachedExtensionToken: string | null = null
+let hydratedStorageArea: ChromeStorageArea | null = null
+let hydrationInFlight: { area: ChromeStorageArea; promise: Promise<string> } | null = null
+let tokenMutationSeq = 0
+
+function getChromeStorageLocal(): ChromeStorageArea | null {
+  const chromeObj = (globalThis as { chrome?: { storage?: { local?: ChromeStorageArea } } }).chrome
+  const area = chromeObj?.storage?.local
+  if (
+    !area ||
+    typeof area.get !== 'function' ||
+    typeof area.set !== 'function' ||
+    typeof area.remove !== 'function'
+  ) {
+    return null
+  }
+  return area
+}
+
+async function chromeStorageGet(area: ChromeStorageArea, key: string): Promise<string> {
+  try {
+    const result = area.get(key)
+    if (result && typeof (result as Promise<Record<string, unknown>>).then === 'function') {
+      const items = await result
+      return typeof items?.[key] === 'string' ? (items[key] as string) : ''
+    }
+    return await new Promise<string>((resolve) => {
+      area.get(key, (items) => {
+        resolve(typeof items?.[key] === 'string' ? (items[key] as string) : '')
+      })
+    })
+  } catch {
+    return ''
+  }
+}
+
+async function chromeStorageSet(
+  area: ChromeStorageArea,
+  key: string,
+  value: string,
+): Promise<void> {
+  try {
+    const result = area.set({ [key]: value })
+    if (result && typeof (result as Promise<void>).then === 'function') {
+      await result
+      return
+    }
+    await new Promise<void>((resolve) => {
+      area.set({ [key]: value }, () => resolve())
+    })
+  } catch {
+    // ignore storage quota/privacy errors
+  }
+}
+
+async function chromeStorageRemove(area: ChromeStorageArea, key: string): Promise<void> {
+  try {
+    const result = area.remove(key)
+    if (result && typeof (result as Promise<void>).then === 'function') {
+      await result
+      return
+    }
+    await new Promise<void>((resolve) => {
+      area.remove(key, () => resolve())
+    })
+  } catch {
+    // ignore storage quota/privacy errors
+  }
+}
+
+function readLegacyLocalStorageToken(): string {
   try {
     return window.localStorage?.getItem(EXTENSION_TOKEN_STORAGE_KEY) || ''
   } catch {
@@ -204,13 +283,89 @@ function readStoredToken(): string {
   }
 }
 
-function writeStoredToken(token: string | null): void {
-  if (!isExtensionRuntime()) return
+function removeLegacyLocalStorageToken(): void {
   try {
+    window.localStorage?.removeItem(EXTENSION_TOKEN_STORAGE_KEY)
+  } catch {
+    // ignore storage quota/privacy errors
+  }
+}
+
+export async function hydrateExtensionToken(): Promise<string> {
+  if (!isExtensionRuntime()) return ''
+  const area = getChromeStorageLocal()
+  if (!area) {
+    return readLegacyLocalStorageToken()
+  }
+  if (hydratedStorageArea === area && cachedExtensionToken !== null) {
+    return cachedExtensionToken
+  }
+  if (hydrationInFlight && hydrationInFlight.area === area) {
+    return hydrationInFlight.promise
+  }
+
+  const seqAtStart = tokenMutationSeq
+  const promise = (async () => {
+    let token = await chromeStorageGet(area, EXTENSION_TOKEN_STORAGE_KEY)
     if (!token) {
+      const legacy = readLegacyLocalStorageToken()
+      if (legacy) {
+        token = legacy
+        await chromeStorageSet(area, EXTENSION_TOKEN_STORAGE_KEY, legacy)
+        removeLegacyLocalStorageToken()
+      }
+    }
+    if (tokenMutationSeq === seqAtStart) {
+      cachedExtensionToken = token
+      hydratedStorageArea = area
+      return token
+    }
+    return cachedExtensionToken ?? ''
+  })()
+
+  hydrationInFlight = { area, promise }
+  try {
+    return await promise
+  } finally {
+    if (hydrationInFlight?.promise === promise) {
+      hydrationInFlight = null
+    }
+  }
+}
+
+function readStoredToken(): string {
+  if (!isExtensionRuntime()) return ''
+  const area = getChromeStorageLocal()
+  if (area && hydratedStorageArea === area && cachedExtensionToken !== null) {
+    return cachedExtensionToken
+  }
+  return readLegacyLocalStorageToken()
+}
+
+async function writeStoredToken(token: string | null): Promise<void> {
+  if (!isExtensionRuntime()) return
+  tokenMutationSeq += 1
+  const normalized = typeof token === 'string' && token ? token : ''
+  const area = getChromeStorageLocal()
+  if (area) {
+    cachedExtensionToken = normalized
+    hydratedStorageArea = area
+    removeLegacyLocalStorageToken()
+    if (normalized) {
+      await chromeStorageSet(area, EXTENSION_TOKEN_STORAGE_KEY, normalized)
+    } else {
+      await chromeStorageRemove(area, EXTENSION_TOKEN_STORAGE_KEY)
+    }
+    return
+  }
+
+  cachedExtensionToken = null
+  hydratedStorageArea = null
+  try {
+    if (!normalized) {
       window.localStorage?.removeItem(EXTENSION_TOKEN_STORAGE_KEY)
     } else {
-      window.localStorage?.setItem(EXTENSION_TOKEN_STORAGE_KEY, token)
+      window.localStorage?.setItem(EXTENSION_TOKEN_STORAGE_KEY, normalized)
     }
   } catch {
     // ignore storage quota/privacy errors
@@ -318,7 +473,7 @@ async function requestJson<T>(
   fetchImpl: typeof fetch = fetch,
 ): Promise<T> {
   const extMode = isExtensionRuntime()
-  const bearer = extMode ? readStoredToken() : ''
+  const bearer = extMode ? await hydrateExtensionToken() : ''
   let response: Response
   try {
     response = await fetchImpl(url, {
@@ -369,8 +524,11 @@ export async function getMe(
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SyncUser | null> {
-  if (isExtensionRuntime() && !readStoredToken()) {
-    return null
+  if (isExtensionRuntime()) {
+    const token = await hydrateExtensionToken()
+    if (!token) {
+      return null
+    }
   }
   try {
     const res = await requestJson<{ user: SyncUser }>(
@@ -381,7 +539,7 @@ export async function getMe(
     return res.user
   } catch (err) {
     if (err instanceof UserSyncError && err.status === 401) {
-      writeStoredToken(null)
+      await writeStoredToken(null)
       return null
     }
     throw err
@@ -408,21 +566,41 @@ export async function register(
     fetchImpl,
   )
   if (typeof res.token === 'string' && res.token) {
-    writeStoredToken(res.token)
+    await writeStoredToken(res.token)
   }
   return res.user
+}
+
+export async function requestEmailVerifyCode(
+  email: string,
+  baseUrl = DEFAULT_BASE_URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; message?: string }> {
+  return requestJson<{ ok: boolean; message?: string }>(
+    joinUrl(baseUrl, '/me/email/request-code'),
+    {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    },
+    fetchImpl,
+  )
 }
 
 export async function updateProfile(
   email: string | null,
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl: typeof fetch = fetch,
+  verificationCode?: string,
 ): Promise<SyncUser> {
+  const payload: { email: string | null; verificationCode?: string } = { email }
+  if (typeof verificationCode === 'string' && verificationCode.trim()) {
+    payload.verificationCode = verificationCode.trim()
+  }
   const res = await requestJson<{ user: SyncUser }>(
     joinUrl(baseUrl, '/me/profile'),
     {
       method: 'PATCH',
-      body: JSON.stringify({ email }),
+      body: JSON.stringify(payload),
     },
     fetchImpl,
   )
@@ -444,7 +622,7 @@ export async function changePassword(
     fetchImpl,
   )
   if (typeof res.token === 'string' && res.token) {
-    writeStoredToken(res.token)
+    await writeStoredToken(res.token)
   }
   return res.user
 }
@@ -496,7 +674,7 @@ export async function login(
     fetchImpl,
   )
   if (typeof res.token === 'string' && res.token) {
-    writeStoredToken(res.token)
+    await writeStoredToken(res.token)
   }
   return res.user
 }
@@ -508,7 +686,7 @@ export async function logout(
   try {
     await requestJson<{ ok: boolean }>(joinUrl(baseUrl, '/logout'), { method: 'POST' }, fetchImpl)
   } finally {
-    writeStoredToken(null)
+    await writeStoredToken(null)
   }
 }
 

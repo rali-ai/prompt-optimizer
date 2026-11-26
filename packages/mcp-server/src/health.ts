@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 
 import type { CoreServicesManager } from './adapters/core-services.js';
+import * as logger from './utils/logging.js';
 
 export type MCPHealthStatus = Awaited<ReturnType<CoreServicesManager['getHealthStatus']>>;
 type HealthStatusProvider = Pick<CoreServicesManager, 'getHealthStatus'>;
@@ -11,11 +12,12 @@ function isHealthyStatus(healthStatus: MCPHealthStatus): boolean {
 
 export function buildHealthzResponse(healthStatus: MCPHealthStatus): {
   statusCode: number;
-  body: MCPHealthStatus;
+  body: { ok: boolean };
 } {
+  const healthy = isHealthyStatus(healthStatus);
   return {
-    statusCode: isHealthyStatus(healthStatus) ? 200 : 503,
-    body: healthStatus
+    statusCode: healthy ? 200 : 503,
+    body: { ok: healthy }
   };
 }
 
@@ -26,11 +28,8 @@ export function registerHealthzRoute(app: Express, healthProvider: HealthStatusP
       const { statusCode, body } = buildHealthzResponse(healthStatus);
       res.status(statusCode).json(body);
     } catch (error) {
-      res.status(503).json({
-        initialized: false,
-        services: {},
-        error: error instanceof Error ? error.message : 'Health check failed'
-      });
+      logger.error('Health check failed:', error as Error);
+      res.status(503).json({ ok: false });
     }
   });
 }

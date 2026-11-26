@@ -5,9 +5,19 @@
 HTPASSWD_FILE=/data/auth/.htpasswd
 
 if [ -n "$ACCESS_PASSWORD" ]; then
+    if [ "$ACCESS_PASSWORD" = "123456" ]; then
+        echo "ERROR: ACCESS_PASSWORD 不能使用默认弱口令 123456，请配置至少 8 位的强密码或留空以禁用 Basic 认证。" >&2
+        exit 1
+    fi
+
+    if [ "${#ACCESS_PASSWORD}" -lt 8 ]; then
+        echo "WARNING: ACCESS_PASSWORD 长度小于 8 位，存在弱口令风险，请尽快更换为更强的密码！" >&2
+    fi
+
     echo "启用Basic认证..."
 
-    mkdir -p "$(dirname "$HTPASSWD_FILE")"
+    HTPASSWD_DIR=$(dirname "$HTPASSWD_FILE")
+    mkdir -p "$HTPASSWD_DIR"
 
     if [ -s "$HTPASSWD_FILE" ]; then
         echo "沿用已有密码文件 $HTPASSWD_FILE（ACCESS_PASSWORD 仅用于首次初始化）"
@@ -18,8 +28,15 @@ if [ -n "$ACCESS_PASSWORD" ]; then
         echo "已用 ACCESS_PASSWORD 初始化密码文件，用户名: $USERNAME"
     fi
 
-    # nginx workers run as an unprivileged user and must read the file.
-    chmod a+r "$HTPASSWD_FILE"
+    # nginx workers run in the nginx group; restrict permissions so unprivileged node services cannot read .htpasswd.
+    if chown root:nginx "$HTPASSWD_DIR" 2>/dev/null; then
+        chmod 750 "$HTPASSWD_DIR"
+    fi
+    if chown root:nginx "$HTPASSWD_FILE" 2>/dev/null; then
+        chmod 640 "$HTPASSWD_FILE"
+    else
+        chmod 644 "$HTPASSWD_FILE"
+    fi
 
     cat > /etc/nginx/http.d/auth.conf << EOF
 # 此文件由generate-auth.sh脚本自动生成

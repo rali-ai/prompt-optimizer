@@ -411,6 +411,26 @@
                   data-testid="account-sync-profile-email"
                 />
               </NFormItem>
+              <div v-if="needsEmailVerification" class="reset-code-bar">
+                <NInput
+                  v-model:value="securityForm.emailVerifyCode"
+                  size="small"
+                  :maxlength="6"
+                  :placeholder="text.emailVerifyCodePlaceholder"
+                  :input-props="{ inputmode: 'numeric', autocomplete: 'one-time-code' }"
+                  data-testid="account-sync-email-verify-code"
+                />
+                <NButton
+                  secondary
+                  size="small"
+                  :loading="busy && activeAction === 'email-verify-send'"
+                  :disabled="busy || emailCodeCooldownSec > 0"
+                  data-testid="account-sync-email-verify-send"
+                  @click="handleRequestEmailVerifyCode"
+                >
+                  {{ emailCodeCooldownSec > 0 ? `${emailCodeCooldownSec}s` : text.sendEmailVerifyCodeButton }}
+                </NButton>
+              </div>
               <NButton
                 secondary
                 size="small"
@@ -516,6 +536,7 @@ import {
   pullSync,
   pushSync,
   register,
+  requestEmailVerifyCode,
   requestPasswordReset,
   resolveDefaultSyncBaseUrl,
   stripSecretsForSync,
@@ -570,6 +591,11 @@ const text = computed(() =>
         emailUnbound: '邮箱：未绑定',
         bindEmailLabel: '绑定或修改邮箱',
         saveEmailButton: '保存邮箱',
+        emailVerifyCodePlaceholder: '6 位邮箱验证码',
+        sendEmailVerifyCodeButton: '发送验证码',
+        errEmailVerifyRequired: '请输入要绑定的邮箱地址',
+        errEmailVerifyCodeRequired: '请输入 6 位数字验证码',
+        okEmailVerifySent: '验证码已发送至新邮箱，请查收邮件（含垃圾箱）',
         securityButton: '邮箱与修改密码',
         hideSecurityButton: '收起邮箱与改密',
         currentPasswordLabel: '当前密码',
@@ -635,6 +661,11 @@ const text = computed(() =>
         emailUnbound: 'Email: Not set',
         bindEmailLabel: 'Email address',
         saveEmailButton: 'Save Email',
+        emailVerifyCodePlaceholder: '6-digit email code',
+        sendEmailVerifyCodeButton: 'Send code',
+        errEmailVerifyRequired: 'Please enter the email address to bind',
+        errEmailVerifyCodeRequired: 'Please enter the 6-digit verification code',
+        okEmailVerifySent: 'Verification code sent to the new email. Check your inbox (and spam folder).',
         securityButton: 'Email & Password',
         hideSecurityButton: 'Hide Security Settings',
         currentPasswordLabel: 'Current password',
@@ -691,6 +722,7 @@ const { credits, loadingCredits } = platformCatalog
 const available = ref(false)
 const membershipEnabled = ref(false)
 const emailResetEnabled = ref(false)
+const emailVerificationRequired = ref(false)
 const monthlyCreditsConfig = ref<MonthlyCreditsConfig | null>(null)
 const currentUser = ref<SyncUser | null>(null)
 const lastSyncVersion = ref(0)
@@ -703,18 +735,29 @@ const showCreditLedger = ref(false)
 const showForgotReset = ref(false)
 const resetCooldownSec = ref(0)
 let resetCooldownTimer: ReturnType<typeof setInterval> | null = null
+const emailCodeCooldownSec = ref(0)
+let emailCodeCooldownTimer: ReturnType<typeof setInterval> | null = null
 const activeTab = ref<'login' | 'register'>('login')
 const busy = ref(false)
 const activeAction = ref<
-  'auth' | 'push' | 'pull' | 'logout' | 'profile' | 'password' | 'reset-send' | 'reset-confirm' | null
+  'auth' | 'push' | 'pull' | 'logout' | 'profile' | 'password' | 'reset-send' | 'reset-confirm' | 'email-verify-send' | null
 >(null)
 const notice = ref<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null)
 const form = reactive({ username: '', email: '', password: '', confirmPassword: '' })
 const securityForm = reactive({
   email: '',
+  emailVerifyCode: '',
   currentPassword: '',
   newPassword: '',
   confirmNewPassword: '',
+})
+
+const needsEmailVerification = computed(() => {
+  if (!emailVerificationRequired.value) return false
+  const nextEmail = securityForm.email.trim().toLowerCase()
+  if (!nextEmail) return false
+  const currentEmail = (currentUser.value?.email || '').trim().toLowerCase()
+  return nextEmail !== currentEmail
 })
 const resetForm = reactive({
   email: '',
@@ -881,6 +924,7 @@ onMounted(async () => {
     available.value = true
     membershipEnabled.value = Boolean(cfg.membershipEnabled)
     emailResetEnabled.value = Boolean(cfg.emailResetEnabled)
+    emailVerificationRequired.value = Boolean(cfg.emailVerificationRequired ?? cfg.emailResetEnabled)
     monthlyCreditsConfig.value = cfg.monthlyCredits || null
     const user = await getMe(props.baseUrl)
     currentUser.value = user
@@ -904,7 +948,27 @@ onUnmounted(() => {
     clearInterval(resetCooldownTimer)
     resetCooldownTimer = null
   }
+  if (emailCodeCooldownTimer) {
+    clearInterval(emailCodeCooldownTimer)
+    emailCodeCooldownTimer = null
+  }
 })
+
+function startEmailCodeCooldown(seconds = 60) {
+  emailCodeCooldownSec.value = seconds
+  if (emailCodeCooldownTimer) clearInterval(emailCodeCooldownTimer)
+  emailCodeCooldownTimer = setInterval(() => {
+    if (emailCodeCooldownSec.value <= 1) {
+      emailCodeCooldownSec.value = 0
+      if (emailCodeCooldownTimer) {
+        clearInterval(emailCodeCooldownTimer)
+        emailCodeCooldownTimer = null
+      }
+    } else {
+      emailCodeCooldownSec.value -= 1
+    }
+  }, 1000)
+}
 
 function startResetCooldown(seconds = 60) {
   resetCooldownSec.value = seconds
@@ -997,10 +1061,12 @@ function openPanel() {
   form.password = ''
   form.confirmPassword = ''
   securityForm.email = currentUser.value?.email || ''
+  securityForm.emailVerifyCode = ''
   getConfig(props.baseUrl)
     .then((cfg) => {
       membershipEnabled.value = Boolean(cfg.membershipEnabled)
       emailResetEnabled.value = Boolean(cfg.emailResetEnabled)
+      emailVerificationRequired.value = Boolean(cfg.emailVerificationRequired ?? cfg.emailResetEnabled)
       if (cfg.monthlyCredits) {
         monthlyCreditsConfig.value = cfg.monthlyCredits
       }
@@ -1026,6 +1092,7 @@ function toggleSecurity() {
   showSecurity.value = !showSecurity.value
   if (showSecurity.value) {
     securityForm.email = currentUser.value?.email || ''
+    securityForm.emailVerifyCode = ''
     securityForm.currentPassword = ''
     securityForm.newPassword = ''
     securityForm.confirmNewPassword = ''
@@ -1104,15 +1171,43 @@ async function handleRegister() {
   }
 }
 
+async function handleRequestEmailVerifyCode() {
+  if (busy.value || emailCodeCooldownSec.value > 0 || !currentUser.value) return
+  const email = securityForm.email.trim()
+  if (!email) {
+    notice.value = { type: 'error', text: text.value.errEmailVerifyRequired }
+    return
+  }
+  busy.value = true
+  activeAction.value = 'email-verify-send'
+  notice.value = null
+  try {
+    const res = await requestEmailVerifyCode(email, props.baseUrl)
+    notice.value = { type: 'success', text: res.message || text.value.okEmailVerifySent }
+    startEmailCodeCooldown(60)
+  } catch (err) {
+    notice.value = { type: 'error', text: errorMessage(err) }
+  } finally {
+    busy.value = false
+    activeAction.value = null
+  }
+}
+
 async function handleSaveEmail() {
   if (busy.value || !currentUser.value) return
+  const emailVal = securityForm.email.trim()
+  const verificationCode = needsEmailVerification.value ? securityForm.emailVerifyCode.trim() : undefined
+  if (needsEmailVerification.value && !/^\d{6}$/.test(verificationCode || '')) {
+    notice.value = { type: 'error', text: text.value.errEmailVerifyCodeRequired }
+    return
+  }
   busy.value = true
   activeAction.value = 'profile'
   notice.value = null
   try {
-    const emailVal = securityForm.email.trim()
-    currentUser.value = await updateProfile(emailVal || null, props.baseUrl)
+    currentUser.value = await updateProfile(emailVal || null, props.baseUrl, undefined, verificationCode)
     securityForm.email = currentUser.value.email || ''
+    securityForm.emailVerifyCode = ''
     notice.value = { type: 'success', text: text.value.okEmailUpdated }
   } catch (err) {
     notice.value = { type: 'error', text: errorMessage(err) }
@@ -1256,6 +1351,7 @@ async function handleLogout() {
     showSecurity.value = false
     showCreditLedger.value = false
     securityForm.email = ''
+    securityForm.emailVerifyCode = ''
     securityForm.currentPassword = ''
     securityForm.newPassword = ''
     securityForm.confirmNewPassword = ''

@@ -2,7 +2,7 @@ import type { InjectionKey } from 'vue'
 
 export const HTML_PREVIEW_HOST_KEY: InjectionKey<string> = Symbol('html-preview-host')
 export const HTML_PREVIEW_ERROR_TYPE = 'prompt-optimizer:preview-error'
-export const HTML_PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline' https: blob:; style-src 'unsafe-inline' https:; img-src https: data: blob:; font-src https: data:; media-src https: data: blob:; connect-src https: http: wss: ws:; frame-src about:; worker-src blob:; base-uri 'none'; form-action 'none'"
+export const HTML_PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline' https:; img-src https: data: blob:; font-src https: data:; media-src data: blob:; connect-src 'none'; frame-src about:; worker-src blob:; base-uri 'none'; form-action 'none'"
 
 const svgStart = /^(?:\s|<!--[\s\S]*?-->|<\?xml\s[\s\S]*?\?>)*<svg\b/iu
 export const isSvgDocument = (source: string): boolean => svgStart.test(source)

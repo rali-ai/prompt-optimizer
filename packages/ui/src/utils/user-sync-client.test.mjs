@@ -18,12 +18,14 @@ import {
   getModelPresets,
   getPlatformModels,
   getStoredExtensionToken,
+  hydrateExtensionToken,
   isExtensionRuntime,
   login,
   logout,
   pullSync,
   pushSync,
   register,
+  requestEmailVerifyCode,
   requestPasswordReset,
   resolveCommentImageUrl,
   resolveDefaultSyncBaseUrl,
@@ -1023,4 +1025,154 @@ test('createAnnouncementComment and getAnnouncementComments support image payloa
     method: 'POST',
     body: { content: '', image: { dataUrl } },
   })
+})
+
+test('extension runtime stores sync token in chrome.storage.local and migrates legacy localStorage token', async () => {
+  const prevWindow = globalThis.window
+  const prevChrome = globalThis.chrome
+
+  const localStore = new Map()
+  const chromeStore = new Map()
+  const createChromeLocal = (map) => ({
+    get: async (key) => {
+      const keys = Array.isArray(key) ? key : [key]
+      const out = {}
+      for (const k of keys) {
+        if (map.has(k)) out[k] = map.get(k)
+      }
+      return out
+    },
+    set: async (items) => {
+      for (const [k, v] of Object.entries(items)) {
+        map.set(k, v)
+      }
+    },
+    remove: async (key) => {
+      const keys = Array.isArray(key) ? key : [key]
+      for (const k of keys) {
+        map.delete(k)
+      }
+    },
+  })
+
+  globalThis.window = {
+    location: { protocol: 'chrome-extension:', origin: 'chrome-extension://ijhpdghdlhlfolpnbkjojglpolngpajc' },
+    localStorage: {
+      getItem: (k) => (localStore.has(k) ? localStore.get(k) : null),
+      setItem: (k, v) => localStore.set(k, String(v)),
+      removeItem: (k) => localStore.delete(k),
+    },
+  }
+  globalThis.chrome = { storage: { local: createChromeLocal(chromeStore) } }
+
+  try {
+    // 1. Legacy token in localStorage migrates into chrome.storage.local and is removed from localStorage
+    localStore.set('goprmpt_extension_sync_token', 'legacy_tok_123')
+    const seenHeaders = []
+    const fetchMock = async (url, init) => {
+      seenHeaders.push({ url, authorization: init?.headers?.Authorization })
+      if (url.endsWith('/me')) {
+        return jsonResponse({
+          user: {
+            id: 'u-mig',
+            username: 'migrated',
+            role: 'user',
+            tier: 'free',
+            tierExpiresAt: null,
+            disabled: false,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        })
+      }
+      if (url.endsWith('/login')) {
+        return jsonResponse({
+          user: {
+            id: 'u-new',
+            username: 'fresh',
+            role: 'user',
+            tier: 'standard',
+            tierExpiresAt: null,
+            disabled: false,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          token: 'chrome_storage_tok_456',
+        })
+      }
+      return jsonResponse({ ok: true })
+    }
+
+    const me = await getMe(EXTENSION_SYNC_BASE_URL, fetchMock)
+    assert.equal(me?.username, 'migrated')
+    assert.equal(seenHeaders[0].authorization, 'Bearer legacy_tok_123')
+    assert.equal(chromeStore.get('goprmpt_extension_sync_token'), 'legacy_tok_123')
+    assert.equal(localStore.has('goprmpt_extension_sync_token'), false)
+    assert.equal(getStoredExtensionToken(), 'legacy_tok_123')
+
+    // 2. Login overwrites chrome.storage.local without leaving any copy in localStorage
+    await login('fresh', 'Password123!', EXTENSION_SYNC_BASE_URL, fetchMock)
+    assert.equal(chromeStore.get('goprmpt_extension_sync_token'), 'chrome_storage_tok_456')
+    assert.equal(localStore.has('goprmpt_extension_sync_token'), false)
+    assert.equal(getStoredExtensionToken(), 'chrome_storage_tok_456')
+    assert.equal(await hydrateExtensionToken(), 'chrome_storage_tok_456')
+
+    // 3. Logout removes token from chrome.storage.local and clears cached token
+    await logout(EXTENSION_SYNC_BASE_URL, fetchMock)
+    assert.equal(chromeStore.has('goprmpt_extension_sync_token'), false)
+    assert.equal(localStore.has('goprmpt_extension_sync_token'), false)
+    assert.equal(getStoredExtensionToken(), '')
+  } finally {
+    if (prevWindow === undefined) {
+      delete globalThis.window
+    } else {
+      globalThis.window = prevWindow
+    }
+    if (prevChrome === undefined) {
+      delete globalThis.chrome
+    } else {
+      globalThis.chrome = prevChrome
+    }
+  }
+})
+
+test('requestEmailVerifyCode and updateProfile with verificationCode send expected payloads', async () => {
+  const calls = []
+  const mockUser = {
+    id: 'u-email',
+    username: 'alice',
+    email: 'verified@example.com',
+    role: 'user',
+    tier: 'free',
+    tierExpiresAt: null,
+    disabled: false,
+    createdAt: 1,
+    updatedAt: 2,
+  }
+  const fetchMock = async (url, init) => {
+    calls.push({ url, method: init?.method, body: JSON.parse(String(init?.body || '{}')) })
+    if (url.endsWith('/me/email/request-code')) {
+      return jsonResponse({ ok: true, message: 'sent' }, 200)
+    }
+    return jsonResponse({ user: mockUser }, 200)
+  }
+
+  const codeRes = await requestEmailVerifyCode('verified@example.com', '/user-api', fetchMock)
+  assert.deepEqual(codeRes, { ok: true, message: 'sent' })
+
+  const updated = await updateProfile('verified@example.com', '/user-api', fetchMock, '654321')
+  assert.equal(updated.email, 'verified@example.com')
+
+  assert.deepEqual(calls, [
+    {
+      url: '/user-api/me/email/request-code',
+      method: 'POST',
+      body: { email: 'verified@example.com' },
+    },
+    {
+      url: '/user-api/me/profile',
+      method: 'PATCH',
+      body: { email: 'verified@example.com', verificationCode: '654321' },
+    },
+  ])
 })
